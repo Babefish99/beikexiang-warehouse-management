@@ -10,11 +10,14 @@ describe("enterprise WeChat OAuth client", () => {
       .toThrow("enterprise WeChat OAuth is not configured");
   });
 
-  it("builds an authorization URL with a return state", () => {
+  it("builds a browser QR authorization URL with a return state", () => {
     const client = new WeComOAuthClient({ corpId: "corp-1", agentId: "agent-1", secret: "secret", redirectUri: "https://warehouse.example.com/auth/callback" });
     const url = new URL(client.getAuthorizeUrl("/admin/reports"));
 
+    expect(url.origin).toBe("https://open.work.weixin.qq.com");
+    expect(url.pathname).toBe("/wwopen/sso/qrConnect");
     expect(url.searchParams.get("appid")).toBe("corp-1");
+    expect(url.searchParams.get("agentid")).toBe("agent-1");
     expect(url.searchParams.get("redirect_uri")).toBe("https://warehouse.example.com/auth/callback");
     expect(url.searchParams.get("state")).toBe(Buffer.from("/admin/reports").toString("base64url"));
   });

@@ -35,13 +35,12 @@ export class WeComOAuthClient {
 
   getAuthorizeUrl(returnTo = "/"): string {
     if (!this.options.corpId.trim()) throw new Error("enterprise WeChat OAuth is not configured");
-    const url = new URL("https://open.weixin.qq.com/connect/oauth2/authorize");
+    const url = new URL("https://open.work.weixin.qq.com/wwopen/sso/qrConnect");
     url.searchParams.set("appid", this.options.corpId);
+    url.searchParams.set("agentid", this.options.agentId);
     url.searchParams.set("redirect_uri", this.options.redirectUri);
-    url.searchParams.set("response_type", "code");
-    url.searchParams.set("scope", "snsapi_base");
     url.searchParams.set("state", Buffer.from(safeReturnTo(returnTo), "utf8").toString("base64url"));
-    return `${url.toString()}#wechat_redirect`;
+    return url.toString();
   }
 
   decodeReturnTo(state?: string): string {
