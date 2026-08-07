@@ -1,0 +1,25 @@
+{
+  "name": "group-warehouse-management",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@11.20.0",
+  "scripts": {
+    "dev": "corepack pnpm --parallel --filter @warehouse/web --filter @warehouse/api dev",
+    "build": "corepack pnpm --parallel --filter @warehouse/web --filter @warehouse/api build",
+    "start": "corepack pnpm --filter @warehouse/api start",
+    "lint": "corepack pnpm --recursive lint",
+    "typecheck": "corepack pnpm --recursive typecheck",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "prisma db seed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

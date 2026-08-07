@@ -8,4 +8,5 @@ test-results/
 !.env.example
 .superpowers/
 .tmp_excel_inspect/
+.tmp_runtime/
 .DS_Store
