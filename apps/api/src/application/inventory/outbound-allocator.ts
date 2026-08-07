@@ -37,7 +37,7 @@ export interface AllocationValidationResult {
 export class OutboundAllocator {
   validate(input: { lines: AllocationLine[]; batches: AllocationBatch[]; allocations: OutboundAllocationInput[]; reason?: string }): AllocationValidationResult {
     const linesById = new Map(input.lines.map((line) => [line.id, line]));
-    const batchesById = new Map(input.batches.map((batch) => [batch.id, batch]));
+    const batchesById = new Map(input.batches.map((batch) => [`${batch.warehouseId}:${batch.id}`, batch]));
     const totalsByLine = new Map<string, Decimal>();
     const totalsByBatch = new Map<string, Decimal>();
     const allocations: ValidatedAllocation[] = [];
@@ -46,7 +46,10 @@ export class OutboundAllocator {
     for (const allocation of input.allocations) {
       const line = linesById.get(allocation.approvalLineId);
       if (!line) throw new Error(`approval line not found: ${allocation.approvalLineId}`);
-      const batch = batchesById.get(allocation.batchId);
+      const batchKey = `${allocation.warehouseId}:${allocation.batchId}`;
+      const batch = batchesById.get(batchKey);
+      const batchWithSameId = input.batches.find((candidate) => candidate.id === allocation.batchId);
+      if (!batch && batchWithSameId) throw new Error("batch does not belong to warehouse");
       if (!batch) throw new Error(`batch not found: ${allocation.batchId}`);
       if (batch.warehouseId !== allocation.warehouseId) throw new Error("batch does not belong to warehouse");
       if (batch.itemId !== line.itemId) throw new Error("item substitution is not allowed");
@@ -54,10 +57,10 @@ export class OutboundAllocator {
       if (!quantity.isFinite() || !quantity.gt(0)) throw new Error("allocation quantity must be positive");
       const lineTotal = (totalsByLine.get(line.id) ?? new Decimal(0)).plus(quantity);
       if (lineTotal.gt(new Decimal(line.requestedQuantity))) throw new Error("actual quantity exceeds approved quantity");
-      const batchTotal = (totalsByBatch.get(batch.id) ?? new Decimal(0)).plus(quantity);
+      const batchTotal = (totalsByBatch.get(batchKey) ?? new Decimal(0)).plus(quantity);
       if (batchTotal.gt(new Decimal(batch.remainingQuantity))) throw new Error("batch balance cannot become negative");
       totalsByLine.set(line.id, lineTotal);
-      totalsByBatch.set(batch.id, batchTotal);
+      totalsByBatch.set(batchKey, batchTotal);
       const unitCost = new Decimal(batch.unitCost);
       amount = amount.plus(quantity.mul(unitCost));
       allocations.push({ ...allocation, quantity: quantity.toString(), itemId: line.itemId, unitCost: unitCost.toString(), expectedRemainingQuantity: batch.remainingQuantity });

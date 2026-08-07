@@ -9,6 +9,7 @@ import { SessionService } from "./application/auth/session-service.js";
 import type { ItemRepository } from "./application/items/item-service.js";
 import { ItemService } from "./application/items/item-service.js";
 import { InMemoryInventoryEntryStore, InboundService } from "./application/inventory/inbound-service.js";
+import { createInventoryMemoryState } from "./application/inventory/inventory-memory-state.js";
 import { OpeningStockService } from "./application/inventory/opening-stock-service.js";
 import { InMemoryOutboundStore, OutboundService } from "./application/inventory/outbound-service.js";
 import { ReturnService } from "./application/inventory/return-service.js";
@@ -85,17 +86,18 @@ export function buildServer() {
   const auditService = persistence.auditService;
   const itemRepository = persistence.repositories.items;
   const itemService = new ItemService(itemRepository);
-  const outboundStore = new InMemoryOutboundStore();
+  const inventoryState = createInventoryMemoryState();
+  const outboundStore = new InMemoryOutboundStore(inventoryState);
   const outboundService = new OutboundService(outboundStore);
-  const movementStore = new InMemoryMovementStore();
+  const movementStore = new InMemoryMovementStore(inventoryState);
   const transferService = new TransferService(movementStore);
   const returnService = new ReturnService(movementStore);
   const periodStore = new InMemoryAccountingPeriodStore();
-  const stocktakeStore = new InMemoryStocktakeStore();
+  const stocktakeStore = new InMemoryStocktakeStore(inventoryState);
   const stocktakeService = new StocktakeService(stocktakeStore, periodStore);
   const periodCloseService = new PeriodCloseService(periodStore);
   const warehouseService = new WarehouseService(persistence.repositories.warehouses);
-  const inventoryEntryStore = new InMemoryInventoryEntryStore({
+  const inventoryEntryStore = new InMemoryInventoryEntryStore(inventoryState, {
     onRecordStockEntry: ({ itemId }) => {
       const mutableRepository = itemRepository as ItemRepository & { markLedgerActivity?: (id: string) => void };
       mutableRepository.markLedgerActivity?.(itemId);
@@ -103,22 +105,7 @@ export function buildServer() {
   });
   const inboundService = new InboundService(inventoryEntryStore, { warehouseService, itemService });
   const openingStockService = new OpeningStockService(inventoryEntryStore, { warehouseService, itemService });
-  const listReportEntries = async (): Promise<ReportEntry[]> => [
-    ...inventoryEntryStore.ledger().map(toReportEntry),
-    ...outboundStore.ledger().map(toReportEntry),
-    ...movementStore.ledger().map(toReportEntry),
-    ...stocktakeStore.adjustments().map((entry) => ({
-      id: entry.stocktakeId,
-      occurredAt: entry.occurredAt,
-      warehouseId: entry.warehouseId,
-      itemId: entry.itemId,
-      type: "STOCKTAKE_ADJUSTMENT",
-      quantity: entry.quantityDelta,
-      unitCost: entry.unitCost,
-      amount: new Decimal(entry.quantityDelta).abs().mul(entry.unitCost).toFixed(2),
-      referenceType: "STOCKTAKE",
-    })),
-  ];
+  const listReportEntries = async (): Promise<ReportEntry[]> => inventoryState.ledger.map(toReportEntry);
   const inventoryReportService = new InventoryReportService(listReportEntries);
   const transactionReportService = new TransactionReportService(listReportEntries);
   const oauthClient = new WeComOAuthClient({
@@ -130,7 +117,7 @@ export function buildServer() {
   const approvalSyncService = new ApprovalSyncService({
     gateway: new HttpApprovalGateway({ corpId: process.env.WE_COM_CORP_ID ?? "", secret: process.env.WE_COM_SECRET ?? "" }),
     parser: new ApprovalParser((optionKey) => itemService.resolveByWeComOptionKey(optionKey)),
-    store: new InMemoryApprovalSyncStore(),
+    store: new InMemoryApprovalSyncStore(inventoryState),
   });
   const signatureVerifier = new WeComSignatureVerifier({
     token: process.env.WE_COM_CALLBACK_TOKEN ?? "",

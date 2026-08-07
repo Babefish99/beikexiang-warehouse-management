@@ -1,6 +1,7 @@
 import { Decimal } from "decimal.js";
 import type { AccountingPeriod } from "../../domain/periods/accounting-period.js";
 import { InMemoryAccountingPeriodStore, type AccountingPeriodStore } from "../periods/period-close-service.js";
+import { createInventoryMemoryState, inventoryBalanceKey, type InventoryMemoryState, type InventoryStocktakeAdjustmentState } from "./inventory-memory-state.js";
 
 export interface StocktakeBalance {
   warehouseId: string;
@@ -25,32 +26,60 @@ export interface StocktakeAdjustment {
 }
 
 export class InMemoryStocktakeStore {
-  private readonly records: StocktakeAdjustment[] = [];
-  private readonly balances = new Map<string, StocktakeBalance>();
+  private readonly state: InventoryMemoryState;
+
+  constructor(state: InventoryMemoryState = createInventoryMemoryState()) {
+    this.state = state;
+  }
 
   seedBalance(balance: StocktakeBalance): void {
-    this.balances.set(`${balance.warehouseId}:${balance.batchId}`, structuredClone(balance));
+    this.state.balances.set(inventoryBalanceKey(balance.warehouseId, balance.batchId), {
+      warehouseId: balance.warehouseId,
+      itemId: balance.itemId,
+      batchId: balance.batchId,
+      remainingQuantity: balance.bookQuantity,
+      unitCost: balance.unitCost,
+    });
   }
 
   balance(warehouseId: string, batchId: string): StocktakeBalance | undefined {
-    const balance = this.balances.get(`${warehouseId}:${batchId}`);
-    return balance ? structuredClone(balance) : undefined;
+    const balance = this.state.balances.get(inventoryBalanceKey(warehouseId, batchId));
+    return balance ? { warehouseId: balance.warehouseId, itemId: balance.itemId, batchId: balance.batchId, bookQuantity: balance.remainingQuantity, unitCost: balance.unitCost } : undefined;
   }
 
   listBalances(): StocktakeBalance[] {
-    return [...this.balances.values()].map((balance) => structuredClone(balance));
+    return [...this.state.balances.values()].map((balance) => ({
+      warehouseId: balance.warehouseId,
+      itemId: balance.itemId,
+      batchId: balance.batchId,
+      bookQuantity: balance.remainingQuantity,
+      unitCost: balance.unitCost,
+    }));
   }
 
   record(adjustment: StocktakeAdjustment): void {
-    const key = `${adjustment.warehouseId}:${adjustment.batchId}`;
-    const current = this.balances.get(key);
+    const key = inventoryBalanceKey(adjustment.warehouseId, adjustment.batchId);
+    const current = this.state.balances.get(key);
     if (!current || current.itemId !== adjustment.itemId) throw new Error("stocktake balance not found");
-    this.records.push(structuredClone(adjustment));
-    this.balances.set(key, { ...current, bookQuantity: adjustment.actualQuantity });
+    this.state.stocktakeAdjustments.push(structuredClone(adjustment));
+    this.state.balances.set(key, { ...current, remainingQuantity: adjustment.actualQuantity });
+    this.state.ledger.push({
+      id: crypto.randomUUID(),
+      warehouseId: adjustment.warehouseId,
+      itemId: adjustment.itemId,
+      batchId: adjustment.batchId,
+      type: "STOCKTAKE_ADJUSTMENT",
+      quantity: adjustment.quantityDelta,
+      unitCost: adjustment.unitCost,
+      amount: new Decimal(adjustment.quantityDelta).abs().mul(adjustment.unitCost).toFixed(2),
+      referenceType: "STOCKTAKE",
+      referenceId: adjustment.stocktakeId,
+      occurredAt: adjustment.occurredAt,
+    });
   }
 
   adjustments(): StocktakeAdjustment[] {
-    return this.records.map((record) => ({ ...record }));
+    return this.state.stocktakeAdjustments.map((record) => ({ ...record }));
   }
 }
 

@@ -1,6 +1,7 @@
 import { Decimal } from "decimal.js";
 import type { InventoryLedgerEntry } from "../../domain/inventory/ledger.js";
 import { OutboundAllocator, type AllocationBatch, type AllocationLine, type OutboundAllocationInput, type AllocationValidationResult } from "./outbound-allocator.js";
+import { createInventoryMemoryState, inventoryBalanceKey, type InventoryApprovalOutboundStatus, type InventoryApprovalState, type InventoryBalanceState, type InventoryMemoryState } from "./inventory-memory-state.js";
 
 export interface PendingApproval {
   id: string;
@@ -40,48 +41,119 @@ export interface OutboundStore {
 }
 
 export class InMemoryOutboundStore implements OutboundStore {
-  private readonly approvals = new Map<string, PendingApproval>();
-  private readonly batchBalances = new Map<string, AllocationBatch>();
-  private readonly entries: InventoryLedgerEntry[] = [];
+  private readonly state: InventoryMemoryState;
   private readonly orders: OutboundOrderResult[] = [];
 
-  seedApproval(approval: PendingApproval): void { this.approvals.set(approval.id, structuredClone(approval)); }
-  seedBatch(batch: AllocationBatch): void { this.batchBalances.set(batch.id, structuredClone(batch)); }
-  batch(id: string): AllocationBatch | undefined { const value = this.batchBalances.get(id); return value ? structuredClone(value) : undefined; }
-  ledger(): InventoryLedgerEntry[] { return this.entries.map((entry) => ({ ...entry })); }
+  constructor(state: InventoryMemoryState = createInventoryMemoryState()) {
+    this.state = state;
+  }
 
-  async getApproval(approvalId: string): Promise<PendingApproval | undefined> { const value = this.approvals.get(approvalId); return value ? structuredClone(value) : undefined; }
-  async listPending(): Promise<PendingApproval[]> { return [...this.approvals.values()].filter((approval) => approval.status === "PENDING_OUTBOUND").map((approval) => structuredClone(approval)); }
-  async listBatches(itemIds: string[]): Promise<AllocationBatch[]> { return [...this.batchBalances.values()].filter((batch) => itemIds.includes(batch.itemId)).map((batch) => structuredClone(batch)); }
+  seedApproval(approval: PendingApproval): void {
+    this.state.approvals.set(approval.id, {
+      id: approval.id,
+      weComSpNo: approval.weComSpNo,
+      syncStatus: "APPROVED",
+      outboundStatus: approval.status,
+      applicantUserId: "",
+      applicantName: "",
+      purpose: "",
+      submittedAt: new Date(0).toISOString(),
+      lines: approval.lines.map((line) => ({ id: line.id, itemId: line.itemId, requestedQuantity: line.requestedQuantity, unit: "" })),
+    });
+    this.state.approvalsBySpNo.set(approval.weComSpNo, approval.id);
+  }
+
+  seedBatch(batch: AllocationBatch): void {
+    const storedBalance: InventoryBalanceState = { warehouseId: batch.warehouseId, itemId: batch.itemId, batchId: batch.id, remainingQuantity: batch.remainingQuantity, unitCost: batch.unitCost };
+    this.state.balances.set(inventoryBalanceKey(batch.warehouseId, batch.id), storedBalance);
+    if (!this.state.batches.has(batch.id)) {
+      this.state.batches.set(batch.id, {
+        id: batch.id,
+        warehouseId: batch.warehouseId,
+        itemId: batch.itemId,
+        batchNo: batch.id,
+        quantity: batch.remainingQuantity,
+        remainingQuantity: batch.remainingQuantity,
+        unitCost: batch.unitCost,
+        purchasedAt: new Date(0).toISOString(),
+      });
+    }
+  }
+
+  batch(id: string): AllocationBatch | undefined {
+    const value = [...this.state.balances.values()].find((balance) => balance.batchId === id);
+    return value ? { id: value.batchId, warehouseId: value.warehouseId, itemId: value.itemId, remainingQuantity: value.remainingQuantity, unitCost: value.unitCost } : undefined;
+  }
+
+  ledger(): InventoryLedgerEntry[] { return this.state.ledger.map((entry) => ({ ...entry })); }
+
+  async getApproval(approvalId: string): Promise<PendingApproval | undefined> {
+    const value = this.state.approvals.get(approvalId);
+    return value ? toPendingApproval(value) : undefined;
+  }
+
+  async listPending(): Promise<PendingApproval[]> {
+    return [...this.state.approvals.values()]
+      .filter((approval) => approval.outboundStatus === "PENDING_OUTBOUND")
+      .map((approval) => toPendingApproval(approval));
+  }
+
+  async listBatches(itemIds: string[]): Promise<AllocationBatch[]> {
+    return [...this.state.balances.values()]
+      .filter((batch) => itemIds.includes(batch.itemId))
+      .map((batch) => ({ id: batch.batchId, warehouseId: batch.warehouseId, itemId: batch.itemId, remainingQuantity: batch.remainingQuantity, unitCost: batch.unitCost }));
+  }
 
   async commitOutbound(approval: PendingApproval, validation: AllocationValidationResult, reason?: string): Promise<OutboundOrderResult> {
-    const nextBalances = new Map([...this.batchBalances].map(([id, batch]) => [id, structuredClone(batch)]));
+    const nextBalances = new Map([...this.state.balances].map(([key, batch]) => [key, structuredClone(batch)]));
     for (const allocation of validation.allocations) {
-      const current = nextBalances.get(allocation.batchId);
+      const current = nextBalances.get(inventoryBalanceKey(allocation.warehouseId, allocation.batchId));
       if (!current || current.remainingQuantity !== allocation.expectedRemainingQuantity) throw new Error("stock balance changed; retry transaction");
       const remaining = new Decimal(current.remainingQuantity).minus(allocation.quantity);
       if (remaining.lt(0)) throw new Error("batch balance cannot become negative");
-      nextBalances.set(current.id, { ...current, remainingQuantity: remaining.toString() });
+      nextBalances.set(inventoryBalanceKey(current.warehouseId, current.batchId), { ...current, remainingQuantity: remaining.toString() });
     }
-    this.batchBalances.clear();
-    for (const [id, batch] of nextBalances) this.batchBalances.set(id, batch);
+    this.state.balances.clear();
+    for (const [key, batch] of nextBalances) this.state.balances.set(key, batch);
     const status = validation.status === "FULL" ? "COMPLETED" : validation.status === "ZERO" ? "UNAVAILABLE" : "PARTIALLY_ISSUED";
     const order: OutboundOrderResult = { id: crypto.randomUUID(), approvalId: approval.id, status, actualQuantity: validation.totalQuantity, amount: validation.amount, reason };
     this.orders.push(order);
-    this.approvals.set(approval.id, { ...approval, status });
+    const currentApproval = this.state.approvals.get(approval.id);
+    if (currentApproval) {
+      this.state.approvals.set(approval.id, { ...currentApproval, outboundStatus: status });
+    }
     for (const allocation of validation.allocations) {
-      this.entries.push({ id: crypto.randomUUID(), warehouseId: allocation.warehouseId, itemId: allocation.itemId, batchId: allocation.batchId, type: "OUTBOUND", quantity: new Decimal(allocation.quantity).negated().toString(), unitCost: allocation.unitCost, amount: new Decimal(allocation.quantity).mul(allocation.unitCost).toFixed(2), referenceType: "OUTBOUND_ORDER", referenceId: order.id, occurredAt: new Date().toISOString() });
+      this.state.ledger.push({ id: crypto.randomUUID(), warehouseId: allocation.warehouseId, itemId: allocation.itemId, batchId: allocation.batchId, type: "OUTBOUND", quantity: new Decimal(allocation.quantity).negated().toString(), unitCost: allocation.unitCost, amount: new Decimal(allocation.quantity).mul(allocation.unitCost).toFixed(2), referenceType: "OUTBOUND_ORDER", referenceId: order.id, occurredAt: new Date().toISOString() });
+      const allocationId = crypto.randomUUID();
+      this.state.issuedAllocations.set(allocationId, {
+        id: allocationId,
+        outboundOrderId: order.id,
+        warehouseId: allocation.warehouseId,
+        itemId: allocation.itemId,
+        batchId: allocation.batchId,
+        issuedQuantity: allocation.quantity,
+        unitCost: allocation.unitCost,
+      });
     }
     return structuredClone(order);
   }
 
   async cancelApproval(approvalId: string, reason: string): Promise<void> {
-    const approval = this.approvals.get(approvalId);
+    const approval = this.state.approvals.get(approvalId);
     if (!approval) throw new Error(`approval not found: ${approvalId}`);
-    if (approval.status !== "PENDING_OUTBOUND") throw new Error("approval is already closed");
+    if (approval.outboundStatus !== "PENDING_OUTBOUND") throw new Error("approval is already closed");
     if (!reason.trim()) throw new Error("reason is required");
-    this.approvals.set(approvalId, { ...approval, status: "VOIDED" });
+    this.state.approvals.set(approvalId, { ...approval, outboundStatus: "VOIDED" });
   }
+}
+
+function toPendingApproval(approval: InventoryApprovalState): PendingApproval {
+  return {
+    id: approval.id,
+    weComSpNo: approval.weComSpNo,
+    status: approval.outboundStatus as Exclude<InventoryApprovalOutboundStatus, "NONE">,
+    lines: approval.lines.map((line) => ({ id: line.id, itemId: line.itemId, requestedQuantity: line.requestedQuantity })),
+  };
 }
 
 export class OutboundService {

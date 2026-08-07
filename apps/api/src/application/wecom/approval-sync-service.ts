@@ -1,5 +1,6 @@
 import type { ApprovalGateway } from "../../infrastructure/wecom/approval-gateway.js";
 import { ApprovalParser, type ParsedApproval, type WeComApprovalPayload } from "../../infrastructure/wecom/approval-parser.js";
+import { createInventoryMemoryState, type InventoryApprovalState, type InventoryMemoryState } from "../inventory/inventory-memory-state.js";
 
 export type ApprovalOutboundStatus = "NONE" | "PENDING_OUTBOUND" | "COMPLETED";
 
@@ -26,13 +27,49 @@ export interface ApprovalSyncStore {
 export class InMemoryApprovalSyncStore implements ApprovalSyncStore {
   private readonly approvalRecords = new Map<string, ApprovalSyncRecord>();
   private readonly syncAttempts: ApprovalSyncAttempt[] = [];
+  private readonly state?: InventoryMemoryState;
+
+  constructor(state?: InventoryMemoryState) {
+    this.state = state;
+  }
 
   async findBySpNo(weComSpNo: string): Promise<ApprovalSyncRecord | undefined> {
+    if (this.state) {
+      const approvalId = this.state.approvalsBySpNo.get(weComSpNo);
+      const record = approvalId ? this.state.approvals.get(approvalId) : undefined;
+      return record ? toApprovalSyncRecord(record) : undefined;
+    }
     const record = this.approvalRecords.get(weComSpNo);
     return record ? structuredClone(record) : undefined;
   }
 
   async save(record: ApprovalSyncRecord): Promise<void> {
+    if (this.state) {
+      const existingId = this.state.approvalsBySpNo.get(record.weComSpNo);
+      const existing = existingId ? this.state.approvals.get(existingId) : undefined;
+      const approvalId = existing?.id ?? record.id;
+      this.state.approvalsBySpNo.set(record.weComSpNo, approvalId);
+      this.state.approvals.set(approvalId, {
+        id: approvalId,
+        weComSpNo: record.weComSpNo,
+        syncStatus: record.status,
+        outboundStatus: record.outboundStatus,
+        applicantUserId: record.applicantUserId,
+        applicantName: record.applicantName,
+        department: record.department,
+        purpose: record.purpose,
+        submittedAt: record.submittedAt,
+        lines: record.lines.map((line, index) => ({
+          id: existing?.lines[index]?.id ?? `${approvalId}-line-${index + 1}`,
+          itemId: line.itemId,
+          requestedQuantity: line.requestedQuantity,
+          unit: line.unit,
+          itemOptionKey: line.itemOptionKey,
+          itemName: line.itemName,
+        })),
+      });
+      return;
+    }
     this.approvalRecords.set(record.weComSpNo, structuredClone(record));
   }
 
@@ -45,12 +82,36 @@ export class InMemoryApprovalSyncStore implements ApprovalSyncStore {
   }
 
   records(): ApprovalSyncRecord[] {
+    if (this.state) {
+      return [...this.state.approvals.values()].map((record) => toApprovalSyncRecord(record));
+    }
     return [...this.approvalRecords.values()].map((record) => structuredClone(record));
   }
 
   attempts(): ApprovalSyncAttempt[] {
     return this.syncAttempts.map((attempt) => structuredClone(attempt));
   }
+}
+
+function toApprovalSyncRecord(record: InventoryApprovalState): ApprovalSyncRecord {
+  return {
+    id: record.id,
+    weComSpNo: record.weComSpNo,
+    status: record.syncStatus,
+    applicantUserId: record.applicantUserId,
+    applicantName: record.applicantName,
+    department: record.department,
+    purpose: record.purpose,
+    submittedAt: record.submittedAt,
+    lines: record.lines.map((line) => ({
+      itemId: line.itemId,
+      itemOptionKey: line.itemOptionKey ?? "",
+      itemName: line.itemName ?? "",
+      requestedQuantity: line.requestedQuantity,
+      unit: line.unit,
+    })),
+    outboundStatus: record.outboundStatus as ApprovalOutboundStatus,
+  };
 }
 
 export class ApprovalSyncService {

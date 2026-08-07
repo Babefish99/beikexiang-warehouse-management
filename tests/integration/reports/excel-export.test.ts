@@ -27,6 +27,7 @@ describe("report export integration", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllEnvs();
   });
 
@@ -62,6 +63,73 @@ describe("report export integration", () => {
 
       expect(summary.statusCode).toBe(200);
       expect(summary.json()).toEqual([{ itemId, quantity: "8", amount: "160.00" }]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("calculates month-end summary cumulatively while keeping transaction details in the requested month", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const app = buildServer();
+
+    try {
+      const cookie = await createAdminSessionCookie(app);
+      const createdItem = await app.inject({
+        method: "POST",
+        url: "/admin/items",
+        headers: { cookie },
+        payload: { code: "TEA-0001", name: "Tea leaves", specification: "Iron Goddess", unit: "box", categoryId: "cat-tea" },
+      });
+      const itemId = createdItem.json<{ id: string }>().id;
+
+      vi.setSystemTime(new Date("2026-07-31T10:00:00.000Z"));
+      const openingStock = await app.inject({
+        method: "POST",
+        url: "/admin/opening-stock",
+        headers: { cookie },
+        payload: {
+          verifiedBy: "admin",
+          rows: [{ warehouseId: "warehouse-1", itemId, batchNo: "JULY-OPEN", quantity: "8", unitCost: "20", remark: "opening count" }],
+        },
+      });
+      expect(openingStock.statusCode).toBe(201);
+
+      vi.setSystemTime(new Date("2026-08-02T10:00:00.000Z"));
+      const inbound = await app.inject({
+        method: "POST",
+        url: "/admin/inbound",
+        headers: { cookie },
+        payload: {
+          warehouseId: "warehouse-1",
+          itemId,
+          batchNo: "AUG-001",
+          quantity: "5",
+          unitCost: "20",
+          purchasedAt: "2026-08-02",
+          purchaser: "buyer",
+        },
+      });
+      expect(inbound.statusCode).toBe(201);
+
+      const [summary, transactions] = await Promise.all([
+        app.inject({
+          method: "GET",
+          url: "/admin/reports/summary?period=2026-08",
+          headers: { cookie },
+        }),
+        app.inject({
+          method: "GET",
+          url: "/admin/reports/transactions?period=2026-08&type=all",
+          headers: { cookie },
+        }),
+      ]);
+
+      expect(summary.statusCode).toBe(200);
+      expect(summary.json()).toEqual([{ itemId, quantity: "13", amount: "260.00" }]);
+      expect(transactions.statusCode).toBe(200);
+      expect(transactions.json()).toEqual([
+        expect.objectContaining({ type: "INBOUND", quantity: "5", amount: "100.00" }),
+      ]);
     } finally {
       await app.close();
     }

@@ -31,12 +31,18 @@ function inPeriod(entry: ReportEntry, period: string): boolean {
   return occurredAt >= start && occurredAt < end;
 }
 
+function isOnOrBeforePeriodEnd(entry: ReportEntry, period: string): boolean {
+  const endExclusive = new Date(`${period}-01T00:00:00.000Z`);
+  endExclusive.setUTCMonth(endExclusive.getUTCMonth() + 1);
+  return new Date(entry.occurredAt) < endExclusive;
+}
+
 export class InventoryReportService {
   constructor(private readonly listEntries: () => Promise<ReportEntry[]>) {}
 
   async getSummary(period: string): Promise<Array<{ itemId: string; quantity: string; amount: string }>> {
     const grouped = new Map<string, { quantity: Decimal; amount: Decimal }>();
-    for (const entry of (await this.listEntries()).filter((candidate) => inPeriod(candidate, period))) {
+    for (const entry of (await this.listEntries()).filter((candidate) => isOnOrBeforePeriodEnd(candidate, period))) {
       const current = grouped.get(entry.itemId) ?? { quantity: new Decimal(0), amount: new Decimal(0) };
       current.quantity = current.quantity.plus(entry.quantity);
       current.amount = current.amount.plus(new Decimal(entry.quantity).mul(entry.unitCost));

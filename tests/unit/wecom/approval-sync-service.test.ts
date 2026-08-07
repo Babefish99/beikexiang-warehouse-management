@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { createInventoryMemoryState } from "../../../apps/api/src/application/inventory/inventory-memory-state.js";
+import { InMemoryOutboundStore, OutboundService } from "../../../apps/api/src/application/inventory/outbound-service.js";
 import { ApprovalParser, type WeComApprovalPayload } from "../../../apps/api/src/infrastructure/wecom/approval-parser.js";
 import { ApprovalSyncService, InMemoryApprovalSyncStore } from "../../../apps/api/src/application/wecom/approval-sync-service.js";
 
@@ -75,5 +77,41 @@ describe("approval synchronization service", () => {
     await service.handleCallback({ spNo: "202607230021", rawPayload: callbackPayload });
 
     expect(store.attempts()[0]?.payload).toEqual({ callback: callbackPayload, detail });
+  });
+
+  it("makes an approved saved record visible to outbound pending when both stores share memory state", async () => {
+    const sharedState = createInventoryMemoryState();
+    const approvalStore = new InMemoryApprovalSyncStore(sharedState);
+    const outboundService = new OutboundService(new InMemoryOutboundStore(sharedState));
+
+    await approvalStore.save({
+      id: "approval-202607230021",
+      weComSpNo: "202607230021",
+      status: "APPROVED",
+      outboundStatus: "PENDING_OUTBOUND",
+      applicantUserId: "wx-1",
+      applicantName: "Tea Applicant",
+      department: "ops",
+      purpose: "field visit",
+      submittedAt: "2026-08-07T00:00:00.000Z",
+      lines: [
+        {
+          itemId: "item-tea",
+          itemOptionKey: "opt-tea",
+          itemName: "Tea leaves",
+          requestedQuantity: "2",
+          unit: "box",
+        },
+      ],
+    });
+
+    await expect(outboundService.listPending()).resolves.toEqual([
+      {
+        id: "approval-202607230021",
+        weComSpNo: "202607230021",
+        status: "PENDING_OUTBOUND",
+        lines: [{ id: "approval-202607230021-line-1", itemId: "item-tea", requestedQuantity: "2" }],
+      },
+    ]);
   });
 });
