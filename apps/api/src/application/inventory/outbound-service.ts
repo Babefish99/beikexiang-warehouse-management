@@ -78,6 +78,12 @@ export class OutboundService {
 
   listPending(): Promise<PendingApproval[]> { return this.store.listPending(); }
 
+  async listOptions(approvalId: string): Promise<{ approvalId: string; batches: AllocationBatch[] }> {
+    const approval = await this.store.getApproval(approvalId);
+    if (!approval) throw new Error(`approval not found: ${approvalId}`);
+    return { approvalId, batches: await this.store.listBatches(approval.lines.map((line) => line.itemId)) };
+  }
+
   async confirm(input: { approvalId: string; allocations: OutboundAllocationInput[]; reason?: string }): Promise<OutboundOrderResult> {
     const approval = await this.store.getApproval(input.approvalId);
     if (!approval) throw new Error(`approval not found: ${input.approvalId}`);

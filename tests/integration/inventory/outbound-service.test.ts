@@ -10,6 +10,26 @@ function makeService() {
 }
 
 describe("outbound service", () => {
+  it("lists available batches for a pending approval", async () => {
+    const { store, service } = makeService();
+
+    store.seedBatch({ id: "batch-2", warehouseId: "wh-2", itemId: "item-1", remainingQuantity: "3", unitCost: "25" });
+
+    await expect(service.listOptions("approval-1")).resolves.toEqual({
+      approvalId: "approval-1",
+      batches: [
+        { id: "batch-1", warehouseId: "wh-1", itemId: "item-1", remainingQuantity: "10", unitCost: "20" },
+        { id: "batch-2", warehouseId: "wh-2", itemId: "item-1", remainingQuantity: "3", unitCost: "25" },
+      ],
+    });
+  });
+
+  it("rejects when listing batches for an unknown approval", async () => {
+    const { service } = makeService();
+
+    await expect(service.listOptions("missing-approval")).rejects.toThrow("approval not found: missing-approval");
+  });
+
   it("confirms a batch-aware issue and posts one negative ledger entry", async () => {
     const { store, service } = makeService();
 
