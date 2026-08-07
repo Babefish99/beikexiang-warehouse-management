@@ -12,6 +12,13 @@ describe("enterprise WeChat OAuth client", () => {
     expect(url.searchParams.get("state")).toBe(Buffer.from("/admin/reports").toString("base64url"));
   });
 
+  it("rejects external and backslash-based return paths", () => {
+    const client = new WeComOAuthClient({ corpId: "corp-1", agentId: "agent-1", secret: "secret", redirectUri: "https://warehouse.example.com/auth/callback" });
+
+    expect(new URL(client.getAuthorizeUrl("//evil.example.com")).searchParams.get("state")).toBe(Buffer.from("/").toString("base64url"));
+    expect(client.decodeReturnTo(Buffer.from("/\\evil.example.com").toString("base64url"))).toBe("/");
+  });
+
   it("exchanges a code through token and user lookup", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "token-1" }), { status: 200 }))

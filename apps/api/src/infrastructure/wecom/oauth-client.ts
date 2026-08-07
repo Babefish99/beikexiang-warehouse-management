@@ -16,6 +16,16 @@ export interface WeComOAuthClientOptions {
   fetcher?: typeof fetch;
 }
 
+function safeReturnTo(value: string): string {
+  if (value.includes("\\") || /[\u0000-\u001f\u007f]/.test(value)) return "/";
+  try {
+    const url = new URL(value, "https://warehouse.invalid");
+    return url.origin === "https://warehouse.invalid" && url.pathname.startsWith("/") ? value : "/";
+  } catch {
+    return "/";
+  }
+}
+
 export class WeComOAuthClient {
   private readonly fetcher: typeof fetch;
 
@@ -24,13 +34,12 @@ export class WeComOAuthClient {
   }
 
   getAuthorizeUrl(returnTo = "/"): string {
-    const safeReturnTo = returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/";
     const url = new URL("https://open.weixin.qq.com/connect/oauth2/authorize");
     url.searchParams.set("appid", this.options.corpId);
     url.searchParams.set("redirect_uri", this.options.redirectUri);
     url.searchParams.set("response_type", "code");
     url.searchParams.set("scope", "snsapi_base");
-    url.searchParams.set("state", Buffer.from(safeReturnTo, "utf8").toString("base64url"));
+    url.searchParams.set("state", Buffer.from(safeReturnTo(returnTo), "utf8").toString("base64url"));
     return `${url.toString()}#wechat_redirect`;
   }
 
@@ -38,7 +47,7 @@ export class WeComOAuthClient {
     if (!state) return "/";
     try {
       const returnTo = Buffer.from(state, "base64url").toString("utf8");
-      return returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/";
+      return safeReturnTo(returnTo);
     } catch {
       return "/";
     }
