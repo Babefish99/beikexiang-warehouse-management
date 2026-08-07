@@ -24,13 +24,24 @@ export class WeComOAuthClient {
   }
 
   getAuthorizeUrl(returnTo = "/"): string {
+    const safeReturnTo = returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/";
     const url = new URL("https://open.weixin.qq.com/connect/oauth2/authorize");
     url.searchParams.set("appid", this.options.corpId);
     url.searchParams.set("redirect_uri", this.options.redirectUri);
     url.searchParams.set("response_type", "code");
     url.searchParams.set("scope", "snsapi_base");
-    url.searchParams.set("state", Buffer.from(returnTo, "utf8").toString("base64url"));
+    url.searchParams.set("state", Buffer.from(safeReturnTo, "utf8").toString("base64url"));
     return `${url.toString()}#wechat_redirect`;
+  }
+
+  decodeReturnTo(state?: string): string {
+    if (!state) return "/";
+    try {
+      const returnTo = Buffer.from(state, "base64url").toString("utf8");
+      return returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/";
+    } catch {
+      return "/";
+    }
   }
 
   async exchangeCode(code: string): Promise<{ weComUserId: string; name: string }> {

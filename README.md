@@ -17,7 +17,7 @@
 4. 启动 PostgreSQL：`docker compose up -d postgres`。
 5. 启动前后端：`corepack pnpm dev`。
 6. API 健康检查：<http://localhost:3001/health>。
-7. 管理后台：<http://localhost:5173>。
+7. 管理后台：<http://localhost:5174>。
 
 ## 参考界面
 

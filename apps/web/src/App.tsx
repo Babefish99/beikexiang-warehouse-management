@@ -1,6 +1,11 @@
-import { ArrowDownToLine, ArrowUpFromLine, Boxes, RefreshCw } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowDownToLine, ArrowUpFromLine, Boxes, FileSpreadsheet, RefreshCw, ShieldAlert } from "lucide-react";
 import { AdminLayout } from "./layouts/AdminLayout";
 import { PageHeader } from "./components/PageHeader";
+import { LoginPage } from "./pages/LoginPage";
+
+type WebUser = { id: string; weComUserId: string; name: string; role: "APPLICANT" | "ADMIN" | "FINANCE" };
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
 
 const cards = [
   { label: "库存品类", value: "—", hint: "标准物品库" },
@@ -10,6 +15,31 @@ const cards = [
 ];
 
 export default function App() {
+  const [user, setUser] = useState<WebUser | null>(null);
+  const [authorizeUrl, setAuthorizeUrl] = useState(`${apiBaseUrl}/auth/wecom/authorize`);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadSession = async () => {
+      try {
+        const [sessionResponse, authorizeResponse] = await Promise.all([
+          fetch(`${apiBaseUrl}/auth/session`, { credentials: "include" }),
+          fetch(`${apiBaseUrl}/auth/wecom/authorize?returnTo=${encodeURIComponent(window.location.pathname)}`),
+        ]);
+        if (sessionResponse.ok) setUser((await sessionResponse.json()).user as WebUser);
+        if (authorizeResponse.ok) setAuthorizeUrl((await authorizeResponse.json()).authorizeUrl);
+      } finally {
+        setLoading(false);
+      }
+    };
+    void loadSession();
+  }, []);
+
+  if (loading) return <main className="login-page"><p>正在检查企业微信登录状态…</p></main>;
+  if (!user) return <LoginPage authorizeUrl={authorizeUrl} />;
+  if (user.role === "APPLICANT") return <main className="login-page"><section className="login-card"><ShieldAlert size={36} color="var(--orange)" /><h1>暂无后台权限</h1><p>当前企业微信账号只能发起和查看领用申请。</p></section></main>;
+  if (user.role === "FINANCE") return <AdminLayout user={{ name: user.name, roleLabel: "财务" }}><div className="page"><PageHeader title="报表中心" description="财务可查询和导出已结账期间的库存报表。" /><section className="panel"><div className="notice"><FileSpreadsheet size={24} color="var(--orange)" /><strong>月度库存报表</strong><p>报表下载功能将在月结账后开放，财务账号不具备库存修改权限。</p></div></section></div></AdminLayout>;
+
   return (
     <AdminLayout user={{ name: "管理员", roleLabel: "库存管理员" }}>
       <div className="page">

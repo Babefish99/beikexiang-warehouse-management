@@ -1,6 +1,8 @@
 import Fastify from "fastify";
+import cors from "@fastify/cors";
 import { RolePolicy, type AuthenticatedUser } from "./application/auth/role-service.js";
 import { SessionService } from "./application/auth/session-service.js";
+import { InMemoryAuditService } from "./infrastructure/audit/audit-service.js";
 import { WeComOAuthClient } from "./infrastructure/wecom/oauth-client.js";
 
 const SESSION_COOKIE = "warehouse_session";
@@ -20,7 +22,9 @@ function readCookie(header: string | undefined, name: string): string | null {
 
 export function buildServer() {
   const app = Fastify({ logger: true });
+  void app.register(cors, { origin: process.env.WEB_BASE_URL ?? "http://localhost:5174", credentials: true });
   const sessionService = new SessionService(process.env.SESSION_SECRET ?? "local-development-session-secret");
+  const auditService = new InMemoryAuditService();
   const oauthClient = new WeComOAuthClient({
     corpId: process.env.WE_COM_CORP_ID ?? "",
     agentId: process.env.WE_COM_AGENT_ID ?? "",
@@ -28,23 +32,34 @@ export function buildServer() {
     redirectUri: `${process.env.API_BASE_URL ?? "http://localhost:3001"}/auth/wecom/callback`,
   });
 
+  const getSessionUser = (request: { headers: { cookie?: string } }) => sessionService.readSession(readCookie(request.headers.cookie, SESSION_COOKIE) ?? "");
+
+  app.addHook("onRequest", async (request, reply) => {
+    if (!request.url.startsWith("/admin")) return;
+    const user = getSessionUser(request);
+    const requiredPermission = request.url.startsWith("/admin/reports") ? "VIEW_REPORTS" as const : "VIEW_ADMIN" as const;
+    if (!user) return reply.code(401).send({ error: "unauthorized" });
+    if (!RolePolicy.can(user, requiredPermission)) return reply.code(403).send({ error: "forbidden" });
+  });
+
   app.get("/health", async () => ({ status: "ok", service: "warehouse-api" }));
   app.get<{ Querystring: { returnTo?: string } }>("/auth/wecom/authorize", async (request) => ({ authorizeUrl: oauthClient.getAuthorizeUrl(request.query.returnTo ?? "/") }));
-  app.get<{ Querystring: { code?: string } }>("/auth/wecom/callback", async (request, reply) => {
+  app.get<{ Querystring: { code?: string; state?: string } }>("/auth/wecom/callback", async (request, reply) => {
     if (!request.query.code) return reply.code(400).send({ error: "code is required" });
     const identity = await oauthClient.exchangeCode(request.query.code);
     const user: AuthenticatedUser = { id: identity.weComUserId, weComUserId: identity.weComUserId, name: identity.name, role: roleForUser(identity.weComUserId) };
     const token = sessionService.createSession(user);
     reply.header("set-cookie", `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${sessionService.cookieOptions(false).maxAge}`);
-    return reply.redirect(process.env.WEB_BASE_URL ?? "http://localhost:5173");
+    await auditService.record({ actorUserId: user.id, actorRole: user.role, action: "LOGIN", entityType: "SESSION", entityId: user.id, requestId: request.id, occurredAt: new Date().toISOString() });
+    return reply.redirect(`${process.env.WEB_BASE_URL ?? "http://localhost:5174"}${oauthClient.decodeReturnTo(request.query.state)}`);
   });
   app.get("/auth/session", async (request, reply) => {
-    const user = sessionService.readSession(readCookie(request.headers.cookie, SESSION_COOKIE) ?? "");
+    const user = getSessionUser(request);
     if (!user) return reply.code(401).send({ error: "unauthorized" });
     return { user };
   });
   app.get("/auth/permissions", async (request, reply) => {
-    const user = sessionService.readSession(readCookie(request.headers.cookie, SESSION_COOKIE) ?? "");
+    const user = getSessionUser(request);
     if (!user) return reply.code(401).send({ error: "unauthorized" });
     return { role: user.role, canViewAdmin: RolePolicy.can(user, "VIEW_ADMIN"), canViewReports: RolePolicy.can(user, "VIEW_REPORTS") };
   });
