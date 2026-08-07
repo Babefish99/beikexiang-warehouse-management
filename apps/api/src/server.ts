@@ -14,7 +14,7 @@ import { InMemoryOutboundStore, OutboundService } from "./application/inventory/
 import { InMemoryMovementStore, TransferService } from "./application/inventory/transfer-service.js";
 import { ReturnService } from "./application/inventory/return-service.js";
 import { InMemoryStocktakeStore, StocktakeService } from "./application/inventory/stocktake-service.js";
-import { PeriodCloseService } from "./application/periods/period-close-service.js";
+import { InMemoryAccountingPeriodStore, PeriodCloseService } from "./application/periods/period-close-service.js";
 import { InventoryReportService, TransactionReportService } from "./application/reports/report-query-service.js";
 import { InMemoryAuditService } from "./infrastructure/audit/audit-service.js";
 import { HttpApprovalGateway } from "./infrastructure/wecom/approval-gateway.js";
@@ -73,8 +73,9 @@ export function buildServer() {
   const movementStore = new InMemoryMovementStore();
   const transferService = new TransferService(movementStore);
   const returnService = new ReturnService(movementStore);
-  const stocktakeService = new StocktakeService(new InMemoryStocktakeStore());
-  const periodCloseService = new PeriodCloseService();
+  const periodStore = new InMemoryAccountingPeriodStore();
+  const stocktakeService = new StocktakeService(new InMemoryStocktakeStore(), periodStore);
+  const periodCloseService = new PeriodCloseService(periodStore);
   const inventoryReportService = new InventoryReportService(async () => []);
   const transactionReportService = new TransactionReportService(async () => []);
   const warehouseService = new WarehouseService(new InMemoryWarehouseRepository([

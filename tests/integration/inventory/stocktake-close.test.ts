@@ -2,9 +2,10 @@ import Fastify from "fastify";
 import { describe, expect, it } from "vitest";
 
 import { InMemoryStocktakeStore, StocktakeService } from "../../../apps/api/src/application/inventory/stocktake-service.js";
-import { PeriodCloseService } from "../../../apps/api/src/application/periods/period-close-service.js";
+import { InMemoryAccountingPeriodStore, PeriodCloseService } from "../../../apps/api/src/application/periods/period-close-service.js";
 import { createAccountingPeriod } from "../../../apps/api/src/domain/periods/accounting-period.js";
 import { registerStocktakeRoutes } from "../../../apps/api/src/routes/admin/stocktake.js";
+import { registerPeriodCloseRoutes } from "../../../apps/api/src/routes/admin/period-close.js";
 import { buildServer } from "../../../apps/api/src/server.js";
 
 describe("stocktake and period close", () => {
@@ -33,6 +34,47 @@ describe("stocktake and period close", () => {
 
     await expect(service.close({ period, pendingOutboundCount: 1, unpostedAdjustmentCount: 0 })).rejects.toThrow("pending outbound items must be resolved");
     await expect(service.close({ period, pendingOutboundCount: 0, unpostedAdjustmentCount: 0 })).resolves.toMatchObject({ status: "CLOSED", code: "2026-08" });
+  });
+
+  it("rejects stocktake after closing the period even when the request claims it is open", async () => {
+    const app = Fastify();
+    const stocktakeStore = new InMemoryStocktakeStore();
+    stocktakeStore.seedBalance({ warehouseId: "wh-1", itemId: "item-1", batchId: "batch-1", bookQuantity: "10", unitCost: "20" });
+    const periodStore = new InMemoryAccountingPeriodStore();
+    const periodCloseService = new PeriodCloseService(periodStore);
+    registerPeriodCloseRoutes(app, { periodCloseService });
+    registerStocktakeRoutes(app, { stocktakeService: new StocktakeService(stocktakeStore, periodStore) });
+
+    try {
+      const closeResponse = await app.inject({
+        method: "POST",
+        url: "/admin/period-close",
+        payload: { period: { code: "2026-08", status: "OPEN" }, pendingOutboundCount: 0, unpostedAdjustmentCount: 0 },
+      });
+      expect(closeResponse.statusCode).toBe(200);
+      expect(closeResponse.json()).toMatchObject({ code: "2026-08", status: "CLOSED" });
+
+      const stocktakeResponse = await app.inject({
+        method: "POST",
+        url: "/admin/stocktake",
+        payload: {
+          periodCode: "2026-08",
+          period: { code: "2026-08", status: "OPEN" },
+          warehouseId: "wh-1",
+          itemId: "item-1",
+          batchId: "batch-1",
+          bookQuantity: "10",
+          actualQuantity: "9",
+          reason: "closed period attempt",
+        },
+      });
+
+      expect(stocktakeResponse.statusCode).toBe(500);
+      expect(stocktakeResponse.json()).toMatchObject({ message: "closed period: 2026-08" });
+      expect(stocktakeStore.balance("wh-1", "batch-1")?.bookQuantity).toBe("10");
+    } finally {
+      await app.close();
+    }
   });
 });
 

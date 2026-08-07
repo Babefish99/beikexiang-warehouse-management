@@ -54,7 +54,7 @@ export function StocktakePage() {
       credentials: "include",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        period: { code: form.periodCode, status: "OPEN" },
+        periodCode: form.periodCode,
         warehouseId: form.warehouseId,
         itemId: form.itemId,
         batchId: form.batchId,
@@ -119,7 +119,7 @@ export function StocktakePage() {
           </label>
           <label className="form-grid__wide">
             <span>差异原因 *</span>
-            <textarea required value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} />
+            <textarea required={Boolean(selectedBalance && form.actualQuantity !== selectedBalance.bookQuantity)} value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} />
           </label>
           <div className="form-grid__wide notice">
             <strong>{loading ? "正在读取账面库存……" : selectedBalance ? `当前账面数量 ${selectedBalance.bookQuantity}` : "请选择仓库、物品和批次"}</strong>

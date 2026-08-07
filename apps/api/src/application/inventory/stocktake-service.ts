@@ -1,5 +1,6 @@
 import { Decimal } from "decimal.js";
 import type { AccountingPeriod } from "../../domain/periods/accounting-period.js";
+import { InMemoryAccountingPeriodStore, type AccountingPeriodStore } from "../periods/period-close-service.js";
 
 export interface StocktakeBalance {
   warehouseId: string;
@@ -53,14 +54,17 @@ export class InMemoryStocktakeStore {
 }
 
 export class StocktakeService {
-  constructor(private readonly store: InMemoryStocktakeStore) {}
+  constructor(private readonly store: InMemoryStocktakeStore, private readonly periodStore: AccountingPeriodStore = new InMemoryAccountingPeriodStore()) {}
 
   async listOptions(): Promise<{ balances: StocktakeBalance[] }> {
     return { balances: this.store.listBalances() };
   }
 
-  async record(input: { period: AccountingPeriod; operatorId?: string; warehouseId: string; itemId: string; batchId: string; bookQuantity: string; actualQuantity: string; reason?: string }): Promise<{ stocktakeId: string; difference: string }> {
-    if (input.period.status !== "OPEN") throw new Error(`closed period: ${input.period.code}`);
+  async record(input: { periodCode?: string; period?: Pick<AccountingPeriod, "code">; operatorId?: string; warehouseId: string; itemId: string; batchId: string; bookQuantity: string; actualQuantity: string; reason?: string }): Promise<{ stocktakeId: string; difference: string }> {
+    const periodCode = input.periodCode?.trim() || input.period?.code.trim();
+    if (!periodCode) throw new Error("period code is required");
+    const period = this.periodStore.getOrCreate(periodCode);
+    if (period.status !== "OPEN") throw new Error(`closed period: ${period.code}`);
     if (!input.warehouseId.trim() || !input.itemId.trim() || !input.batchId.trim()) throw new Error("warehouse, item, and batch are required");
     const difference = new Decimal(input.actualQuantity).minus(input.bookQuantity);
     if (!difference.isFinite()) throw new Error("stocktake quantity is invalid");

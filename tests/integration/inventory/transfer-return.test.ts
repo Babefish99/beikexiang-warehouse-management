@@ -35,6 +35,17 @@ describe("transfer and return services", () => {
     expect(store.ledger()).toHaveLength(2);
   });
 
+  it("rejects a transfer into a same-batch balance for another item", async () => {
+    const store = new InMemoryMovementStore();
+    store.seedBalance({ warehouseId: "wh-1", itemId: "item-1", batchId: "batch-1", remainingQuantity: "10", unitCost: "20" });
+    store.seedBalance({ warehouseId: "wh-2", itemId: "item-2", batchId: "batch-1", remainingQuantity: "4", unitCost: "20" });
+    const service = new TransferService(store);
+
+    await expect(service.complete({ itemId: "item-1", batchId: "batch-1", sourceWarehouseId: "wh-1", destinationWarehouseId: "wh-2", quantity: "3", reason: "batch correction" })).rejects.toThrow("destination stock balance item mismatch");
+    expect(store.balance("wh-1", "batch-1")?.remainingQuantity).toBe("10");
+    expect(store.balance("wh-2", "batch-1")).toMatchObject({ itemId: "item-2", remainingQuantity: "4" });
+  });
+
   it("lists returnable allocations and limits return quantity", async () => {
     const store = new InMemoryMovementStore();
     store.seedBalance({ warehouseId: "wh-1", itemId: "item-1", batchId: "batch-1", remainingQuantity: "6", unitCost: "20" });
@@ -57,6 +68,16 @@ describe("transfer and return services", () => {
     });
     await expect(service.create({ outboundAllocationId: "allocation-1", quantity: "3", reason: "再次退回" })).rejects.toThrow("return quantity exceeds original issued quantity");
     expect(store.balance("wh-1", "batch-1")?.remainingQuantity).toBe("8");
+  });
+
+  it("rejects a return when the current balance belongs to another item", async () => {
+    const store = new InMemoryMovementStore();
+    store.seedBalance({ warehouseId: "wh-1", itemId: "item-2", batchId: "batch-1", remainingQuantity: "6", unitCost: "20" });
+    store.seedIssuedAllocation({ id: "allocation-1", outboundOrderId: "out-1", warehouseId: "wh-1", itemId: "item-1", batchId: "batch-1", issuedQuantity: "4", unitCost: "20" });
+    const service = new ReturnService(store);
+
+    await expect(service.create({ outboundAllocationId: "allocation-1", quantity: "2", reason: "item mismatch" })).rejects.toThrow("return stock balance item mismatch");
+    expect(store.balance("wh-1", "batch-1")?.remainingQuantity).toBe("6");
   });
 });
 

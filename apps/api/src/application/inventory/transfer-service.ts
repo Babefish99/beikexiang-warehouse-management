@@ -78,11 +78,13 @@ export class InMemoryMovementStore implements MovementStore {
     if (!source || source.itemId !== input.itemId) throw new Error("source stock balance not found");
     const remaining = new Decimal(source.remainingQuantity).minus(quantity);
     if (remaining.lt(0)) throw new Error("batch balance cannot become negative");
-    const destination = this.balances.get(destinationKey) ?? { ...source, warehouseId: input.destinationWarehouseId, remainingQuantity: "0" };
-    if (destination.unitCost !== source.unitCost) throw new Error("transferred batch cost cannot change");
+    const destination = this.balances.get(destinationKey);
+    if (destination && destination.itemId !== input.itemId) throw new Error("destination stock balance item mismatch");
+    const target = destination ?? { ...source, warehouseId: input.destinationWarehouseId, remainingQuantity: "0" };
+    if (target.unitCost !== source.unitCost) throw new Error("transferred batch cost cannot change");
     const transferId = crypto.randomUUID();
     this.balances.set(sourceKey, { ...source, remainingQuantity: remaining.toString() });
-    this.balances.set(destinationKey, { ...destination, remainingQuantity: new Decimal(destination.remainingQuantity).plus(quantity).toString() });
+    this.balances.set(destinationKey, { ...target, remainingQuantity: new Decimal(target.remainingQuantity).plus(quantity).toString() });
     const amount = quantity.mul(source.unitCost).toFixed(2);
     this.entries.push(
       {
@@ -124,6 +126,7 @@ export class InMemoryMovementStore implements MovementStore {
     const key = `${input.allocation.warehouseId}:${input.allocation.batchId}`;
     const balance = this.balances.get(key);
     if (!balance) throw new Error("return stock balance not found");
+    if (balance.itemId !== input.allocation.itemId) throw new Error("return stock balance item mismatch");
     const returnId = crypto.randomUUID();
     this.balances.set(key, { ...balance, remainingQuantity: new Decimal(balance.remainingQuantity).plus(quantity).toString() });
     this.returned.set(input.allocation.id, returned.plus(quantity));
