@@ -76,7 +76,7 @@
 
 - `corepack pnpm test`
   - 36 test files passed
-  - 146 tests passed
+  - 147 tests passed
 - `corepack pnpm test:e2e`
   - 31 tests passed
 - `corepack pnpm typecheck`
