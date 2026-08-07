@@ -114,4 +114,22 @@ describe("approval synchronization service", () => {
       },
     ]);
   });
+
+  it.each(["COMPLETED", "PARTIALLY_ISSUED", "UNAVAILABLE", "VOIDED"] as const)("preserves the closed outbound status %s when an approved approval is re-synchronized", async (outboundStatus) => {
+    const sharedState = createInventoryMemoryState();
+    const outboundStore = new InMemoryOutboundStore(sharedState);
+    outboundStore.seedApproval({
+      id: "approval-202607230021",
+      weComSpNo: "202607230021",
+      status: outboundStatus,
+      lines: [{ id: "line-1", itemId: "item-tea", requestedQuantity: "2" }],
+    });
+    const gateway = { fetchDetail: vi.fn().mockResolvedValue(makeDetail(2)) };
+    const parser = new ApprovalParser((optionKey) => optionKey === "opt-tea" ? { id: "item-tea" } : undefined);
+    const store = new InMemoryApprovalSyncStore(sharedState);
+    const service = new ApprovalSyncService({ gateway, parser, store });
+
+    await expect(service.sync("202607230021")).resolves.toMatchObject({ created: false, status: outboundStatus });
+    await expect(store.findBySpNo("202607230021")).resolves.toMatchObject({ outboundStatus });
+  });
 });

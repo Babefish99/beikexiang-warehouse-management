@@ -1,8 +1,15 @@
 import type { ApprovalGateway } from "../../infrastructure/wecom/approval-gateway.js";
 import { ApprovalParser, type ParsedApproval, type WeComApprovalPayload } from "../../infrastructure/wecom/approval-parser.js";
-import { createInventoryMemoryState, type InventoryApprovalState, type InventoryMemoryState } from "../inventory/inventory-memory-state.js";
+import { createInventoryMemoryState, type InventoryApprovalOutboundStatus, type InventoryApprovalState, type InventoryMemoryState } from "../inventory/inventory-memory-state.js";
 
-export type ApprovalOutboundStatus = "NONE" | "PENDING_OUTBOUND" | "COMPLETED";
+export type ApprovalOutboundStatus = InventoryApprovalOutboundStatus;
+
+const CLOSED_OUTBOUND_STATUSES = new Set<ApprovalOutboundStatus>([
+  "COMPLETED",
+  "PARTIALLY_ISSUED",
+  "UNAVAILABLE",
+  "VOIDED",
+]);
 
 export interface ApprovalSyncRecord extends ParsedApproval {
   id: string;
@@ -128,7 +135,9 @@ export class ApprovalSyncService {
       const record: ApprovalSyncRecord = {
         id: existing?.id ?? `approval-${spNo}`,
         ...parsed,
-        outboundStatus: parsed.status === "APPROVED" ? existing?.outboundStatus === "COMPLETED" ? "COMPLETED" : "PENDING_OUTBOUND" : existing?.outboundStatus ?? "NONE",
+        outboundStatus: parsed.status === "APPROVED"
+          ? existing && CLOSED_OUTBOUND_STATUSES.has(existing.outboundStatus) ? existing.outboundStatus : "PENDING_OUTBOUND"
+          : existing?.outboundStatus ?? "NONE",
       };
       await this.dependencies.store.save(record);
       const payload = options.callbackPayload === undefined ? detail : { callback: options.callbackPayload, detail };
