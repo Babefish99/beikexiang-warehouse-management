@@ -34,6 +34,7 @@ test("outbound page allocates a batch and submits the actual issue", async ({ pa
   await form.locator("select").nth(1).selectOption("wh-1");
   await form.locator("select").nth(2).selectOption("batch-1");
   await form.locator('input[type="number"]').fill("4");
+  await expect(form.getByText(/审批数量 4\.000，实际出库 4\.000，预计金额 80\.00/)).toBeVisible();
   await form.getByRole("button", { name: "确认实际出库" }).click();
 
   await expect(page.getByText("outbound-1")).toBeVisible();

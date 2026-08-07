@@ -166,6 +166,13 @@ export function OutboundPage() {
                 </div>;
               }) : null}
               {!editor.loading ? <>
+                <div className="form-grid__wide notice">
+                  <strong>出库汇总：审批数量 {approval.lines.reduce((total, line) => total + Number(line.requestedQuantity), 0).toFixed(3)}，实际出库 {editor.allocations.reduce((total, row) => total + Number(row.quantity || 0), 0).toFixed(3)}，预计金额 {editor.allocations.reduce((total, row) => {
+                    const batch = editor.options.find((option) => option.warehouseId === row.warehouseId && option.batchId === row.batchId);
+                    return total + Number(row.quantity || 0) * Number(batch?.unitCost || 0);
+                  }, 0).toFixed(2)}</strong>
+                  <p>预计金额按管理员选择的入库批次采购单价计算，提交后由服务端再次校验并写入出库流水。</p>
+                </div>
                 <div className="form-grid__wide form-actions form-actions--split"><button className="button button--secondary" type="button" onClick={() => updateEditor(approval.id, (current) => ({ ...current, allocations: [...current.allocations, newAllocation(approval.lines[0]?.id)] }))}><Plus size={15} />增加分配行</button><button className="button button--secondary" type="button" onClick={() => updateEditor(approval.id, (current) => ({ ...current, allocations: [], reason: "" }))}>清空分配（零出库）</button></div>
                 <label className="form-grid__wide"><span>少出 / 零出原因（少出或零出时必填）</span><textarea value={editor.reason} onChange={(event) => updateEditor(approval.id, (current) => ({ ...current, reason: event.target.value, error: null }))} /></label>
                 <div className="form-grid__wide form-actions"><button className="button button--primary" type="submit" disabled={editor.submitting}>{editor.submitting ? "提交中…" : "确认实际出库"}</button></div>

@@ -76,15 +76,22 @@
 
 - `corepack pnpm test`
   - 36 test files passed
-  - 145 tests passed
+  - 146 tests passed
 - `corepack pnpm test:e2e`
-  - 28 tests passed
+  - 31 tests passed
 - `corepack pnpm typecheck`
   - passed
 - `corepack pnpm build`
   - passed
 - `git diff --check`
   - passed without whitespace errors
+
+## Post-audit acceptance fixes
+
+- Completed the administrator outbound page: approval expansion, multi-line/multi-batch allocation, actual quantity validation, partial/zero issue reasons, confirmation, refresh, and error state preservation.
+- Changed period close to calculate pending outbound work on the server and removed client-supplied counts from the page.
+- Enforced the current accounting period guard for inbound, opening stock, outbound, transfers, and returns after close.
+- Added outbound and period-close end-to-end coverage.
 
 ## Notes
 
