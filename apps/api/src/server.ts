@@ -32,6 +32,8 @@ import { registerReturnRoutes } from "./routes/admin/returns.js";
 import { registerStocktakeRoutes } from "./routes/admin/stocktake.js";
 import { registerPeriodCloseRoutes } from "./routes/admin/period-close.js";
 import { registerReportRoutes } from "./routes/admin/reports.js";
+import { isLocalAuthEnabled } from "./application/auth/local-auth.js";
+import { registerLocalAuthRoutes } from "./routes/auth/local-auth.js";
 import { registerApprovalCallbackRoute } from "./routes/wecom/approval-callback.js";
 
 const SESSION_COOKIE = "warehouse_session";
@@ -53,7 +55,14 @@ function readCookie(header: string | undefined, name: string): string | null {
 
 export function buildServer() {
   const app = Fastify({ logger: true });
-  void app.register(cors, { origin: process.env.WEB_BASE_URL ?? "http://localhost:5174", credentials: true });
+  const apiBaseUrl = process.env.API_BASE_URL ?? "http://localhost:3001";
+  const webBaseUrl = process.env.WEB_BASE_URL ?? "http://localhost:5174";
+  const localAuthEnabled = isLocalAuthEnabled({
+    bypassEnabled: process.env.LOCAL_AUTH_BYPASS === "true",
+    nodeEnv: process.env.NODE_ENV,
+  });
+
+  void app.register(cors, { origin: webBaseUrl, credentials: true });
   const sessionService = new SessionService(process.env.SESSION_SECRET ?? "local-development-session-secret");
   const auditService = new InMemoryAuditService();
   const itemService = new ItemService(new InMemoryItemRepository());
@@ -77,7 +86,7 @@ export function buildServer() {
     corpId: process.env.WE_COM_CORP_ID ?? "",
     agentId: process.env.WE_COM_AGENT_ID ?? "",
     secret: process.env.WE_COM_SECRET ?? "",
-    redirectUri: `${process.env.API_BASE_URL ?? "http://localhost:3001"}/auth/wecom/callback`,
+    redirectUri: `${apiBaseUrl}/auth/wecom/callback`,
   });
   const approvalSyncService = new ApprovalSyncService({
     gateway: new HttpApprovalGateway({ corpId: process.env.WE_COM_CORP_ID ?? "", secret: process.env.WE_COM_SECRET ?? "" }),
@@ -99,7 +108,10 @@ export function buildServer() {
   app.get("/health", async () => ({ status: "ok", service: "warehouse-api" }));
   app.get<{ Querystring: { returnTo?: string } }>("/auth/wecom/authorize", async (request, reply) => {
     try {
-      return { authorizeUrl: oauthClient.getAuthorizeUrl(request.query.returnTo ?? "/") };
+      return {
+        authorizeUrl: oauthClient.getAuthorizeUrl(request.query.returnTo ?? "/"),
+        ...(localAuthEnabled ? { localAuthUrl: `${apiBaseUrl}/auth/local?returnTo=${encodeURIComponent(request.query.returnTo ?? "/")}` } : {}),
+      };
     } catch (error) {
       if (error instanceof Error && error.message === "enterprise WeChat OAuth is not configured") {
         return reply.code(503).send({ error: "wecom_not_configured", message: "Enterprise WeChat OAuth is not configured" });
@@ -114,7 +126,7 @@ export function buildServer() {
     const token = sessionService.createSession(user);
     reply.header("set-cookie", `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${sessionService.cookieOptions(false).maxAge}`);
     await auditService.record({ actorUserId: user.id, actorRole: user.role, action: "LOGIN", entityType: "SESSION", entityId: user.id, requestId: request.id, occurredAt: new Date().toISOString() });
-    return reply.redirect(`${process.env.WEB_BASE_URL ?? "http://localhost:5174"}${oauthClient.decodeReturnTo(request.query.state)}`);
+    return reply.redirect(`${webBaseUrl}${oauthClient.decodeReturnTo(request.query.state)}`);
   });
   app.get("/auth/session", async (request, reply) => {
     const user = getSessionUser(request);
@@ -127,6 +139,7 @@ export function buildServer() {
     return { role: user.role, canViewAdmin: RolePolicy.can(user, "VIEW_ADMIN"), canViewReports: RolePolicy.can(user, "VIEW_REPORTS") };
   });
 
+  registerLocalAuthRoutes(app, { enabled: localAuthEnabled, webBaseUrl, sessionService, auditService });
   registerApprovalCallbackRoute(app, { verifier: signatureVerifier, syncService: approvalSyncService });
   registerApprovalResyncRoute(app, { syncService: approvalSyncService });
   registerItemRoutes(app, { itemService });
@@ -143,12 +156,20 @@ export function buildServer() {
   return app;
 }
 
-const app = buildServer();
-const port = Number(process.env.API_PORT ?? 3001);
+export async function startServer() {
+  const app = buildServer();
+  const port = Number(process.env.API_PORT ?? 3001);
 
-try {
-  await app.listen({ host: "0.0.0.0", port });
-} catch (error) {
-  app.log.error(error);
-  process.exit(1);
+  try {
+    await app.listen({ host: "0.0.0.0", port });
+  } catch (error) {
+    app.log.error(error);
+    process.exit(1);
+  }
+
+  return app;
+}
+
+if (process.env.NODE_ENV !== "test") {
+  await startServer();
 }
