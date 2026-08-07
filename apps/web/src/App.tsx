@@ -5,6 +5,8 @@ import { PageHeader } from "./components/PageHeader";
 import { LoginPage } from "./pages/LoginPage";
 import { ItemsPage } from "./pages/ItemsPage";
 import { WarehousesPage } from "./pages/WarehousesPage";
+import { InboundPage } from "./pages/InboundPage";
+import { OpeningStockPage } from "./pages/OpeningStockPage";
 
 type WebUser = { id: string; weComUserId: string; name: string; role: "APPLICANT" | "ADMIN" | "FINANCE" };
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
@@ -44,6 +46,8 @@ export default function App() {
 
   if (window.location.pathname === "/admin/items") return <AdminLayout user={{ name: user.name, roleLabel: "库存管理员" }}><ItemsPage /></AdminLayout>;
   if (window.location.pathname === "/admin/warehouses") return <AdminLayout user={{ name: user.name, roleLabel: "库存管理员" }}><WarehousesPage /></AdminLayout>;
+  if (window.location.pathname === "/admin/inbound") return <AdminLayout user={{ name: user.name, roleLabel: "库存管理员" }}><InboundPage /></AdminLayout>;
+  if (window.location.pathname === "/admin/opening-stock") return <AdminLayout user={{ name: user.name, roleLabel: "库存管理员" }}><OpeningStockPage /></AdminLayout>;
 
   return (
     <AdminLayout user={{ name: "管理员", roleLabel: "库存管理员" }}>

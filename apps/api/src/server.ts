@@ -5,6 +5,8 @@ import { SessionService } from "./application/auth/session-service.js";
 import { ApprovalSyncService, InMemoryApprovalSyncStore } from "./application/wecom/approval-sync-service.js";
 import { InMemoryItemRepository, ItemService } from "./application/items/item-service.js";
 import { InMemoryWarehouseRepository, WarehouseService } from "./application/warehouses/warehouse-service.js";
+import { InMemoryInventoryEntryStore, InboundService } from "./application/inventory/inbound-service.js";
+import { OpeningStockService } from "./application/inventory/opening-stock-service.js";
 import { InMemoryAuditService } from "./infrastructure/audit/audit-service.js";
 import { HttpApprovalGateway } from "./infrastructure/wecom/approval-gateway.js";
 import { ApprovalParser } from "./infrastructure/wecom/approval-parser.js";
@@ -13,6 +15,8 @@ import { WeComSignatureVerifier } from "./infrastructure/wecom/signature-verifie
 import { registerApprovalResyncRoute } from "./routes/admin/approvals-resync.js";
 import { registerItemRoutes } from "./routes/admin/items.js";
 import { registerWarehouseRoutes } from "./routes/admin/warehouses.js";
+import { registerInboundRoutes } from "./routes/admin/inbound.js";
+import { registerOpeningStockRoutes } from "./routes/admin/opening-stock.js";
 import { registerApprovalCallbackRoute } from "./routes/wecom/approval-callback.js";
 
 const SESSION_COOKIE = "warehouse_session";
@@ -36,6 +40,9 @@ export function buildServer() {
   const sessionService = new SessionService(process.env.SESSION_SECRET ?? "local-development-session-secret");
   const auditService = new InMemoryAuditService();
   const itemService = new ItemService(new InMemoryItemRepository());
+  const inventoryEntryStore = new InMemoryInventoryEntryStore();
+  const inboundService = new InboundService(inventoryEntryStore);
+  const openingStockService = new OpeningStockService(inventoryEntryStore);
   const warehouseService = new WarehouseService(new InMemoryWarehouseRepository([
     { id: "warehouse-1", code: "WH-01", name: "待配置仓库一", isActive: true, isPlaceholder: true },
     { id: "warehouse-2", code: "WH-02", name: "待配置仓库二", isActive: true, isPlaceholder: true },
@@ -90,6 +97,8 @@ export function buildServer() {
   registerApprovalResyncRoute(app, { syncService: approvalSyncService });
   registerItemRoutes(app, { itemService });
   registerWarehouseRoutes(app, { warehouseService });
+  registerInboundRoutes(app, { inboundService });
+  registerOpeningStockRoutes(app, { openingStockService });
 
   return app;
 }
