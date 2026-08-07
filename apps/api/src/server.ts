@@ -7,6 +7,7 @@ import { InMemoryItemRepository, ItemService } from "./application/items/item-se
 import { InMemoryWarehouseRepository, WarehouseService } from "./application/warehouses/warehouse-service.js";
 import { InMemoryInventoryEntryStore, InboundService } from "./application/inventory/inbound-service.js";
 import { OpeningStockService } from "./application/inventory/opening-stock-service.js";
+import { InMemoryOutboundStore, OutboundService } from "./application/inventory/outbound-service.js";
 import { InMemoryAuditService } from "./infrastructure/audit/audit-service.js";
 import { HttpApprovalGateway } from "./infrastructure/wecom/approval-gateway.js";
 import { ApprovalParser } from "./infrastructure/wecom/approval-parser.js";
@@ -17,6 +18,7 @@ import { registerItemRoutes } from "./routes/admin/items.js";
 import { registerWarehouseRoutes } from "./routes/admin/warehouses.js";
 import { registerInboundRoutes } from "./routes/admin/inbound.js";
 import { registerOpeningStockRoutes } from "./routes/admin/opening-stock.js";
+import { registerOutboundRoutes } from "./routes/admin/outbound.js";
 import { registerApprovalCallbackRoute } from "./routes/wecom/approval-callback.js";
 
 const SESSION_COOKIE = "warehouse_session";
@@ -43,6 +45,7 @@ export function buildServer() {
   const inventoryEntryStore = new InMemoryInventoryEntryStore();
   const inboundService = new InboundService(inventoryEntryStore);
   const openingStockService = new OpeningStockService(inventoryEntryStore);
+  const outboundService = new OutboundService(new InMemoryOutboundStore());
   const warehouseService = new WarehouseService(new InMemoryWarehouseRepository([
     { id: "warehouse-1", code: "WH-01", name: "待配置仓库一", isActive: true, isPlaceholder: true },
     { id: "warehouse-2", code: "WH-02", name: "待配置仓库二", isActive: true, isPlaceholder: true },
@@ -99,6 +102,7 @@ export function buildServer() {
   registerWarehouseRoutes(app, { warehouseService });
   registerInboundRoutes(app, { inboundService });
   registerOpeningStockRoutes(app, { openingStockService });
+  registerOutboundRoutes(app, { outboundService });
 
   return app;
 }
