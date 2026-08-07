@@ -15,4 +15,11 @@ test.describe("authentication boundaries", () => {
     await page.goto("/");
     await expect(page.getByRole("link", { name: "使用企业微信登录" })).toBeVisible();
   });
+
+  test("local development login reaches the admin dashboard", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("link", { name: "使用企业微信登录" })).toBeVisible();
+    await page.getByRole("link", { name: "本地开发登录" }).click();
+    await expect(page.getByText("库存总览")).toBeVisible();
+  });
 });
