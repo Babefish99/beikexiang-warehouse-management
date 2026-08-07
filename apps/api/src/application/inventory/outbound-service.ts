@@ -18,6 +18,19 @@ export interface OutboundOrderResult {
   reason?: string;
 }
 
+export interface OutboundBatchOption {
+  batchId: string;
+  warehouseId: string;
+  itemId: string;
+  remainingQuantity: string;
+  unitCost: string;
+}
+
+export interface OutboundOptions {
+  approvalId: string;
+  batches: OutboundBatchOption[];
+}
+
 export interface OutboundStore {
   getApproval(approvalId: string): Promise<PendingApproval | undefined>;
   listPending(): Promise<PendingApproval[]>;
@@ -78,11 +91,17 @@ export class OutboundService {
 
   listPending(): Promise<PendingApproval[]> { return this.store.listPending(); }
 
-  async listOptions(approvalId: string): Promise<{ approvalId: string; batches: AllocationBatch[] }> {
+  async listOptions(approvalId: string): Promise<OutboundOptions> {
     const approval = await this.store.getApproval(approvalId);
     if (!approval) throw new Error(`approval not found: ${approvalId}`);
     if (approval.status !== "PENDING_OUTBOUND") throw new Error("approval is already closed");
-    return { approvalId, batches: await this.store.listBatches(approval.lines.map((line) => line.itemId)) };
+    const batches = await this.store.listBatches(approval.lines.map((line) => line.itemId));
+    return {
+      approvalId,
+      batches: batches
+        .filter((batch) => new Decimal(batch.remainingQuantity).gt(0))
+        .map(({ id: batchId, ...batch }) => ({ batchId, ...batch })),
+    };
   }
 
   async confirm(input: { approvalId: string; allocations: OutboundAllocationInput[]; reason?: string }): Promise<OutboundOrderResult> {

@@ -17,13 +17,14 @@ describe("outbound service", () => {
     const { store, service } = makeService();
 
     store.seedBatch({ id: "batch-2", warehouseId: "wh-2", itemId: "item-1", remainingQuantity: "3", unitCost: "25" });
+    store.seedBatch({ id: "batch-empty", warehouseId: "wh-4", itemId: "item-1", remainingQuantity: "0", unitCost: "15" });
     store.seedBatch({ id: "batch-other-item", warehouseId: "wh-3", itemId: "item-2", remainingQuantity: "8", unitCost: "30" });
 
     await expect(service.listOptions("approval-1")).resolves.toEqual({
       approvalId: "approval-1",
       batches: [
-        { id: "batch-1", warehouseId: "wh-1", itemId: "item-1", remainingQuantity: "10", unitCost: "20" },
-        { id: "batch-2", warehouseId: "wh-2", itemId: "item-1", remainingQuantity: "3", unitCost: "25" },
+        { batchId: "batch-1", warehouseId: "wh-1", itemId: "item-1", remainingQuantity: "10", unitCost: "20" },
+        { batchId: "batch-2", warehouseId: "wh-2", itemId: "item-1", remainingQuantity: "3", unitCost: "25" },
       ],
     });
   });
@@ -69,6 +70,7 @@ describe("outbound options route", () => {
     const app = Fastify();
     const { store, service } = makeService();
     store.seedBatch({ id: "batch-2", warehouseId: "wh-2", itemId: "item-1", remainingQuantity: "3", unitCost: "25" });
+    store.seedBatch({ id: "batch-empty", warehouseId: "wh-4", itemId: "item-1", remainingQuantity: "0", unitCost: "15" });
     registerOutboundRoutes(app, { outboundService: service });
 
     try {
@@ -78,8 +80,8 @@ describe("outbound options route", () => {
       expect(response.json()).toEqual({
         approvalId: "approval-1",
         batches: [
-          { id: "batch-1", warehouseId: "wh-1", itemId: "item-1", remainingQuantity: "10", unitCost: "20" },
-          { id: "batch-2", warehouseId: "wh-2", itemId: "item-1", remainingQuantity: "3", unitCost: "25" },
+          { batchId: "batch-1", warehouseId: "wh-1", itemId: "item-1", remainingQuantity: "10", unitCost: "20" },
+          { batchId: "batch-2", warehouseId: "wh-2", itemId: "item-1", remainingQuantity: "3", unitCost: "25" },
         ],
       });
     } finally {
