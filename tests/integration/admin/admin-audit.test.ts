@@ -94,6 +94,19 @@ describe("admin mutation audit", () => {
           quantity: "1",
           unitCost: "10",
           purchasedAt: "2026-08-07",
+          session: "session-value",
+          secret: "secret-value",
+          token: "token-value",
+          cookie: "cookie-value",
+          password: "password-value",
+          metadata: {
+            session: "nested-session-value",
+            secret: "nested-secret-value",
+            token: "nested-token-value",
+            cookie: "nested-cookie-value",
+            password: "nested-password-value",
+            note: "safe-value",
+          },
         },
       });
 
@@ -111,6 +124,35 @@ describe("admin mutation audit", () => {
         status: "FAILED",
         errorMessage: "warehouse is inactive or not found",
       });
+      expect(audit?.afterData).toMatchObject({
+        warehouseId: "warehouse-missing",
+        metadata: { note: "safe-value" },
+      });
+      for (const sensitiveField of ["session", "secret", "token", "cookie", "password"]) {
+        expect(audit?.afterData).not.toHaveProperty(sensitiveField);
+        expect(audit?.afterData).not.toHaveProperty(`metadata.${sensitiveField}`);
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("returns unknown admin failures as a 500 JSON error", async () => {
+    const app = buildServer();
+
+    try {
+      app.get("/admin/test-unknown-error", async () => {
+        throw new Error("unexpected admin failure");
+      });
+      const cookie = await createAdminSessionCookie(app);
+      const response = await app.inject({
+        method: "GET",
+        url: "/admin/test-unknown-error",
+        headers: { cookie },
+      });
+
+      expect(response.statusCode).toBe(500);
+      expect(response.json()).toEqual({ error: "unexpected admin failure" });
     } finally {
       await app.close();
     }

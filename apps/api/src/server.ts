@@ -149,7 +149,11 @@ export function buildServer() {
     if (businessError) {
       return reply.code(businessError.statusCode).send({ error: businessError.message });
     }
-    return reply.send(error);
+    const statusCode = typeof error === "object" && error !== null && "statusCode" in error && typeof error.statusCode === "number"
+      ? error.statusCode
+      : 500;
+    const message = error instanceof Error ? error.message : String(error);
+    return reply.code(statusCode).send({ error: message });
   });
 
   app.get("/health", async () => ({ status: "ok", service: "warehouse-api", persistenceDriver: persistence.driver }));

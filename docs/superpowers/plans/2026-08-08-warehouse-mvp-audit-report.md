@@ -72,11 +72,11 @@
 
 ## Fresh Verification
 
-在 2026-08-07 本地执行并通过：
+在 2026-08-08 本地执行并通过：
 
 - `corepack pnpm test`
-  - 35 test files passed
-  - 138 tests passed
+  - 36 test files passed
+  - 145 tests passed
 - `corepack pnpm test:e2e`
   - 28 tests passed
 - `corepack pnpm typecheck`

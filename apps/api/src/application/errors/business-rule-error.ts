@@ -14,10 +14,11 @@ const NOT_FOUND_PATTERNS = [
 const BAD_REQUEST_PATTERNS = [
   /inactive or not found$/i,
   /is invalid$/i,
-  /is required$/i,
+  /\b(?:is|are) required\b/i,
   /already exists/i,
   /already closed/i,
   /cannot /i,
+  /does not belong to/i,
   /must /i,
   /mismatch/i,
   /exceeds/i,
