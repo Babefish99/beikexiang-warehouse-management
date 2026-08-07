@@ -1,5 +1,5 @@
 import { assertNonNegative, decimal } from "../../domain/inventory/invariants.js";
-import type { InventoryEntryStore } from "./inbound-service.js";
+import { assertActiveMasterData, type InventoryEntryStore, type InventoryMasterDataServices } from "./inbound-service.js";
 
 export interface OpeningStockRow {
   warehouseId: string;
@@ -11,7 +11,7 @@ export interface OpeningStockRow {
 }
 
 export class OpeningStockService {
-  constructor(private readonly store: InventoryEntryStore) {}
+  constructor(private readonly store: InventoryEntryStore, private readonly masterData: InventoryMasterDataServices) {}
 
   async create(input: { verifiedBy: string; rows: OpeningStockRow[] }): Promise<{ batchIds: string[] }> {
     if (!input.verifiedBy.trim()) throw new Error("verified by is required");
@@ -20,6 +20,7 @@ export class OpeningStockService {
     for (const row of input.rows) {
       if (!row.warehouseId.trim()) throw new Error("warehouse is required");
       if (!row.itemId.trim()) throw new Error("item is required");
+      await assertActiveMasterData(this.masterData, row.warehouseId, row.itemId);
       if (!row.batchNo.trim()) throw new Error("batch number is required");
       const quantity = assertNonNegative(row.quantity, "quantity");
       const unitCost = assertNonNegative(row.unitCost, "unit cost");

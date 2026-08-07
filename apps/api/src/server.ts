@@ -67,9 +67,6 @@ export function buildServer() {
   const auditService = new InMemoryAuditService();
   const itemRepository = new InMemoryItemRepository();
   const itemService = new ItemService(itemRepository);
-  const inventoryEntryStore = new InMemoryInventoryEntryStore({ onRecordStockEntry: ({ itemId }) => itemRepository.markLedgerActivity(itemId) });
-  const inboundService = new InboundService(inventoryEntryStore);
-  const openingStockService = new OpeningStockService(inventoryEntryStore);
   const outboundService = new OutboundService(new InMemoryOutboundStore());
   const movementStore = new InMemoryMovementStore();
   const transferService = new TransferService(movementStore);
@@ -84,6 +81,9 @@ export function buildServer() {
     { id: "warehouse-2", code: "WH-02", name: "待配置仓库二", isActive: true, isPlaceholder: true },
     { id: "warehouse-3", code: "WH-03", name: "待配置仓库三", isActive: true, isPlaceholder: true },
   ]));
+  const inventoryEntryStore = new InMemoryInventoryEntryStore({ onRecordStockEntry: ({ itemId }) => itemRepository.markLedgerActivity(itemId) });
+  const inboundService = new InboundService(inventoryEntryStore, { warehouseService, itemService });
+  const openingStockService = new OpeningStockService(inventoryEntryStore, { warehouseService, itemService });
   const oauthClient = new WeComOAuthClient({
     corpId: process.env.WE_COM_CORP_ID ?? "",
     agentId: process.env.WE_COM_AGENT_ID ?? "",

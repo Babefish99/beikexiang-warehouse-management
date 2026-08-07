@@ -39,6 +39,28 @@ export interface InventoryEntryStore {
   recordStockEntry(input: StockEntryInput): Promise<{ orderId: string; batchId: string }>;
 }
 
+export interface ActiveMasterDataLookup {
+  list(includeInactive?: boolean): Promise<Array<{ id: string; isActive: boolean }>>;
+}
+
+export interface InventoryMasterDataServices {
+  warehouseService: ActiveMasterDataLookup;
+  itemService: ActiveMasterDataLookup;
+}
+
+export async function assertActiveMasterData(services: InventoryMasterDataServices, warehouseId: string, itemId: string): Promise<void> {
+  const [warehouses, items] = await Promise.all([
+    services.warehouseService.list(true),
+    services.itemService.list(true),
+  ]);
+  if (!warehouses.some((warehouse) => warehouse.id === warehouseId && warehouse.isActive)) {
+    throw new Error("warehouse is inactive or not found");
+  }
+  if (!items.some((item) => item.id === itemId && item.isActive)) {
+    throw new Error("item is inactive or not found");
+  }
+}
+
 export class InMemoryInventoryEntryStore implements InventoryEntryStore {
   private readonly storedBatches: StoredBatch[] = [];
   private readonly balancesList: Array<{ warehouseId: string; itemId: string; batchId: string; remainingQuantity: string; unitCost: string }> = [];
@@ -73,11 +95,12 @@ function assertDate(value: string, field: string): string {
 }
 
 export class InboundService {
-  constructor(private readonly store: InventoryEntryStore) {}
+  constructor(private readonly store: InventoryEntryStore, private readonly masterData: InventoryMasterDataServices) {}
 
   async create(input: InboundInput): Promise<{ inboundId: string; batchIds: string[] }> {
     if (!input.warehouseId.trim()) throw new Error("warehouse is required");
     if (!input.itemId.trim()) throw new Error("item is required");
+    await assertActiveMasterData(this.masterData, input.warehouseId, input.itemId);
     if (!input.batchNo.trim()) throw new Error("batch number is required");
     const quantity = assertNonNegative(input.quantity, "quantity");
     const unitCost = assertNonNegative(input.unitCost, "unit cost");
