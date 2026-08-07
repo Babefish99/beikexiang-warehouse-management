@@ -1,5 +1,5 @@
 import { ArrowDownToLine, ArrowUpFromLine, Boxes, RefreshCw } from "lucide-react";
-import { AppShell } from "./components/AppShell";
+import { AdminLayout } from "./layouts/AdminLayout";
 import { PageHeader } from "./components/PageHeader";
 
 const cards = [
@@ -11,7 +11,7 @@ const cards = [
 
 export default function App() {
   return (
-    <AppShell>
+    <AdminLayout user={{ name: "管理员", roleLabel: "库存管理员" }}>
       <div className="page">
         <PageHeader title="库存总览" description="查看三个仓库的库存状态、待处理业务和本月变动。" actions={<button className="button button--secondary" type="button"><RefreshCw size={15} />刷新数据</button>} />
         <section className="metric-strip" aria-label="库存概览指标">
@@ -22,6 +22,6 @@ export default function App() {
           <article className="panel"><header className="panel__header"><div><strong>系统说明</strong><small>当前阶段</small></div></header><div className="notice"><strong>企业微信审批已接入准备</strong><p>员工继续在企业微信发起申请，审批通过后自动进入后台待出库列表。管理员实际出库时选择仓库和采购批次。</p></div></article>
         </section>
       </div>
-    </AppShell>
+    </AdminLayout>
   );
 }
