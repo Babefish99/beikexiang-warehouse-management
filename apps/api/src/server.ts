@@ -1,3 +1,5 @@
+import "dotenv/config";
+
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { RolePolicy, type AuthenticatedUser } from "./application/auth/role-service.js";
@@ -92,7 +94,16 @@ export function buildServer() {
   });
 
   app.get("/health", async () => ({ status: "ok", service: "warehouse-api" }));
-  app.get<{ Querystring: { returnTo?: string } }>("/auth/wecom/authorize", async (request) => ({ authorizeUrl: oauthClient.getAuthorizeUrl(request.query.returnTo ?? "/") }));
+  app.get<{ Querystring: { returnTo?: string } }>("/auth/wecom/authorize", async (request, reply) => {
+    try {
+      return { authorizeUrl: oauthClient.getAuthorizeUrl(request.query.returnTo ?? "/") };
+    } catch (error) {
+      if (error instanceof Error && error.message === "enterprise WeChat OAuth is not configured") {
+        return reply.code(503).send({ error: "wecom_not_configured", message: "Enterprise WeChat OAuth is not configured" });
+      }
+      throw error;
+    }
+  });
   app.get<{ Querystring: { code?: string; state?: string } }>("/auth/wecom/callback", async (request, reply) => {
     if (!request.query.code) return reply.code(400).send({ error: "code is required" });
     const identity = await oauthClient.exchangeCode(request.query.code);

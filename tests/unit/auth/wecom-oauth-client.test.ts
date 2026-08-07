@@ -3,6 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import { WeComOAuthClient } from "../../../apps/api/src/infrastructure/wecom/oauth-client.js";
 
 describe("enterprise WeChat OAuth client", () => {
+  it("rejects authorization URL generation when the Corp ID is missing", () => {
+    const client = new WeComOAuthClient({ corpId: "", agentId: "agent-1", secret: "secret", redirectUri: "https://warehouse.example.com/auth/callback" });
+
+    expect(() => client.getAuthorizeUrl("/"))
+      .toThrow("enterprise WeChat OAuth is not configured");
+  });
+
   it("builds an authorization URL with a return state", () => {
     const client = new WeComOAuthClient({ corpId: "corp-1", agentId: "agent-1", secret: "secret", redirectUri: "https://warehouse.example.com/auth/callback" });
     const url = new URL(client.getAuthorizeUrl("/admin/reports"));

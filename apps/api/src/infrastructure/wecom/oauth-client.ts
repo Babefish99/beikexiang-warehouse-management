@@ -34,6 +34,7 @@ export class WeComOAuthClient {
   }
 
   getAuthorizeUrl(returnTo = "/"): string {
+    if (!this.options.corpId.trim()) throw new Error("enterprise WeChat OAuth is not configured");
     const url = new URL("https://open.weixin.qq.com/connect/oauth2/authorize");
     url.searchParams.set("appid", this.options.corpId);
     url.searchParams.set("redirect_uri", this.options.redirectUri);
