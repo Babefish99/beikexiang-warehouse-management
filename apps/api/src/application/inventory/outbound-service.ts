@@ -81,6 +81,7 @@ export class OutboundService {
   async listOptions(approvalId: string): Promise<{ approvalId: string; batches: AllocationBatch[] }> {
     const approval = await this.store.getApproval(approvalId);
     if (!approval) throw new Error(`approval not found: ${approvalId}`);
+    if (approval.status !== "PENDING_OUTBOUND") throw new Error("approval is already closed");
     return { approvalId, batches: await this.store.listBatches(approval.lines.map((line) => line.itemId)) };
   }
 

@@ -1,6 +1,9 @@
+import Fastify from "fastify";
 import { describe, expect, it } from "vitest";
 
 import { OutboundService, InMemoryOutboundStore } from "../../../apps/api/src/application/inventory/outbound-service.js";
+import { registerOutboundRoutes } from "../../../apps/api/src/routes/admin/outbound.js";
+import { buildServer } from "../../../apps/api/src/server.js";
 
 function makeService() {
   const store = new InMemoryOutboundStore();
@@ -14,6 +17,7 @@ describe("outbound service", () => {
     const { store, service } = makeService();
 
     store.seedBatch({ id: "batch-2", warehouseId: "wh-2", itemId: "item-1", remainingQuantity: "3", unitCost: "25" });
+    store.seedBatch({ id: "batch-other-item", warehouseId: "wh-3", itemId: "item-2", remainingQuantity: "8", unitCost: "30" });
 
     await expect(service.listOptions("approval-1")).resolves.toEqual({
       approvalId: "approval-1",
@@ -28,6 +32,13 @@ describe("outbound service", () => {
     const { service } = makeService();
 
     await expect(service.listOptions("missing-approval")).rejects.toThrow("approval not found: missing-approval");
+  });
+
+  it.each(["COMPLETED", "VOIDED"] as const)("rejects when listing batches for a %s approval", async (status) => {
+    const { store, service } = makeService();
+    store.seedApproval({ id: "approval-1", weComSpNo: "202607230021", status, lines: [{ id: "line-1", itemId: "item-1", requestedQuantity: "10" }] });
+
+    await expect(service.listOptions("approval-1")).rejects.toThrow("approval is already closed");
   });
 
   it("confirms a batch-aware issue and posts one negative ledger entry", async () => {
@@ -50,5 +61,56 @@ describe("outbound service", () => {
 
     await expect(service.cancelBeforeIssue({ approvalId: "approval-1", reason: "申请人取消领用" })).resolves.toMatchObject({ status: "VOIDED" });
     expect(store.ledger()).toHaveLength(0);
+  });
+});
+
+describe("outbound options route", () => {
+  it("uses the approvalId path parameter and returns options", async () => {
+    const app = Fastify();
+    const { store, service } = makeService();
+    store.seedBatch({ id: "batch-2", warehouseId: "wh-2", itemId: "item-1", remainingQuantity: "3", unitCost: "25" });
+    registerOutboundRoutes(app, { outboundService: service });
+
+    try {
+      const response = await app.inject({ method: "GET", url: "/admin/outbound/approval-1/options" });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({
+        approvalId: "approval-1",
+        batches: [
+          { id: "batch-1", warehouseId: "wh-1", itemId: "item-1", remainingQuantity: "10", unitCost: "20" },
+          { id: "batch-2", warehouseId: "wh-2", itemId: "item-1", remainingQuantity: "3", unitCost: "25" },
+        ],
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("returns the service error for an unknown approval", async () => {
+    const app = Fastify();
+    registerOutboundRoutes(app, { outboundService: new OutboundService(new InMemoryOutboundStore()) });
+
+    try {
+      const response = await app.inject({ method: "GET", url: "/admin/outbound/missing-approval/options" });
+
+      expect(response.statusCode).toBe(500);
+      expect(response.json()).toMatchObject({ message: "approval not found: missing-approval" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("rejects unauthenticated access to the options route", async () => {
+    const app = buildServer();
+
+    try {
+      const response = await app.inject({ method: "GET", url: "/admin/outbound/approval-1/options" });
+
+      expect(response.statusCode).toBe(401);
+      expect(response.json()).toEqual({ error: "unauthorized" });
+    } finally {
+      await app.close();
+    }
   });
 });
