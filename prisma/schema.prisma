@@ -6,7 +6,261 @@ datasource db {
   provider = "postgresql"
 }
 
-model BootstrapMarker {
+model User {
+  id         String   @id @default(cuid())
+  weComUserId String  @unique
+  name       String
+  roleId     String
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+}
+
+model Role {
   id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
   createdAt DateTime @default(now())
+}
+
+model Warehouse {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  isActive    Boolean  @default(true)
+  isPlaceholder Boolean @default(false)
+  createdAt   DateTime @default(now())
+}
+
+model ItemCategory {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  prefix    String   @unique
+  name      String
+  createdAt DateTime @default(now())
+}
+
+model Item {
+  id              String   @id @default(cuid())
+  code            String   @unique
+  name            String
+  specification   String?
+  unit            String
+  categoryId      String
+  weComOptionKey  String?  @unique
+  minimumStock    Decimal?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model ApprovalRequest {
+  id              String   @id @default(cuid())
+  weComSpNo       String   @unique
+  applicantUserId String
+  applicantName   String
+  department      String?
+  purpose         String
+  status          String
+  submittedAt     DateTime
+  approvedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model ApprovalLine {
+  id                 String   @id @default(cuid())
+  approvalRequestId  String
+  itemId             String
+  requestedQuantity  Decimal
+  unit               String
+  createdAt          DateTime @default(now())
+}
+
+model InboundOrder {
+  id           String   @id @default(cuid())
+  warehouseId  String
+  orderNo      String   @unique
+  source       String
+  receivedAt   DateTime
+  operatorId   String
+  remark       String?
+  createdAt    DateTime @default(now())
+}
+
+model InboundLine {
+  id             String   @id @default(cuid())
+  inboundOrderId String
+  itemId         String
+  batchId        String
+  quantity       Decimal
+  unitCost       Decimal
+  amount         Decimal
+}
+
+model ProcurementBatch {
+  id                String   @id @default(cuid())
+  warehouseId       String
+  itemId            String
+  batchNo           String
+  quantity          Decimal
+  remainingQuantity Decimal
+  unitCost          Decimal
+  purchasedAt       DateTime
+  productionDate    DateTime?
+  expiryDate        DateTime?
+  purchaser         String?
+  createdAt         DateTime @default(now())
+  @@unique([warehouseId, itemId, batchNo])
+}
+
+model StockBalance {
+  id                String   @id @default(cuid())
+  warehouseId       String
+  itemId            String
+  batchId           String
+  remainingQuantity Decimal
+  unitCost          Decimal
+  updatedAt         DateTime @updatedAt
+  @@unique([warehouseId, batchId])
+}
+
+model OutboundOrder {
+  id                String   @id @default(cuid())
+  approvalRequestId String   @unique
+  orderNo           String   @unique
+  status            String
+  actualQuantity    Decimal
+  amount            Decimal
+  reason            String?
+  issuedAt          DateTime?
+  operatorId        String
+  createdAt         DateTime @default(now())
+}
+
+model OutboundAllocation {
+  id                String   @id @default(cuid())
+  outboundOrderId   String
+  approvalLineId    String
+  warehouseId       String
+  itemId            String
+  batchId           String
+  originalQuantity  Decimal
+  quantity          Decimal
+  unitCost          Decimal
+  amount            Decimal
+}
+
+model TransferOrder {
+  id                  String   @id @default(cuid())
+  transferNo          String   @unique
+  sourceWarehouseId   String
+  destinationWarehouseId String
+  status              String
+  reason              String
+  operatorId          String
+  completedAt         DateTime?
+  createdAt           DateTime @default(now())
+}
+
+model TransferLine {
+  id              String   @id @default(cuid())
+  transferOrderId String
+  itemId          String
+  batchId         String
+  quantity        Decimal
+  unitCost        Decimal
+  amount          Decimal
+}
+
+model ReturnOrder {
+  id                   String   @id @default(cuid())
+  returnNo             String   @unique
+  originalOutboundId   String
+  warehouseId          String
+  reason               String
+  operatorId           String
+  returnedAt           DateTime?
+  createdAt            DateTime @default(now())
+}
+
+model ReturnLine {
+  id                    String   @id @default(cuid())
+  returnOrderId         String
+  outboundAllocationId  String
+  itemId                String
+  batchId               String
+  quantity              Decimal
+  unitCost              Decimal
+  amount                Decimal
+}
+
+model Stocktake {
+  id          String   @id @default(cuid())
+  stocktakeNo String   @unique
+  periodCode  String
+  status      String
+  operatorId  String
+  reason      String?
+  createdAt   DateTime @default(now())
+}
+
+model StockAdjustment {
+  id          String   @id @default(cuid())
+  stocktakeId String?
+  periodCode  String
+  warehouseId String
+  itemId      String
+  batchId     String
+  quantity    Decimal
+  unitCost    Decimal
+  amount      Decimal
+  reason      String
+  operatorId  String
+  createdAt   DateTime @default(now())
+}
+
+model InventoryLedgerEntry {
+  id            String   @id @default(cuid())
+  warehouseId   String
+  itemId        String
+  batchId       String?
+  type          String
+  quantity      Decimal
+  unitCost      Decimal
+  amount        Decimal
+  referenceType String
+  referenceId   String
+  occurredAt    DateTime
+  createdAt     DateTime @default(now())
+}
+
+model AccountingPeriod {
+  id         String   @id @default(cuid())
+  periodCode String   @unique
+  status     String
+  openedAt   DateTime @default(now())
+  closedAt   DateTime?
+  closedBy   String?
+}
+
+model SyncAttempt {
+  id          String   @id @default(cuid())
+  weComSpNo   String
+  status      String
+  attemptNo   Int
+  payload     Json?
+  error       String?
+  attemptedAt DateTime @default(now())
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String
+  action      String
+  entityType  String
+  entityId    String
+  requestId   String?
+  beforeData  Json?
+  afterData   Json?
+  createdAt   DateTime @default(now())
 }
