@@ -71,12 +71,12 @@ export default function App() {
   return (
     <AdminLayout user={{ name: "管理员", roleLabel: "库存管理员" }}>
       <div className="page">
-        <PageHeader title="库存总览" description="查看三个仓库的库存状态、待处理业务和本月变动。" actions={<button className="button button--secondary" type="button"><RefreshCw size={15} />刷新数据</button>} />
+        <PageHeader title="库存总览" description="查看三个仓库的库存状态、待处理业务和本月变动。" actions={<button className="button button--secondary" type="button" onClick={() => window.location.reload()}><RefreshCw size={15} />刷新数据</button>} />
         <section className="metric-strip" aria-label="库存概览指标">
           {cards.map((card) => <div className="metric" key={card.label}><span className="metric__icon"><Boxes size={18} /></span><div><strong>{card.value}</strong><span>{card.label}</span><small>{card.hint}</small></div></div>)}
         </section>
         <section className="dashboard-grid">
-          <article className="panel"><header className="panel__header"><div><strong>业务快捷入口</strong><small>管理员常用操作</small></div></header><div className="quick-actions"><button type="button"><ArrowDownToLine size={19} /><span>登记入库</span></button><button type="button"><ArrowUpFromLine size={19} /><span>办理出库</span></button><button type="button"><ArrowDownToLine size={19} /><span>录入期初库存</span></button></div></article>
+          <article className="panel"><header className="panel__header"><div><strong>业务快捷入口</strong><small>管理员常用操作</small></div></header><div className="quick-actions"><a href="/admin/inbound"><ArrowDownToLine size={19} /><span>登记入库</span></a><a href="/admin/outbound"><ArrowUpFromLine size={19} /><span>办理出库</span></a><a href="/admin/opening-stock"><ArrowDownToLine size={19} /><span>录入期初库存</span></a></div></article>
           <article className="panel"><header className="panel__header"><div><strong>系统说明</strong><small>当前阶段</small></div></header><div className="notice"><strong>企业微信审批已接入准备</strong><p>员工继续在企业微信发起申请，审批通过后自动进入后台待出库列表。管理员实际出库时选择仓库和采购批次。</p></div></article>
         </section>
       </div>

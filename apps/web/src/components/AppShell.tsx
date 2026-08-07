@@ -1,15 +1,33 @@
 import type { ReactNode } from "react";
 import { BarChart3, LayoutDashboard, PackageSearch, Settings, Warehouse } from "lucide-react";
 
-const navItems = [
-  { label: "首页", icon: LayoutDashboard },
-  { label: "库存台账", icon: PackageSearch },
-  { label: "出入库管理", icon: Warehouse },
-  { label: "报表中心", icon: BarChart3 },
-  { label: "系统设置", icon: Settings },
+type NavigationItem = {
+  label: string;
+  href: string;
+  icon: typeof LayoutDashboard;
+  activePaths?: string[];
+};
+
+const navItems: NavigationItem[] = [
+  { label: "首页", href: "/", icon: LayoutDashboard },
+  { label: "库存台账", href: "/admin/items", icon: PackageSearch },
+  {
+    label: "出入库管理",
+    href: "/admin/outbound",
+    icon: Warehouse,
+    activePaths: ["/admin/inbound", "/admin/outbound", "/admin/transfers", "/admin/returns", "/admin/opening-stock", "/admin/stocktake", "/admin/period-close"],
+  },
+  { label: "报表中心", href: "/admin/reports", icon: BarChart3 },
+  { label: "系统设置", href: "/admin/warehouses", icon: Settings },
 ];
 
+function isActivePath(pathname: string, item: NavigationItem): boolean {
+  return [item.href, ...(item.activePaths ?? [])].some((path) => path === "/" ? pathname === path : pathname.startsWith(path));
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
+  const pathname = window.location.pathname;
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -18,12 +36,15 @@ export function AppShell({ children }: { children: ReactNode }) {
           <span><strong>集团仓库</strong><small>Inventory Center</small></span>
         </div>
         <nav className="sidebar__nav" aria-label="主导航">
-          {navItems.map(({ label, icon: Icon }, index) => (
-            <button className={`nav-item ${index === 0 ? "is-active" : ""}`} key={label} type="button">
-              <Icon size={18} strokeWidth={1.8} />
-              <span>{label}</span>
-            </button>
-          ))}
+          {navItems.map(({ label, href, icon: Icon, ...item }) => {
+            const active = isActivePath(pathname, { label, href, icon: Icon, ...item });
+            return (
+              <a className={`nav-item ${active ? "is-active" : ""}`} key={label} href={href} aria-current={active ? "page" : undefined}>
+                <Icon size={18} strokeWidth={1.8} />
+                <span>{label}</span>
+              </a>
+            );
+          })}
         </nav>
         <div className="sidebar__footer"><strong>库存数据安全运行中</strong><small>三仓库统一管理</small></div>
       </aside>
