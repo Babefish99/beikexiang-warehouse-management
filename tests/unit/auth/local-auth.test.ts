@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AuthenticatedUser } from "../../../apps/api/src/application/auth/role-service.js";
-import { isLocalAuthEnabled, isLoopbackAddress, localAdminUser } from "../../../apps/api/src/application/auth/local-auth.js";
+import { isAllowedLocalAuthHost, isLocalAuthEnabled, isLoopbackAddress, localAdminUser } from "../../../apps/api/src/application/auth/local-auth.js";
 
 describe("local auth policy", () => {
   it("enables local auth only when the flag is true outside production", () => {
@@ -15,6 +15,13 @@ describe("local auth policy", () => {
     expect(isLoopbackAddress("::1")).toBe(true);
     expect(isLoopbackAddress("::ffff:127.0.0.1")).toBe(true);
     expect(isLoopbackAddress("192.168.1.10")).toBe(false);
+  });
+
+  it("allows only configured or explicit loopback hosts for local auth", () => {
+    expect(isAllowedLocalAuthHost({ hostHeader: "localhost:3001", apiBaseUrl: "http://localhost:3001" })).toBe(true);
+    expect(isAllowedLocalAuthHost({ hostHeader: "127.0.0.1:3001", apiBaseUrl: "http://localhost:3001" })).toBe(true);
+    expect(isAllowedLocalAuthHost({ hostHeader: "warehouse.test:4100", apiBaseUrl: "http://warehouse.test:4100" })).toBe(true);
+    expect(isAllowedLocalAuthHost({ hostHeader: "attacker.example", apiBaseUrl: "http://localhost:3001" })).toBe(false);
   });
 
   it("returns the fixed local administrator identity", () => {

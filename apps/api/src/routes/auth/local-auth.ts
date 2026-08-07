@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 
-import { isLoopbackAddress, localAdminUser } from "../../application/auth/local-auth.js";
+import { isAllowedLocalAuthHost, isLoopbackAddress, localAdminUser } from "../../application/auth/local-auth.js";
 import { WeComOAuthClient } from "../../infrastructure/wecom/oauth-client.js";
 import type { SessionService } from "../../application/auth/session-service.js";
 import type { InMemoryAuditService } from "../../infrastructure/audit/audit-service.js";
@@ -31,6 +31,7 @@ export function registerLocalAuthRoutes(
   app: FastifyInstance,
   dependencies: {
     enabled: boolean;
+    apiBaseUrl: string;
     webBaseUrl: string;
     sessionService: Pick<SessionService, "createSession" | "cookieOptions">;
     auditService: Pick<InMemoryAuditService, "record">;
@@ -44,7 +45,11 @@ export function registerLocalAuthRoutes(
   });
 
   app.get<{ Querystring: { returnTo?: string } }>("/auth/local", async (request, reply) => {
-    if (!dependencies.enabled || !isLoopbackAddress(request.ip)) {
+    if (
+      !dependencies.enabled
+      || !isLoopbackAddress(request.ip)
+      || !isAllowedLocalAuthHost({ hostHeader: request.headers.host, apiBaseUrl: dependencies.apiBaseUrl })
+    ) {
       return reply.code(404).send({ error: "local_auth_unavailable" });
     }
 

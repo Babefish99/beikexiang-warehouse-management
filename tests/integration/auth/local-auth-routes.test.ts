@@ -28,6 +28,9 @@ describe("local auth routes", () => {
         method: "GET",
         url: "/auth/local?returnTo=/admin/items",
         remoteAddress: "127.0.0.1",
+        headers: {
+          host: "localhost:3001",
+        },
       });
       const setCookie = Array.isArray(response.headers["set-cookie"])
         ? response.headers["set-cookie"]
@@ -41,6 +44,31 @@ describe("local auth routes", () => {
     }
   });
 
+  it.each(["localhost:3001", "127.0.0.1:3001"])(
+    "allows loopback local login from %s",
+    async (host) => {
+      vi.stubEnv("LOCAL_AUTH_BYPASS", "true");
+      const app = buildServer();
+
+      try {
+        const response = await app.inject({
+          method: "GET",
+          url: "/auth/local?returnTo=/admin/items",
+          remoteAddress: "127.0.0.1",
+          headers: {
+            host,
+          },
+        });
+
+        expect(response.statusCode).toBe(302);
+        expect(response.headers.location).toBe("http://localhost:5174/admin/items");
+        expect(response.headers["set-cookie"]).toEqual(expect.stringContaining("warehouse_session="));
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
   it("does not expose or execute local login when the flag is disabled", async () => {
     vi.stubEnv("LOCAL_AUTH_BYPASS", "false");
     const app = buildServer();
@@ -50,6 +78,7 @@ describe("local auth routes", () => {
       const local = await app.inject({ method: "GET", url: "/auth/local", remoteAddress: "127.0.0.1" });
 
       expect(metadata.statusCode).toBe(200);
+      expect(metadata.json()).toHaveProperty("authorizeUrl", expect.stringContaining("https://open.work.weixin.qq.com/wwopen/sso/qrConnect?"));
       expect(metadata.json()).not.toHaveProperty("localAuthUrl");
       expect(local.statusCode).toBe(404);
       expect(local.headers["set-cookie"]).toBeUndefined();
@@ -90,6 +119,28 @@ describe("local auth routes", () => {
 
       expect(metadata.statusCode).toBe(200);
       expect(metadata.json()).toHaveProperty("localAuthUrl", "http://localhost:3001/auth/local?returnTo=%2Freports");
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toEqual({ error: "local_auth_unavailable" });
+      expect(response.headers["set-cookie"]).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("rejects loopback local login when Host is not allowed", async () => {
+    vi.stubEnv("LOCAL_AUTH_BYPASS", "true");
+    const app = buildServer();
+
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: "/auth/local?returnTo=/admin/items",
+        remoteAddress: "127.0.0.1",
+        headers: {
+          host: "attacker.example",
+        },
+      });
+
       expect(response.statusCode).toBe(404);
       expect(response.json()).toEqual({ error: "local_auth_unavailable" });
       expect(response.headers["set-cookie"]).toBeUndefined();

@@ -139,7 +139,7 @@ export function buildServer() {
     return { role: user.role, canViewAdmin: RolePolicy.can(user, "VIEW_ADMIN"), canViewReports: RolePolicy.can(user, "VIEW_REPORTS") };
   });
 
-  registerLocalAuthRoutes(app, { enabled: localAuthEnabled, webBaseUrl, sessionService, auditService });
+  registerLocalAuthRoutes(app, { enabled: localAuthEnabled, apiBaseUrl, webBaseUrl, sessionService, auditService });
   registerApprovalCallbackRoute(app, { verifier: signatureVerifier, syncService: approvalSyncService });
   registerApprovalResyncRoute(app, { syncService: approvalSyncService });
   registerItemRoutes(app, { itemService });
