@@ -33,6 +33,7 @@
 ```env
 PERSISTENCE_DRIVER=prisma
 DATABASE_URL=postgresql://warehouse:warehouse@localhost:5432/warehouse
+SHADOW_DATABASE_URL=postgresql://warehouse:warehouse@localhost:5432/warehouse_shadow
 ```
 
 再执行：
@@ -41,6 +42,8 @@ DATABASE_URL=postgresql://warehouse:warehouse@localhost:5432/warehouse
 corepack pnpm db:migrate
 corepack pnpm db:seed
 ```
+
+Prisma 7 在使用 `--from-migrations` 或 `migrate dev` 时还需要单独的 `SHADOW_DATABASE_URL`；不要将它设置成主库地址。当前环境没有可达 PostgreSQL，因此这里只提交 migration 文件和配置 seam，不声称迁移已连接或应用到真实数据库。
 
 当前 API 运行时不会接受 `PERSISTENCE_DRIVER=prisma`：核心库存、出库、调拨、退库、盘点和报表仍有内存业务 store，不能把部分 Prisma seam 当成生产持久化。API 在启动阶段会明确 fail-fast；在全业务 wiring 和真实 PostgreSQL 端到端验证完成前，请保持 `PERSISTENCE_DRIVER=memory` 运行本地开发。Prisma CLI 的迁移/seed 仍可单独使用 `DATABASE_URL` 验证。
 
