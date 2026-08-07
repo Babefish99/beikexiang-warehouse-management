@@ -12,6 +12,17 @@ export interface ReportEntry {
   referenceType: string;
 }
 
+export type TransactionReportType = "all" | "inbound" | "outbound" | "transfers" | "returns" | "adjustments";
+
+const transactionTypeMap: Record<TransactionReportType, string[] | null> = {
+  all: null,
+  inbound: ["INBOUND", "OPENING_BALANCE"],
+  outbound: ["OUTBOUND"],
+  transfers: ["TRANSFER_IN", "TRANSFER_OUT"],
+  returns: ["RETURN"],
+  adjustments: ["ADJUSTMENT", "STOCKTAKE_ADJUSTMENT"],
+};
+
 function inPeriod(entry: ReportEntry, period: string): boolean {
   const start = new Date(`${period}-01T00:00:00.000Z`);
   const end = new Date(start);
@@ -31,20 +42,25 @@ export class InventoryReportService {
       current.amount = current.amount.plus(new Decimal(entry.quantity).mul(entry.unitCost));
       grouped.set(entry.itemId, current);
     }
-    return [...grouped.entries()].map(([itemId, value]) => ({ itemId, quantity: value.quantity.toString(), amount: value.amount.toFixed(2) }));
+    return [...grouped.entries()]
+      .map(([itemId, value]) => ({ itemId, quantity: value.quantity.toString(), amount: value.amount.toFixed(2) }))
+      .sort((left, right) => left.itemId.localeCompare(right.itemId));
   }
 }
 
 export class TransactionReportService {
   constructor(private readonly listEntries: () => Promise<ReportEntry[]>) {}
 
-  private async listByType(period: string, types: string[]): Promise<ReportEntry[]> {
-    return (await this.listEntries()).filter((entry) => inPeriod(entry, period) && types.includes(entry.type));
+  async getByType(period: string, type: TransactionReportType): Promise<ReportEntry[]> {
+    const allowedTypes = transactionTypeMap[type];
+    return (await this.listEntries())
+      .filter((entry) => inPeriod(entry, period) && (!allowedTypes || allowedTypes.includes(entry.type)))
+      .sort((left, right) => left.occurredAt.localeCompare(right.occurredAt) || left.id.localeCompare(right.id));
   }
 
-  getInbound(period: string): Promise<ReportEntry[]> { return this.listByType(period, ["INBOUND", "OPENING_BALANCE"]); }
-  getOutbound(period: string): Promise<ReportEntry[]> { return this.listByType(period, ["OUTBOUND"]); }
-  getTransfers(period: string): Promise<ReportEntry[]> { return this.listByType(period, ["TRANSFER_IN", "TRANSFER_OUT"]); }
-  getReturns(period: string): Promise<ReportEntry[]> { return this.listByType(period, ["RETURN"]); }
-  getAdjustments(period: string): Promise<ReportEntry[]> { return this.listByType(period, ["ADJUSTMENT", "STOCKTAKE_ADJUSTMENT"]); }
+  getInbound(period: string): Promise<ReportEntry[]> { return this.getByType(period, "inbound"); }
+  getOutbound(period: string): Promise<ReportEntry[]> { return this.getByType(period, "outbound"); }
+  getTransfers(period: string): Promise<ReportEntry[]> { return this.getByType(period, "transfers"); }
+  getReturns(period: string): Promise<ReportEntry[]> { return this.getByType(period, "returns"); }
+  getAdjustments(period: string): Promise<ReportEntry[]> { return this.getByType(period, "adjustments"); }
 }

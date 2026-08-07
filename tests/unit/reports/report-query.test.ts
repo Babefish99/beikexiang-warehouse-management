@@ -26,4 +26,18 @@ describe("inventory report queries", () => {
     await expect(service.getReturns("2026-08")).resolves.toHaveLength(1);
     await expect(service.getAdjustments("2026-08")).resolves.toHaveLength(1);
   });
+
+  it("returns all transaction groups with quantity and amount columns for the selected period", async () => {
+    const service = new TransactionReportService(async () => entries);
+
+    await expect(service.getByType("2026-08", "all")).resolves.toEqual([
+      expect.objectContaining({ id: "1", type: "OPENING_BALANCE", quantity: "10", amount: "200.00" }),
+      expect.objectContaining({ id: "2", type: "INBOUND", quantity: "5", amount: "110.00" }),
+      expect.objectContaining({ id: "3", type: "OUTBOUND", quantity: "-4", amount: "80.00" }),
+      expect.objectContaining({ id: "4", type: "TRANSFER_OUT", quantity: "-2", amount: "40.00" }),
+      expect.objectContaining({ id: "5", type: "TRANSFER_IN", quantity: "2", amount: "40.00" }),
+      expect.objectContaining({ id: "6", type: "RETURN", quantity: "1", amount: "20.00" }),
+      expect.objectContaining({ id: "7", type: "ADJUSTMENT", quantity: "-1", amount: "20.00" }),
+    ]);
+  });
 });

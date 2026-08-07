@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
+import { Decimal } from "decimal.js";
 import { RolePolicy, type AuthenticatedUser } from "./application/auth/role-service.js";
 import { SessionService } from "./application/auth/session-service.js";
 import { ApprovalSyncService, InMemoryApprovalSyncStore } from "./application/wecom/approval-sync-service.js";
@@ -15,7 +16,7 @@ import { InMemoryMovementStore, TransferService } from "./application/inventory/
 import { ReturnService } from "./application/inventory/return-service.js";
 import { InMemoryStocktakeStore, StocktakeService } from "./application/inventory/stocktake-service.js";
 import { InMemoryAccountingPeriodStore, PeriodCloseService } from "./application/periods/period-close-service.js";
-import { InventoryReportService, TransactionReportService } from "./application/reports/report-query-service.js";
+import { InventoryReportService, TransactionReportService, type ReportEntry } from "./application/reports/report-query-service.js";
 import { InMemoryAuditService } from "./infrastructure/audit/audit-service.js";
 import { HttpApprovalGateway } from "./infrastructure/wecom/approval-gateway.js";
 import { ApprovalParser } from "./infrastructure/wecom/approval-parser.js";
@@ -53,6 +54,20 @@ function readCookie(header: string | undefined, name: string): string | null {
   return value ? decodeURIComponent(value.slice(name.length + 1)) : null;
 }
 
+function toReportEntry(entry: { id: string; occurredAt: string; warehouseId: string; itemId: string; type: string; quantity: string; unitCost: string; amount: string; referenceType: string }): ReportEntry {
+  return {
+    id: entry.id,
+    occurredAt: entry.occurredAt,
+    warehouseId: entry.warehouseId,
+    itemId: entry.itemId,
+    type: entry.type,
+    quantity: entry.quantity,
+    unitCost: entry.unitCost,
+    amount: entry.amount,
+    referenceType: entry.referenceType,
+  };
+}
+
 export function buildServer() {
   const app = Fastify({ logger: true });
   const apiBaseUrl = process.env.API_BASE_URL ?? "http://localhost:3001";
@@ -67,15 +82,15 @@ export function buildServer() {
   const auditService = new InMemoryAuditService();
   const itemRepository = new InMemoryItemRepository();
   const itemService = new ItemService(itemRepository);
-  const outboundService = new OutboundService(new InMemoryOutboundStore());
+  const outboundStore = new InMemoryOutboundStore();
+  const outboundService = new OutboundService(outboundStore);
   const movementStore = new InMemoryMovementStore();
   const transferService = new TransferService(movementStore);
   const returnService = new ReturnService(movementStore);
   const periodStore = new InMemoryAccountingPeriodStore();
-  const stocktakeService = new StocktakeService(new InMemoryStocktakeStore(), periodStore);
+  const stocktakeStore = new InMemoryStocktakeStore();
+  const stocktakeService = new StocktakeService(stocktakeStore, periodStore);
   const periodCloseService = new PeriodCloseService(periodStore);
-  const inventoryReportService = new InventoryReportService(async () => []);
-  const transactionReportService = new TransactionReportService(async () => []);
   const warehouseService = new WarehouseService(new InMemoryWarehouseRepository([
     { id: "warehouse-1", code: "WH-01", name: "待配置仓库一", isActive: true, isPlaceholder: true },
     { id: "warehouse-2", code: "WH-02", name: "待配置仓库二", isActive: true, isPlaceholder: true },
@@ -84,6 +99,24 @@ export function buildServer() {
   const inventoryEntryStore = new InMemoryInventoryEntryStore({ onRecordStockEntry: ({ itemId }) => itemRepository.markLedgerActivity(itemId) });
   const inboundService = new InboundService(inventoryEntryStore, { warehouseService, itemService });
   const openingStockService = new OpeningStockService(inventoryEntryStore, { warehouseService, itemService });
+  const listReportEntries = async (): Promise<ReportEntry[]> => [
+    ...inventoryEntryStore.ledger().map(toReportEntry),
+    ...outboundStore.ledger().map(toReportEntry),
+    ...movementStore.ledger().map(toReportEntry),
+    ...stocktakeStore.adjustments().map((entry) => ({
+      id: entry.stocktakeId,
+      occurredAt: entry.occurredAt,
+      warehouseId: entry.warehouseId,
+      itemId: entry.itemId,
+      type: "STOCKTAKE_ADJUSTMENT",
+      quantity: entry.quantityDelta,
+      unitCost: entry.unitCost,
+      amount: new Decimal(entry.quantityDelta).abs().mul(entry.unitCost).toFixed(2),
+      referenceType: "STOCKTAKE",
+    })),
+  ];
+  const inventoryReportService = new InventoryReportService(listReportEntries);
+  const transactionReportService = new TransactionReportService(listReportEntries);
   const oauthClient = new WeComOAuthClient({
     corpId: process.env.WE_COM_CORP_ID ?? "",
     agentId: process.env.WE_COM_AGENT_ID ?? "",

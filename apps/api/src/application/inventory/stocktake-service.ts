@@ -13,6 +13,7 @@ export interface StocktakeBalance {
 export interface StocktakeAdjustment {
   stocktakeId: string;
   operatorId: string;
+  occurredAt: string;
   warehouseId: string;
   itemId: string;
   batchId: string;
@@ -76,6 +77,7 @@ export class StocktakeService {
     this.store.record({
       stocktakeId,
       operatorId: input.operatorId?.trim() || "admin",
+      occurredAt: new Date().toISOString(),
       warehouseId: input.warehouseId,
       itemId: input.itemId,
       batchId: input.batchId,
