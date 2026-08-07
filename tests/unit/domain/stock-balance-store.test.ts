@@ -5,6 +5,17 @@ import { createAccountingPeriod, createAccountingPeriodService } from "../../../
 import { createInMemoryStockBalanceRepository } from "../../../apps/api/src/infrastructure/db/repositories.js";
 
 describe("atomic stock balance operations", () => {
+  it("rejects outbound when the selected batch has no stock balance", () => {
+    const stock = createInMemoryStockBalanceRepository();
+    const service = createInventoryTransactionService({ periodService: createAccountingPeriodService(), stockBalanceRepository: stock });
+
+    expect(() => service.recordOutbound({
+      period: createAccountingPeriod({ code: "2026-08" }),
+      approvalLine: { id: "line-1", approvalId: "approval-1", itemId: "item-1", requestedQuantity: "3", unit: "box" },
+      allocations: [{ warehouseId: "warehouse-1", itemId: "item-1", batchId: "missing", quantity: "3", remainingQuantity: "3", unitCost: "12.50" }],
+    })).toThrowError(/stock balance batch not found/i);
+  });
+
   it("decrements the selected batch before returning outbound ledger entries", () => {
     const stock = createInMemoryStockBalanceRepository();
     stock.seed({ batchId: "batch-1", warehouseId: "warehouse-1", itemId: "item-1", remainingQuantity: "10", unitCost: "12.50" });

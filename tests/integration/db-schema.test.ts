@@ -61,6 +61,13 @@ describe("database schema contract", () => {
     expect(schema).toMatch(/periodCode\s+String\s+@unique/);
   });
 
+  it("declares key foreign-key relations", () => {
+    expect(schema).toMatch(/role\s+Role\s+@relation\(fields: \[roleId\], references: \[id\]\)/);
+    expect(schema).toMatch(/category\s+ItemCategory\s+@relation\(fields: \[categoryId\], references: \[id\]\)/);
+    expect(schema).toMatch(/approvalRequest\s+ApprovalRequest\s+@relation\(fields: \[approvalRequestId\], references: \[id\]\)/);
+    expect(schema).toMatch(/batch\s+ProcurementBatch\s+@relation\(fields: \[batchId\], references: \[id\]\)/);
+  });
+
   it("seeds only structural placeholder data", () => {
     const seedData = getStructuralSeedData();
 

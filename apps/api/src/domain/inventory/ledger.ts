@@ -99,9 +99,7 @@ export function createInventoryTransactionService({ periodService, stockBalanceR
         entries.push({ id: crypto.randomUUID(), warehouseId: allocation.warehouseId, itemId: allocation.itemId, batchId: allocation.batchId, type: "OUTBOUND", quantity: quantity.negated().toString(), unitCost: unitCost.toString(), amount: amount(quantity, unitCost), referenceType: "OUTBOUND_ORDER", referenceId: input.approvalLine.approvalId, occurredAt: new Date().toISOString() });
       }
       for (const allocation of input.allocations) {
-        if (!stockBalanceRepository.get(allocation.warehouseId, allocation.batchId)) {
-          stockBalanceRepository.seed({ batchId: allocation.batchId, warehouseId: allocation.warehouseId, itemId: allocation.itemId, remainingQuantity: allocation.remainingQuantity, unitCost: allocation.unitCost });
-        }
+        if (!stockBalanceRepository.get(allocation.warehouseId, allocation.batchId)) throw new Error("stock balance batch not found");
       }
       stockBalanceRepository.decrementMany(input.allocations.map((allocation) => ({ ...allocation, expectedRemainingQuantity: allocation.remainingQuantity })));
       return entries;
@@ -113,9 +111,7 @@ export function createInventoryTransactionService({ periodService, stockBalanceR
       if (!source.eq(destination)) throw new Error("source and destination quantities must be equal");
       if (input.sourceWarehouseId === input.destinationWarehouseId) throw new Error("source and destination warehouses must differ");
       const unitCost = decimal(input.unitCost);
-      if (!stockBalanceRepository.get(input.sourceWarehouseId, input.batchId)) {
-        stockBalanceRepository.seed({ batchId: input.batchId, warehouseId: input.sourceWarehouseId, itemId: input.itemId, remainingQuantity: source.toString(), unitCost: unitCost.toString() });
-      }
+      if (!stockBalanceRepository.get(input.sourceWarehouseId, input.batchId)) throw new Error("source stock balance not found");
       stockBalanceRepository.transfer({ sourceWarehouseId: input.sourceWarehouseId, destinationWarehouseId: input.destinationWarehouseId, itemId: input.itemId, batchId: input.batchId, quantity: source.toString(), unitCost: unitCost.toString() });
       return [
         { id: crypto.randomUUID(), warehouseId: input.sourceWarehouseId, itemId: input.itemId, batchId: input.batchId, type: "TRANSFER_OUT", quantity: source.negated().toString(), unitCost: unitCost.toString(), amount: amount(source, unitCost), referenceType: "TRANSFER_ORDER", referenceId: input.referenceId, occurredAt: new Date().toISOString() },
