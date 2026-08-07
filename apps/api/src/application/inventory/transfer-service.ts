@@ -150,7 +150,7 @@ export class InMemoryMovementStore implements MovementStore {
 }
 
 export class TransferService {
-  constructor(private readonly store: MovementStore) {}
+  constructor(private readonly store: MovementStore, private readonly assertPeriodOpen?: () => void | Promise<void>) {}
 
   async listOptions(): Promise<{ balances: MovementBalance[] }> {
     return {
@@ -163,6 +163,7 @@ export class TransferService {
       throw new Error("warehouse, item, and batch are required");
     }
     if (!input.reason.trim()) throw new Error("reason is required");
+    await this.assertPeriodOpen?.();
     const result = await this.store.transfer(input);
     return { ...result, status: "COMPLETED" };
   }

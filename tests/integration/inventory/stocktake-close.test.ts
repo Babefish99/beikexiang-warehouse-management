@@ -36,6 +36,16 @@ describe("stocktake and period close", () => {
     await expect(service.close({ period, pendingOutboundCount: 0, unpostedAdjustmentCount: 0 })).resolves.toMatchObject({ status: "CLOSED", code: "2026-08" });
   });
 
+  it("uses server-side close checks instead of trusting client counts", async () => {
+    const service = new PeriodCloseService(new InMemoryAccountingPeriodStore(), {
+      getPendingOutboundCount: () => 1,
+      getUnpostedAdjustmentCount: () => 0,
+    });
+    const period = createAccountingPeriod({ code: "2026-08" });
+
+    await expect(service.close({ period, pendingOutboundCount: 0, unpostedAdjustmentCount: 0 })).rejects.toThrow("pending outbound items must be resolved");
+  });
+
   it("rejects stocktake after closing the period even when the request claims it is open", async () => {
     const app = Fastify();
     const stocktakeStore = new InMemoryStocktakeStore();

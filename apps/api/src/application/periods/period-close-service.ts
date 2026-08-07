@@ -7,6 +7,11 @@ export interface AccountingPeriodStore {
   save(period: AccountingPeriod): void;
 }
 
+export interface PeriodCloseChecks {
+  getPendingOutboundCount?: () => number | Promise<number>;
+  getUnpostedAdjustmentCount?: () => number | Promise<number>;
+}
+
 export class InMemoryAccountingPeriodStore implements AccountingPeriodStore {
   private readonly periods = new Map<string, AccountingPeriod>();
 
@@ -31,11 +36,17 @@ export class InMemoryAccountingPeriodStore implements AccountingPeriodStore {
 export class PeriodCloseService {
   private readonly periods = createAccountingPeriodService();
 
-  constructor(private readonly periodStore: AccountingPeriodStore = new InMemoryAccountingPeriodStore()) {}
+  constructor(private readonly periodStore: AccountingPeriodStore = new InMemoryAccountingPeriodStore(), private readonly checks: PeriodCloseChecks = {}) {}
 
-  async close(input: { period: AccountingPeriod; pendingOutboundCount: number; unpostedAdjustmentCount: number }): Promise<AccountingPeriod> {
-    if (input.pendingOutboundCount > 0) throw new Error("pending outbound items must be resolved");
-    if (input.unpostedAdjustmentCount > 0) throw new Error("unposted adjustments must be resolved");
+  async close(input: { period: AccountingPeriod; pendingOutboundCount?: number; unpostedAdjustmentCount?: number }): Promise<AccountingPeriod> {
+    const pendingOutboundCount = this.checks.getPendingOutboundCount
+      ? await this.checks.getPendingOutboundCount()
+      : input.pendingOutboundCount ?? 0;
+    const unpostedAdjustmentCount = this.checks.getUnpostedAdjustmentCount
+      ? await this.checks.getUnpostedAdjustmentCount()
+      : input.unpostedAdjustmentCount ?? 0;
+    if (pendingOutboundCount > 0) throw new Error("pending outbound items must be resolved");
+    if (unpostedAdjustmentCount > 0) throw new Error("unposted adjustments must be resolved");
     const current = this.periodStore.getOrCreate(input.period.code);
     this.periods.assertOpen(current);
     const closed = this.periods.close(current);

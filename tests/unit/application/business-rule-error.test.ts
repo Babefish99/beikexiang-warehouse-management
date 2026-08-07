@@ -10,6 +10,7 @@ describe("classifyAdminBusinessError", () => {
     "reason is required for partial or zero issue",
     "destination stock balance item mismatch",
     "stocktake quantity is invalid",
+    "unknown item option key: ITEM-UNKNOWN",
   ])("classifies domain validation error %s as bad request", (message) => {
     expect(classifyAdminBusinessError(new Error(message))).toMatchObject({
       message,

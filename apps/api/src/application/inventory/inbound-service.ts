@@ -100,7 +100,7 @@ function assertDate(value: string, field: string): string {
 }
 
 export class InboundService {
-  constructor(private readonly store: InventoryEntryStore, private readonly masterData: InventoryMasterDataServices) {}
+  constructor(private readonly store: InventoryEntryStore, private readonly masterData: InventoryMasterDataServices, private readonly assertPeriodOpen?: () => void | Promise<void>) {}
 
   async create(input: InboundInput): Promise<{ inboundId: string; batchIds: string[] }> {
     if (!input.warehouseId.trim()) throw new Error("warehouse is required");
@@ -110,6 +110,7 @@ export class InboundService {
     const quantity = assertNonNegative(input.quantity, "quantity");
     const unitCost = assertNonNegative(input.unitCost, "unit cost");
     if (unitCost.isZero() && !input.remark?.trim()) throw new Error("remark is required when unit cost is zero");
+    await this.assertPeriodOpen?.();
     const purchasedAt = assertDate(input.purchasedAt, "purchasedAt");
     const result = await this.store.recordStockEntry({ ...input, quantity: quantity.toString(), unitCost: unitCost.toString(), purchasedAt, productionDate: input.productionDate ? assertDate(input.productionDate, "productionDate") : undefined, expiryDate: input.expiryDate ? assertDate(input.expiryDate, "expiryDate") : undefined, ledgerType: "INBOUND", referenceType: "INBOUND_ORDER", referenceId: `inbound-${Date.now()}`, occurredAt: new Date().toISOString() });
     return { inboundId: result.orderId, batchIds: [result.batchId] };

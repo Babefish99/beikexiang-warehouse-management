@@ -91,15 +91,23 @@ export function buildServer() {
   const itemRepository = persistence.repositories.items;
   const itemService = new ItemService(itemRepository);
   const inventoryState = createInventoryMemoryState();
-  const outboundStore = new InMemoryOutboundStore(inventoryState);
-  const outboundService = new OutboundService(outboundStore);
-  const movementStore = new InMemoryMovementStore(inventoryState);
-  const transferService = new TransferService(movementStore);
-  const returnService = new ReturnService(movementStore);
   const periodStore = new InMemoryAccountingPeriodStore();
+  const assertCurrentPeriodOpen = () => {
+    const periodCode = new Date().toISOString().slice(0, 7);
+    const period = periodStore.getOrCreate(periodCode);
+    if (period.status !== "OPEN") throw new Error(`closed period: ${period.code}`);
+  };
+  const outboundStore = new InMemoryOutboundStore(inventoryState);
+  const outboundService = new OutboundService(outboundStore, assertCurrentPeriodOpen);
+  const movementStore = new InMemoryMovementStore(inventoryState);
+  const transferService = new TransferService(movementStore, assertCurrentPeriodOpen);
+  const returnService = new ReturnService(movementStore, assertCurrentPeriodOpen);
   const stocktakeStore = new InMemoryStocktakeStore(inventoryState);
   const stocktakeService = new StocktakeService(stocktakeStore, periodStore);
-  const periodCloseService = new PeriodCloseService(periodStore);
+  const periodCloseService = new PeriodCloseService(periodStore, {
+    getPendingOutboundCount: () => [...inventoryState.approvals.values()].filter((approval) => approval.outboundStatus === "PENDING_OUTBOUND").length,
+    getUnpostedAdjustmentCount: () => 0,
+  });
   const warehouseService = new WarehouseService(persistence.repositories.warehouses);
   const inventoryEntryStore = new InMemoryInventoryEntryStore(inventoryState, {
     onRecordStockEntry: ({ itemId }) => {
@@ -107,8 +115,8 @@ export function buildServer() {
       mutableRepository.markLedgerActivity?.(itemId);
     },
   });
-  const inboundService = new InboundService(inventoryEntryStore, { warehouseService, itemService });
-  const openingStockService = new OpeningStockService(inventoryEntryStore, { warehouseService, itemService });
+  const inboundService = new InboundService(inventoryEntryStore, { warehouseService, itemService }, assertCurrentPeriodOpen);
+  const openingStockService = new OpeningStockService(inventoryEntryStore, { warehouseService, itemService }, assertCurrentPeriodOpen);
   const listReportEntries = async (): Promise<ReportEntry[]> => inventoryState.ledger.map(toReportEntry);
   const inventoryReportService = new InventoryReportService(listReportEntries);
   const transactionReportService = new TransactionReportService(listReportEntries);

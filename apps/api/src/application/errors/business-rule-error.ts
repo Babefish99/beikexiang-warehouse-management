@@ -19,6 +19,7 @@ const BAD_REQUEST_PATTERNS = [
   /already closed/i,
   /cannot /i,
   /does not belong to/i,
+  /unknown item option key/i,
   /must /i,
   /mismatch/i,
   /exceeds/i,

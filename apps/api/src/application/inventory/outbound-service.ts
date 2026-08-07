@@ -159,7 +159,7 @@ function toPendingApproval(approval: InventoryApprovalState): PendingApproval {
 export class OutboundService {
   private readonly allocator = new OutboundAllocator();
 
-  constructor(private readonly store: OutboundStore) {}
+  constructor(private readonly store: OutboundStore, private readonly assertPeriodOpen?: () => void | Promise<void>) {}
 
   listPending(): Promise<PendingApproval[]> { return this.store.listPending(); }
 
@@ -182,10 +182,12 @@ export class OutboundService {
     if (approval.status !== "PENDING_OUTBOUND") throw new Error("approval is already closed");
     const batches = await this.store.listBatches(approval.lines.map((line) => line.itemId));
     const validation = this.allocator.validate({ lines: approval.lines, batches, allocations: input.allocations, reason: input.reason });
+    await this.assertPeriodOpen?.();
     return this.store.commitOutbound(approval, validation, input.reason);
   }
 
   async cancelBeforeIssue(input: { approvalId: string; reason: string }): Promise<{ approvalId: string; status: "VOIDED" }> {
+    await this.assertPeriodOpen?.();
     await this.store.cancelApproval(input.approvalId, input.reason);
     return { approvalId: input.approvalId, status: "VOIDED" };
   }

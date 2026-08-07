@@ -11,7 +11,7 @@ export interface OpeningStockRow {
 }
 
 export class OpeningStockService {
-  constructor(private readonly store: InventoryEntryStore, private readonly masterData: InventoryMasterDataServices) {}
+  constructor(private readonly store: InventoryEntryStore, private readonly masterData: InventoryMasterDataServices, private readonly assertPeriodOpen?: () => void | Promise<void>) {}
 
   async create(input: { verifiedBy: string; rows: OpeningStockRow[] }): Promise<{ batchIds: string[] }> {
     if (!input.verifiedBy.trim()) throw new Error("verified by is required");
@@ -25,6 +25,7 @@ export class OpeningStockService {
       const quantity = assertNonNegative(row.quantity, "quantity");
       const unitCost = assertNonNegative(row.unitCost, "unit cost");
       if (unitCost.isZero() && !row.remark?.trim()) throw new Error("remark is required when unit cost is zero");
+      await this.assertPeriodOpen?.();
       const result = await this.store.recordStockEntry({ warehouseId: row.warehouseId, itemId: row.itemId, batchNo: row.batchNo, quantity: quantity.toString(), unitCost: decimal(unitCost).toString(), purchasedAt: new Date().toISOString(), remark: row.remark, ledgerType: "OPENING_BALANCE", referenceType: "OPENING_STOCK", referenceId: `opening-${input.verifiedBy}-${Date.now()}`, occurredAt: new Date().toISOString() });
       batchIds.push(result.batchId);
     }
