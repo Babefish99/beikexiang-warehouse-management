@@ -277,7 +277,7 @@ model Stocktake {
 
 model StockAdjustment {
   id          String   @id @default(cuid())
-  stocktakeId String?
+  stocktakeId String
   periodCode  String
   warehouseId String
   itemId      String
@@ -288,7 +288,7 @@ model StockAdjustment {
   reason      String
   operatorId  String
   createdAt   DateTime @default(now())
-  stocktake   Stocktake? @relation(fields: [stocktakeId], references: [id])
+  stocktake   Stocktake @relation(fields: [stocktakeId], references: [id], onDelete: Restrict)
   period      AccountingPeriod @relation(fields: [periodCode], references: [periodCode])
   warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
   item        Item @relation(fields: [itemId], references: [id])
@@ -299,7 +299,7 @@ model InventoryLedgerEntry {
   id            String   @id @default(cuid())
   warehouseId   String
   itemId        String
-  batchId       String?
+  batchId       String
   type          String
   quantity      Decimal  @db.Decimal(18, 4)
   unitCost      Decimal  @db.Decimal(18, 4)
@@ -310,7 +310,7 @@ model InventoryLedgerEntry {
   createdAt     DateTime @default(now())
   warehouse     Warehouse @relation(fields: [warehouseId], references: [id])
   item          Item @relation(fields: [itemId], references: [id])
-  batch         ProcurementBatch? @relation(fields: [batchId], references: [id])
+  batch         ProcurementBatch @relation(fields: [batchId], references: [id], onDelete: Restrict)
 }
 
 model AccountingPeriod {

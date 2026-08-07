@@ -26,9 +26,9 @@
 7. Web 后台：
    [http://localhost:5174](http://localhost:5174)
 
-## 切换到 Prisma / PostgreSQL
+## Prisma schema / migration / seed
 
-如需验证 Prisma-backed adapter seam，请先准备可访问的 PostgreSQL，然后把 `.env` 改成：
+可以先准备可访问的 PostgreSQL 来验证 schema、迁移和结构化 seed：
 
 ```env
 PERSISTENCE_DRIVER=prisma
@@ -42,6 +42,8 @@ corepack pnpm db:migrate
 corepack pnpm db:seed
 ```
 
+当前 API 运行时不会接受 `PERSISTENCE_DRIVER=prisma`：核心库存、出库、调拨、退库、盘点和报表仍有内存业务 store，不能把部分 Prisma seam 当成生产持久化。API 在启动阶段会明确 fail-fast；在全业务 wiring 和真实 PostgreSQL 端到端验证完成前，请保持 `PERSISTENCE_DRIVER=memory` 运行本地开发。Prisma CLI 的迁移/seed 仍可单独使用 `DATABASE_URL` 验证。
+
 当前仓库不会导入历史 Excel。seed 只 upsert 结构化基础数据：
 
 - 3 个仓库：`WH-01` / `WH-02` / `WH-03`
@@ -50,21 +52,22 @@ corepack pnpm db:seed
 ## 启动与安全约束
 
 - `PERSISTENCE_DRIVER=memory` 仅适用于开发/演示；`NODE_ENV=production` 下会拒绝启动
-- `PERSISTENCE_DRIVER=prisma` 需要提供 `DATABASE_URL`
+- `PERSISTENCE_DRIVER=prisma` 当前会在 API 启动阶段被拒绝，原因是核心库存业务尚未全部接入 durable persistence
 - `LOCAL_AUTH_BYPASS=true` 只在非生产环境生效
 - 本地 bypass 只接受 loopback 来源与 loopback/配置主机名
 - 企业微信生产回调启用时，`API_BASE_URL` 必须是 HTTPS
 
 ## 企业微信上线前检查清单
 
-在 Friday, August 7, 2026 这次交付中，仓库只补到了“上线前配置与 seam”，没有伪造真实生产联通。上线前仍需你在真实环境完成：
+截至 Saturday, August 8, 2026，仓库只补到了“上线前配置与 seam”，没有伪造真实生产联通。上线前仍需你在真实环境完成：
 
 1. 部署可公网访问的 HTTPS API 域名
 2. 将 `API_BASE_URL` 设置为对应 HTTPS 地址
 3. 在企业微信后台配置回调 URL、Token、EncodingAESKey
 4. 提供真实 `WE_COM_CORP_ID`、`WE_COM_AGENT_ID`、`WE_COM_SECRET`
-5. 切换 `PERSISTENCE_DRIVER=prisma`
-6. 跑迁移与 seed，确认数据库连通
-7. 用真实企业微信账号完成一次登录与审批回调验收
+5. 完成库存、出库、调拨、退库、盘点和报表的全业务 Prisma wiring
+6. 解除 API 对 `PERSISTENCE_DRIVER=prisma` 的启动阻断，并跑真实 PostgreSQL 端到端验收
+7. 跑迁移与 seed，确认数据库连通
+8. 用真实企业微信账号完成一次登录与审批回调验收
 
 在这些条件满足前，不应声称“企业微信生产连接已完成”。

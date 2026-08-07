@@ -1,7 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createPersistenceAdapters, readServerConfig } from "../../../apps/api/src/infrastructure/db/runtime.js";
 import { InMemoryAuditService } from "../../../apps/api/src/infrastructure/audit/audit-service.js";
+import { buildServer } from "../../../apps/api/src/server.js";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("server runtime configuration", () => {
   it("defaults to in-memory persistence outside production", () => {
@@ -52,6 +57,19 @@ describe("server runtime configuration", () => {
       WE_COM_AGENT_ID: "1000001",
       WE_COM_SECRET: "secret",
     })).toThrowError("API_BASE_URL must use HTTPS when Enterprise WeChat callbacks are enabled in production");
+  });
+
+  it("does not start a fake prisma service while core inventory persistence is incomplete", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("PERSISTENCE_DRIVER", "prisma");
+    vi.stubEnv("DATABASE_URL", "postgresql://warehouse:warehouse@db:5432/warehouse");
+    vi.stubEnv("API_BASE_URL", "http://localhost:3001");
+    vi.stubEnv("WEB_BASE_URL", "http://localhost:5174");
+    vi.stubEnv("SESSION_SECRET", "test-session-secret");
+
+    expect(() => buildServer()).toThrowError(
+      "PERSISTENCE_DRIVER=prisma is disabled until all core inventory flows use durable persistence",
+    );
   });
 });
 

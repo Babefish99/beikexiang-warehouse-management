@@ -10,6 +10,9 @@ import { InMemoryAuditService, type AuditEvent, type AuditService } from "../aud
 
 export type PersistenceDriver = "memory" | "prisma";
 
+export const PRISMA_RUNTIME_BLOCKED_ERROR =
+  "PERSISTENCE_DRIVER=prisma is disabled until all core inventory flows use durable persistence";
+
 export interface ServerConfig {
   persistenceDriver: PersistenceDriver;
   databaseUrl?: string;
@@ -97,6 +100,10 @@ export function readServerConfig(env: Record<string, string | undefined>): Serve
 
   if (nodeEnv === "production" && hasProductionWeComCallbackConfig(env) && !apiBaseUrl.startsWith("https://")) {
     throw new Error("API_BASE_URL must use HTTPS when Enterprise WeChat callbacks are enabled in production");
+  }
+
+  if (persistenceDriver === "prisma") {
+    throw new Error(PRISMA_RUNTIME_BLOCKED_ERROR);
   }
 
   return {

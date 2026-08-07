@@ -10,6 +10,10 @@ const schema = readFileSync(schemaPath, "utf8");
 const prismaConfigPath = resolve(process.cwd(), "prisma.config.ts");
 const prismaConfig = readFileSync(prismaConfigPath, "utf8");
 
+function modelBody(modelName: string): string {
+  return schema.match(new RegExp(`model ${modelName} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? "";
+}
+
 describe("database schema contract", () => {
   it("declares the full Task 1 model list", () => {
     const requiredModels = [
@@ -80,6 +84,16 @@ describe("database schema contract", () => {
   it("anchors approval applicants and audit actors back to users with restrictive deletes", () => {
     expect(schema).toMatch(/applicant\s+User\s+@relation\(fields: \[applicantUserId\], references: \[id\], onDelete: Restrict\)/);
     expect(schema).toMatch(/actor\s+User\s+@relation\(fields: \[actorUserId\], references: \[id\], onDelete: Restrict\)/);
+  });
+
+  it("requires restrictive stocktake and batch lineage for confirmed records", () => {
+    const stockAdjustment = modelBody("StockAdjustment");
+    const ledgerEntry = modelBody("InventoryLedgerEntry");
+
+    expect(stockAdjustment).toMatch(/^\s*stocktakeId\s+String\s*$/m);
+    expect(stockAdjustment).toMatch(/stocktake\s+Stocktake\s+@relation\(fields: \[stocktakeId\], references: \[id\], onDelete: Restrict\)/);
+    expect(ledgerEntry).toMatch(/^\s*batchId\s+String\s*$/m);
+    expect(ledgerEntry).toMatch(/batch\s+ProcurementBatch\s+@relation\(fields: \[batchId\], references: \[id\], onDelete: Restrict\)/);
   });
 
   it("keeps stock balances and confirmed relations uniquely scoped", () => {

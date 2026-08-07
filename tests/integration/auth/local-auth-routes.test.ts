@@ -1,6 +1,11 @@
+import Fastify from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { isLocalAuthEnabled } from "../../../apps/api/src/application/auth/local-auth.js";
+import { SessionService } from "../../../apps/api/src/application/auth/session-service.js";
 import { buildServer } from "../../../apps/api/src/server.js";
+import { InMemoryAuditService } from "../../../apps/api/src/infrastructure/audit/audit-service.js";
+import { registerLocalAuthRoutes } from "../../../apps/api/src/routes/auth/local-auth.js";
 
 describe("local auth routes", () => {
   beforeEach(() => {
@@ -126,19 +131,23 @@ describe("local auth routes", () => {
   });
 
   it("does not expose local auth in production even when the flag is true", async () => {
-    vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("LOCAL_AUTH_BYPASS", "true");
-    vi.stubEnv("PERSISTENCE_DRIVER", "prisma");
-    vi.stubEnv("DATABASE_URL", "postgresql://warehouse:warehouse@db:5432/warehouse");
-    vi.stubEnv("API_BASE_URL", "https://warehouse.example.com");
-    const app = buildServer();
+    const app = Fastify();
+    registerLocalAuthRoutes(app, {
+      enabled: isLocalAuthEnabled({ bypassEnabled: true, nodeEnv: "production" }),
+      apiBaseUrl: "https://warehouse.example.com",
+      webBaseUrl: "https://warehouse-web.example.com",
+      sessionService: new SessionService("test-session-secret"),
+      auditService: new InMemoryAuditService(),
+    });
 
     try {
-      const metadata = await app.inject({ method: "GET", url: "/auth/wecom/authorize?returnTo=/" });
-      const local = await app.inject({ method: "GET", url: "/auth/local", remoteAddress: "127.0.0.1" });
+      const local = await app.inject({
+        method: "GET",
+        url: "/auth/local",
+        remoteAddress: "127.0.0.1",
+        headers: { host: "warehouse.example.com" },
+      });
 
-      expect(metadata.statusCode).toBe(200);
-      expect(metadata.json()).not.toHaveProperty("localAuthUrl");
       expect(local.statusCode).toBe(404);
       expect(local.headers["set-cookie"]).toBeUndefined();
     } finally {
