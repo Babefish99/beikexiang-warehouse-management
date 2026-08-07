@@ -3,12 +3,16 @@ import cors from "@fastify/cors";
 import { RolePolicy, type AuthenticatedUser } from "./application/auth/role-service.js";
 import { SessionService } from "./application/auth/session-service.js";
 import { ApprovalSyncService, InMemoryApprovalSyncStore } from "./application/wecom/approval-sync-service.js";
+import { InMemoryItemRepository, ItemService } from "./application/items/item-service.js";
+import { InMemoryWarehouseRepository, WarehouseService } from "./application/warehouses/warehouse-service.js";
 import { InMemoryAuditService } from "./infrastructure/audit/audit-service.js";
 import { HttpApprovalGateway } from "./infrastructure/wecom/approval-gateway.js";
 import { ApprovalParser } from "./infrastructure/wecom/approval-parser.js";
 import { WeComOAuthClient } from "./infrastructure/wecom/oauth-client.js";
 import { WeComSignatureVerifier } from "./infrastructure/wecom/signature-verifier.js";
 import { registerApprovalResyncRoute } from "./routes/admin/approvals-resync.js";
+import { registerItemRoutes } from "./routes/admin/items.js";
+import { registerWarehouseRoutes } from "./routes/admin/warehouses.js";
 import { registerApprovalCallbackRoute } from "./routes/wecom/approval-callback.js";
 
 const SESSION_COOKIE = "warehouse_session";
@@ -31,6 +35,12 @@ export function buildServer() {
   void app.register(cors, { origin: process.env.WEB_BASE_URL ?? "http://localhost:5174", credentials: true });
   const sessionService = new SessionService(process.env.SESSION_SECRET ?? "local-development-session-secret");
   const auditService = new InMemoryAuditService();
+  const itemService = new ItemService(new InMemoryItemRepository());
+  const warehouseService = new WarehouseService(new InMemoryWarehouseRepository([
+    { id: "warehouse-1", code: "WH-01", name: "待配置仓库一", isActive: true, isPlaceholder: true },
+    { id: "warehouse-2", code: "WH-02", name: "待配置仓库二", isActive: true, isPlaceholder: true },
+    { id: "warehouse-3", code: "WH-03", name: "待配置仓库三", isActive: true, isPlaceholder: true },
+  ]));
   const oauthClient = new WeComOAuthClient({
     corpId: process.env.WE_COM_CORP_ID ?? "",
     agentId: process.env.WE_COM_AGENT_ID ?? "",
@@ -39,7 +49,7 @@ export function buildServer() {
   });
   const approvalSyncService = new ApprovalSyncService({
     gateway: new HttpApprovalGateway({ corpId: process.env.WE_COM_CORP_ID ?? "", secret: process.env.WE_COM_SECRET ?? "" }),
-    parser: new ApprovalParser(() => undefined),
+    parser: new ApprovalParser((optionKey) => itemService.resolveByWeComOptionKey(optionKey)),
     store: new InMemoryApprovalSyncStore(),
   });
   const signatureVerifier = new WeComSignatureVerifier({ token: process.env.WE_COM_CALLBACK_TOKEN ?? "", encodingAesKey: process.env.WE_COM_ENCODING_AES_KEY ?? "", corpId: process.env.WE_COM_CORP_ID ?? "" });
@@ -78,6 +88,8 @@ export function buildServer() {
 
   registerApprovalCallbackRoute(app, { verifier: signatureVerifier, syncService: approvalSyncService });
   registerApprovalResyncRoute(app, { syncService: approvalSyncService });
+  registerItemRoutes(app, { itemService });
+  registerWarehouseRoutes(app, { warehouseService });
 
   return app;
 }
