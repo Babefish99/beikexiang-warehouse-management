@@ -1,9 +1,9 @@
 import type { FastifyInstance } from "fastify";
 
-import { isAllowedLocalAuthHost, isLoopbackAddress, localAdminUser } from "../../application/auth/local-auth.js";
+import { isAllowedLocalAuthHost, isLoopbackAddress, localUserForRole } from "../../application/auth/local-auth.js";
 import { WeComOAuthClient } from "../../infrastructure/wecom/oauth-client.js";
 import type { SessionService } from "../../application/auth/session-service.js";
-import type { InMemoryAuditService } from "../../infrastructure/audit/audit-service.js";
+import type { AuditService } from "../../infrastructure/audit/audit-service.js";
 
 const SESSION_COOKIE = "warehouse_session";
 
@@ -34,7 +34,7 @@ export function registerLocalAuthRoutes(
     apiBaseUrl: string;
     webBaseUrl: string;
     sessionService: Pick<SessionService, "createSession" | "cookieOptions">;
-    auditService: Pick<InMemoryAuditService, "record">;
+    auditService: Pick<AuditService, "record">;
   },
 ): void {
   const oauthClient = new WeComOAuthClient({
@@ -44,7 +44,7 @@ export function registerLocalAuthRoutes(
     redirectUri: `${dependencies.webBaseUrl}/auth/local`,
   });
 
-  app.get<{ Querystring: { returnTo?: string } }>("/auth/local", async (request, reply) => {
+  app.get<{ Querystring: { returnTo?: string; role?: string } }>("/auth/local", async (request, reply) => {
     if (
       !dependencies.enabled
       || !isLoopbackAddress(request.ip)
@@ -53,7 +53,13 @@ export function registerLocalAuthRoutes(
       return reply.code(404).send({ error: "local_auth_unavailable" });
     }
 
-    const user = localAdminUser();
+    let user;
+    try {
+      user = localUserForRole(request.query.role);
+    } catch {
+      return reply.code(400).send({ error: "invalid_local_auth_role" });
+    }
+
     const token = dependencies.sessionService.createSession(user);
     const safeReturnTo = oauthClient.decodeReturnTo(encodeReturnTo(request.query.returnTo ?? "/"));
 

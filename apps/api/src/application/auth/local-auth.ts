@@ -1,10 +1,24 @@
 import type { AuthenticatedUser } from "./role-service.js";
 
-const LOCAL_ADMIN_USER: AuthenticatedUser = {
-  id: "local-admin",
-  weComUserId: "local-admin",
-  name: "本地管理员",
-  role: "ADMIN",
+const LOCAL_USERS: Record<AuthenticatedUser["role"], AuthenticatedUser> = {
+  ADMIN: {
+    id: "local-admin",
+    weComUserId: "local-admin",
+    name: "本地管理员",
+    role: "ADMIN",
+  },
+  FINANCE: {
+    id: "local-finance",
+    weComUserId: "local-finance",
+    name: "本地财务",
+    role: "FINANCE",
+  },
+  APPLICANT: {
+    id: "local-applicant",
+    weComUserId: "local-applicant",
+    name: "本地领用人",
+    role: "APPLICANT",
+  },
 };
 
 export function isLocalAuthEnabled(options: { bypassEnabled: boolean; nodeEnv?: string }): boolean {
@@ -58,5 +72,13 @@ export function isAllowedLocalAuthHost(options: { hostHeader?: string; apiBaseUr
 }
 
 export function localAdminUser(): AuthenticatedUser {
-  return { ...LOCAL_ADMIN_USER };
+  return { ...LOCAL_USERS.ADMIN };
+}
+
+export function localUserForRole(role?: string): AuthenticatedUser {
+  const normalized = role?.trim().toUpperCase();
+  if (!normalized || normalized === "ADMIN") return localAdminUser();
+  if (normalized === "FINANCE") return { ...LOCAL_USERS.FINANCE };
+  if (normalized === "APPLICANT") return { ...LOCAL_USERS.APPLICANT };
+  throw new Error(`unsupported local auth role: ${role}`);
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AuthenticatedUser } from "../../../apps/api/src/application/auth/role-service.js";
-import { isAllowedLocalAuthHost, isLocalAuthEnabled, isLoopbackAddress, localAdminUser } from "../../../apps/api/src/application/auth/local-auth.js";
+import { isAllowedLocalAuthHost, isLocalAuthEnabled, isLoopbackAddress, localAdminUser, localUserForRole } from "../../../apps/api/src/application/auth/local-auth.js";
 
 describe("local auth policy", () => {
   it("enables local auth only when the flag is true outside production", () => {
@@ -34,5 +34,21 @@ describe("local auth policy", () => {
       role: "ADMIN",
     });
     expect(localAdminUser()).not.toBe(user);
+  });
+
+  it("returns fixed local identities for explicit development roles", () => {
+    expect(localUserForRole("FINANCE")).toEqual<AuthenticatedUser>({
+      id: "local-finance",
+      weComUserId: "local-finance",
+      name: "本地财务",
+      role: "FINANCE",
+    });
+    expect(localUserForRole("APPLICANT")).toEqual<AuthenticatedUser>({
+      id: "local-applicant",
+      weComUserId: "local-applicant",
+      name: "本地领用人",
+      role: "APPLICANT",
+    });
+    expect(() => localUserForRole("guest")).toThrowError("unsupported local auth role: guest");
   });
 });

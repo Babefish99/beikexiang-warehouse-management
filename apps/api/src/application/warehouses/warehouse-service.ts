@@ -48,6 +48,10 @@ export class WarehouseService {
     return this.repository.list(includeInactive);
   }
 
+  listActive(): Promise<WarehouseDefinition[]> {
+    return this.repository.list(false);
+  }
+
   async update(warehouseId: string, input: WarehouseUpdateInput): Promise<WarehouseDefinition> {
     const current = await this.repository.get(warehouseId);
     if (!current) throw new Error(`warehouse not found: ${warehouseId}`);

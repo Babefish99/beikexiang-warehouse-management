@@ -14,6 +14,7 @@ model User {
   isActive   Boolean  @default(true)
   createdAt  DateTime @default(now())
   role       Role     @relation(fields: [roleId], references: [id])
+  approvalRequests ApprovalRequest[]
   auditLogs  AuditLog[]
 }
 
@@ -60,7 +61,7 @@ model Item {
   unit            String
   categoryId      String
   weComOptionKey  String?  @unique
-  minimumStock    Decimal?
+  minimumStock    Decimal? @db.Decimal(18, 4)
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -88,6 +89,7 @@ model ApprovalRequest {
   approvedAt      DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+  applicant       User     @relation(fields: [applicantUserId], references: [id], onDelete: Restrict)
   lines           ApprovalLine[]
   outboundOrder   OutboundOrder?
 }
@@ -96,10 +98,10 @@ model ApprovalLine {
   id                 String   @id @default(cuid())
   approvalRequestId  String
   itemId             String
-  requestedQuantity  Decimal
+  requestedQuantity  Decimal  @db.Decimal(18, 4)
   unit               String
   createdAt          DateTime @default(now())
-  approvalRequest    ApprovalRequest @relation(fields: [approvalRequestId], references: [id])
+  approvalRequest    ApprovalRequest @relation(fields: [approvalRequestId], references: [id], onDelete: Restrict)
   item               Item @relation(fields: [itemId], references: [id])
   outboundAllocations OutboundAllocation[]
 }
@@ -122,9 +124,9 @@ model InboundLine {
   inboundOrderId String
   itemId         String
   batchId        String
-  quantity       Decimal
-  unitCost       Decimal
-  amount         Decimal
+  quantity       Decimal  @db.Decimal(18, 4)
+  unitCost       Decimal  @db.Decimal(18, 4)
+  amount         Decimal  @db.Decimal(18, 2)
   inboundOrder   InboundOrder @relation(fields: [inboundOrderId], references: [id])
   batch          ProcurementBatch @relation(fields: [batchId], references: [id])
   item           Item @relation(fields: [itemId], references: [id])
@@ -135,9 +137,9 @@ model ProcurementBatch {
   warehouseId       String
   itemId            String
   batchNo           String
-  quantity          Decimal
-  remainingQuantity Decimal
-  unitCost          Decimal
+  quantity          Decimal  @db.Decimal(18, 4)
+  remainingQuantity Decimal  @db.Decimal(18, 4)
+  unitCost          Decimal  @db.Decimal(18, 4)
   purchasedAt       DateTime
   productionDate    DateTime?
   expiryDate        DateTime?
@@ -160,13 +162,13 @@ model StockBalance {
   warehouseId       String
   itemId            String
   batchId           String
-  remainingQuantity Decimal
-  unitCost          Decimal
+  remainingQuantity Decimal  @db.Decimal(18, 4)
+  unitCost          Decimal  @db.Decimal(18, 4)
   updatedAt         DateTime @updatedAt
   warehouse         Warehouse @relation(fields: [warehouseId], references: [id])
   item              Item @relation(fields: [itemId], references: [id])
   batch             ProcurementBatch @relation(fields: [batchId], references: [id])
-  @@unique([warehouseId, batchId])
+  @@unique([warehouseId, itemId, batchId])
 }
 
 model OutboundOrder {
@@ -174,13 +176,13 @@ model OutboundOrder {
   approvalRequestId String   @unique
   orderNo           String   @unique
   status            String
-  actualQuantity    Decimal
-  amount            Decimal
+  actualQuantity    Decimal  @db.Decimal(18, 4)
+  amount            Decimal  @db.Decimal(18, 2)
   reason            String?
   issuedAt          DateTime?
   operatorId        String
   createdAt         DateTime @default(now())
-  approvalRequest   ApprovalRequest @relation(fields: [approvalRequestId], references: [id])
+  approvalRequest   ApprovalRequest @relation(fields: [approvalRequestId], references: [id], onDelete: Restrict)
   allocations       OutboundAllocation[]
   returns           ReturnOrder[] @relation("OriginalOutbound")
 }
@@ -192,11 +194,11 @@ model OutboundAllocation {
   warehouseId       String
   itemId            String
   batchId           String
-  originalQuantity  Decimal
-  quantity          Decimal
-  unitCost          Decimal
-  amount            Decimal
-  outboundOrder     OutboundOrder @relation(fields: [outboundOrderId], references: [id])
+  originalQuantity  Decimal  @db.Decimal(18, 4)
+  quantity          Decimal  @db.Decimal(18, 4)
+  unitCost          Decimal  @db.Decimal(18, 4)
+  amount            Decimal  @db.Decimal(18, 2)
+  outboundOrder     OutboundOrder @relation(fields: [outboundOrderId], references: [id], onDelete: Restrict)
   approvalLine      ApprovalLine @relation(fields: [approvalLineId], references: [id])
   warehouse         Warehouse @relation(fields: [warehouseId], references: [id])
   item              Item @relation(fields: [itemId], references: [id])
@@ -224,9 +226,9 @@ model TransferLine {
   transferOrderId String
   itemId          String
   batchId         String
-  quantity        Decimal
-  unitCost        Decimal
-  amount          Decimal
+  quantity        Decimal  @db.Decimal(18, 4)
+  unitCost        Decimal  @db.Decimal(18, 4)
+  amount          Decimal  @db.Decimal(18, 2)
   transferOrder   TransferOrder @relation(fields: [transferOrderId], references: [id])
   item            Item @relation(fields: [itemId], references: [id])
   batch           ProcurementBatch @relation(fields: [batchId], references: [id])
@@ -252,11 +254,11 @@ model ReturnLine {
   outboundAllocationId  String
   itemId                String
   batchId               String
-  quantity              Decimal
-  unitCost              Decimal
-  amount                Decimal
+  quantity              Decimal  @db.Decimal(18, 4)
+  unitCost              Decimal  @db.Decimal(18, 4)
+  amount                Decimal  @db.Decimal(18, 2)
   returnOrder           ReturnOrder @relation(fields: [returnOrderId], references: [id])
-  outboundAllocation    OutboundAllocation @relation(fields: [outboundAllocationId], references: [id])
+  outboundAllocation    OutboundAllocation @relation(fields: [outboundAllocationId], references: [id], onDelete: Restrict)
   item                  Item @relation(fields: [itemId], references: [id])
   batch                 ProcurementBatch @relation(fields: [batchId], references: [id])
 }
@@ -280,9 +282,9 @@ model StockAdjustment {
   warehouseId String
   itemId      String
   batchId     String
-  quantity    Decimal
-  unitCost    Decimal
-  amount      Decimal
+  quantity    Decimal  @db.Decimal(18, 4)
+  unitCost    Decimal  @db.Decimal(18, 4)
+  amount      Decimal  @db.Decimal(18, 2)
   reason      String
   operatorId  String
   createdAt   DateTime @default(now())
@@ -299,9 +301,9 @@ model InventoryLedgerEntry {
   itemId        String
   batchId       String?
   type          String
-  quantity      Decimal
-  unitCost      Decimal
-  amount        Decimal
+  quantity      Decimal  @db.Decimal(18, 4)
+  unitCost      Decimal  @db.Decimal(18, 4)
+  amount        Decimal  @db.Decimal(18, 2)
   referenceType String
   referenceId   String
   occurredAt    DateTime
@@ -342,5 +344,5 @@ model AuditLog {
   beforeData  Json?
   afterData   Json?
   createdAt   DateTime @default(now())
-  actor       User @relation(fields: [actorUserId], references: [id])
+  actor       User @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
 }
