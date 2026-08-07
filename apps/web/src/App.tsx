@@ -8,6 +8,10 @@ import { WarehousesPage } from "./pages/WarehousesPage";
 import { InboundPage } from "./pages/InboundPage";
 import { OpeningStockPage } from "./pages/OpeningStockPage";
 import { OutboundPage } from "./pages/OutboundPage";
+import { TransfersPage } from "./pages/TransfersPage";
+import { ReturnsPage } from "./pages/ReturnsPage";
+import { StocktakePage } from "./pages/StocktakePage";
+import { PeriodClosePage } from "./pages/PeriodClosePage";
 
 type WebUser = { id: string; weComUserId: string; name: string; role: "APPLICANT" | "ADMIN" | "FINANCE" };
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
@@ -50,6 +54,10 @@ export default function App() {
   if (window.location.pathname === "/admin/inbound") return <AdminLayout user={{ name: user.name, roleLabel: "库存管理员" }}><InboundPage /></AdminLayout>;
   if (window.location.pathname === "/admin/opening-stock") return <AdminLayout user={{ name: user.name, roleLabel: "库存管理员" }}><OpeningStockPage /></AdminLayout>;
   if (window.location.pathname === "/admin/outbound") return <AdminLayout user={{ name: user.name, roleLabel: "库存管理员" }}><OutboundPage /></AdminLayout>;
+  if (window.location.pathname === "/admin/transfers") return <AdminLayout user={{ name: user.name, roleLabel: "库存管理员" }}><TransfersPage /></AdminLayout>;
+  if (window.location.pathname === "/admin/returns") return <AdminLayout user={{ name: user.name, roleLabel: "库存管理员" }}><ReturnsPage /></AdminLayout>;
+  if (window.location.pathname === "/admin/stocktake") return <AdminLayout user={{ name: user.name, roleLabel: "库存管理员" }}><StocktakePage /></AdminLayout>;
+  if (window.location.pathname === "/admin/period-close") return <AdminLayout user={{ name: user.name, roleLabel: "库存管理员" }}><PeriodClosePage /></AdminLayout>;
 
   return (
     <AdminLayout user={{ name: "管理员", roleLabel: "库存管理员" }}>

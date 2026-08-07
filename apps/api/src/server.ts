@@ -8,6 +8,10 @@ import { InMemoryWarehouseRepository, WarehouseService } from "./application/war
 import { InMemoryInventoryEntryStore, InboundService } from "./application/inventory/inbound-service.js";
 import { OpeningStockService } from "./application/inventory/opening-stock-service.js";
 import { InMemoryOutboundStore, OutboundService } from "./application/inventory/outbound-service.js";
+import { InMemoryMovementStore, TransferService } from "./application/inventory/transfer-service.js";
+import { ReturnService } from "./application/inventory/return-service.js";
+import { InMemoryStocktakeStore, StocktakeService } from "./application/inventory/stocktake-service.js";
+import { PeriodCloseService } from "./application/periods/period-close-service.js";
 import { InMemoryAuditService } from "./infrastructure/audit/audit-service.js";
 import { HttpApprovalGateway } from "./infrastructure/wecom/approval-gateway.js";
 import { ApprovalParser } from "./infrastructure/wecom/approval-parser.js";
@@ -19,6 +23,10 @@ import { registerWarehouseRoutes } from "./routes/admin/warehouses.js";
 import { registerInboundRoutes } from "./routes/admin/inbound.js";
 import { registerOpeningStockRoutes } from "./routes/admin/opening-stock.js";
 import { registerOutboundRoutes } from "./routes/admin/outbound.js";
+import { registerTransferRoutes } from "./routes/admin/transfers.js";
+import { registerReturnRoutes } from "./routes/admin/returns.js";
+import { registerStocktakeRoutes } from "./routes/admin/stocktake.js";
+import { registerPeriodCloseRoutes } from "./routes/admin/period-close.js";
 import { registerApprovalCallbackRoute } from "./routes/wecom/approval-callback.js";
 
 const SESSION_COOKIE = "warehouse_session";
@@ -46,6 +54,11 @@ export function buildServer() {
   const inboundService = new InboundService(inventoryEntryStore);
   const openingStockService = new OpeningStockService(inventoryEntryStore);
   const outboundService = new OutboundService(new InMemoryOutboundStore());
+  const movementStore = new InMemoryMovementStore();
+  const transferService = new TransferService(movementStore);
+  const returnService = new ReturnService(movementStore);
+  const stocktakeService = new StocktakeService(new InMemoryStocktakeStore());
+  const periodCloseService = new PeriodCloseService();
   const warehouseService = new WarehouseService(new InMemoryWarehouseRepository([
     { id: "warehouse-1", code: "WH-01", name: "待配置仓库一", isActive: true, isPlaceholder: true },
     { id: "warehouse-2", code: "WH-02", name: "待配置仓库二", isActive: true, isPlaceholder: true },
@@ -103,6 +116,10 @@ export function buildServer() {
   registerInboundRoutes(app, { inboundService });
   registerOpeningStockRoutes(app, { openingStockService });
   registerOutboundRoutes(app, { outboundService });
+  registerTransferRoutes(app, { transferService });
+  registerReturnRoutes(app, { returnService });
+  registerStocktakeRoutes(app, { stocktakeService });
+  registerPeriodCloseRoutes(app, { periodCloseService });
 
   return app;
 }
