@@ -35,9 +35,9 @@ test.describe("master data administration", () => {
     });
     await page.route("http://127.0.0.1:3001/admin/items/item-1", async (route) => {
       await route.fulfill({
-        status: 500,
+        status: 400,
         contentType: "application/json",
-        body: JSON.stringify({ message: "item code cannot change after ledger activity" }),
+        body: JSON.stringify({ error: "item code cannot change after ledger activity" }),
       });
     });
 
@@ -111,7 +111,7 @@ test.describe("master data administration", () => {
       });
     });
     await page.route("http://127.0.0.1:3001/admin/inbound", async (route) => {
-      await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ message: "remark is required when unit cost is zero" }) });
+      await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "remark is required when unit cost is zero" }) });
     });
 
     await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Finbound");
@@ -151,7 +151,7 @@ test.describe("master data administration", () => {
       });
     });
     await page.route("http://127.0.0.1:3001/admin/opening-stock", async (route) => {
-      await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ message: "remark is required when unit cost is zero" }) });
+      await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "remark is required when unit cost is zero" }) });
     });
 
     await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Fopening-stock");

@@ -7,6 +7,6 @@ export default defineConfig({
     { command: "corepack pnpm --filter @warehouse/web dev", url: "http://localhost:5174", reuseExistingServer: true },
   ],
   use: {
-    baseURL: process.env.WEB_BASE_URL ?? "http://localhost:5174",
+    baseURL: process.env.WEB_BASE_URL ?? "http://127.0.0.1:5174",
   },
 });

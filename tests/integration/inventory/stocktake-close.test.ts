@@ -69,8 +69,8 @@ describe("stocktake and period close", () => {
         },
       });
 
-      expect(stocktakeResponse.statusCode).toBe(500);
-      expect(stocktakeResponse.json()).toMatchObject({ message: "closed period: 2026-08" });
+      expect(stocktakeResponse.statusCode).toBe(400);
+      expect(stocktakeResponse.json()).toEqual({ error: "closed period: 2026-08" });
       expect(stocktakeStore.balance("wh-1", "batch-1")?.bookQuantity).toBe("10");
     } finally {
       await app.close();

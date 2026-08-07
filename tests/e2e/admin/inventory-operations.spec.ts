@@ -32,7 +32,7 @@ test("transfer form shows server errors and preserves input", async ({ page }) =
     });
   });
   await page.route("http://127.0.0.1:3001/admin/transfers", async (route) => {
-    await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ message: "batch balance cannot become negative" }) });
+    await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "batch balance cannot become negative" }) });
   });
 
   await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Ftransfers");
@@ -89,7 +89,7 @@ test("return form shows server errors and preserves input", async ({ page }) => 
     });
   });
   await page.route("http://127.0.0.1:3001/admin/returns", async (route) => {
-    await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ message: "return stock balance item mismatch" }) });
+    await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "return stock balance item mismatch" }) });
   });
 
   await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Freturns");
@@ -140,7 +140,7 @@ test("stocktake form shows server errors and preserves input", async ({ page }) 
     });
   });
   await page.route("http://127.0.0.1:3001/admin/stocktake", async (route) => {
-    await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ message: "closed period: 2026-08" }) });
+    await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "closed period: 2026-08" }) });
   });
 
   await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Fstocktake");

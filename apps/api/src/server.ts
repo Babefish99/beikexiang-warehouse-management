@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import { Decimal } from "decimal.js";
 import { RolePolicy, type AuthenticatedUser } from "./application/auth/role-service.js";
 import { SessionService } from "./application/auth/session-service.js";
+import { classifyAdminBusinessError } from "./application/errors/business-rule-error.js";
 import type { ItemRepository } from "./application/items/item-service.js";
 import { ItemService } from "./application/items/item-service.js";
 import { InMemoryInventoryEntryStore, InboundService } from "./application/inventory/inbound-service.js";
@@ -25,6 +26,7 @@ import { ApprovalParser } from "./infrastructure/wecom/approval-parser.js";
 import { WeComOAuthClient } from "./infrastructure/wecom/oauth-client.js";
 import { WeComSignatureVerifier } from "./infrastructure/wecom/signature-verifier.js";
 import { registerApprovalResyncRoute } from "./routes/admin/approvals-resync.js";
+import "./routes/admin/admin-request-context.js";
 import { registerInboundRoutes } from "./routes/admin/inbound.js";
 import { registerItemRoutes } from "./routes/admin/items.js";
 import { registerOpeningStockRoutes } from "./routes/admin/opening-stock.js";
@@ -84,6 +86,8 @@ export function buildServer() {
 
   const sessionService = new SessionService(config.sessionSecret);
   const auditService = persistence.auditService;
+  app.decorateRequest("adminUser", undefined);
+  app.decorate("auditService", auditService);
   const itemRepository = persistence.repositories.items;
   const itemService = new ItemService(itemRepository);
   const inventoryState = createInventoryMemoryState();
@@ -134,6 +138,18 @@ export function buildServer() {
     const requiredPermission = request.url.startsWith("/admin/reports") ? "VIEW_REPORTS" as const : "VIEW_ADMIN" as const;
     if (!user) return reply.code(401).send({ error: "unauthorized" });
     if (!RolePolicy.can(user, requiredPermission)) return reply.code(403).send({ error: "forbidden" });
+    request.adminUser = user;
+  });
+
+  app.setErrorHandler((error, request, reply) => {
+    if (!request.url.startsWith("/admin")) {
+      return reply.send(error);
+    }
+    const businessError = classifyAdminBusinessError(error);
+    if (businessError) {
+      return reply.code(businessError.statusCode).send({ error: businessError.message });
+    }
+    return reply.send(error);
   });
 
   app.get("/health", async () => ({ status: "ok", service: "warehouse-api", persistenceDriver: persistence.driver }));

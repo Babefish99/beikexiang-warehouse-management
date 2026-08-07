@@ -35,16 +35,16 @@ describe("inventory master data validation", () => {
       url: "/admin/inbound",
       payload: { warehouseId: "wh-forged", itemId: activeItem.id, batchNo: "B-01", quantity: "1", unitCost: "10", purchasedAt: "2026-08-08" },
     });
-    expect(forgedWarehouse.statusCode).toBe(500);
-    expect(forgedWarehouse.json()).toMatchObject({ message: "warehouse is inactive or not found" });
+    expect(forgedWarehouse.statusCode).toBe(400);
+    expect(forgedWarehouse.json()).toEqual({ error: "warehouse is inactive or not found" });
 
     const inactiveItemResponse = await app.inject({
       method: "POST",
       url: "/admin/inbound",
       payload: { warehouseId: "wh-1", itemId: inactiveItem.id, batchNo: "B-02", quantity: "1", unitCost: "10", purchasedAt: "2026-08-08" },
     });
-    expect(inactiveItemResponse.statusCode).toBe(500);
-    expect(inactiveItemResponse.json()).toMatchObject({ message: "item is inactive or not found" });
+    expect(inactiveItemResponse.statusCode).toBe(400);
+    expect(inactiveItemResponse.json()).toEqual({ error: "item is inactive or not found" });
     expect(store.batches()).toHaveLength(0);
     await app.close();
   });
@@ -57,16 +57,16 @@ describe("inventory master data validation", () => {
       url: "/admin/opening-stock",
       payload: { verifiedBy: "admin-1", rows: [{ warehouseId: "wh-inactive", itemId: activeItem.id, batchNo: "OPEN-01", quantity: "1", unitCost: "10" }] },
     });
-    expect(inactiveWarehouse.statusCode).toBe(500);
-    expect(inactiveWarehouse.json()).toMatchObject({ message: "warehouse is inactive or not found" });
+    expect(inactiveWarehouse.statusCode).toBe(400);
+    expect(inactiveWarehouse.json()).toEqual({ error: "warehouse is inactive or not found" });
 
     const forgedItem = await app.inject({
       method: "POST",
       url: "/admin/opening-stock",
       payload: { verifiedBy: "admin-1", rows: [{ warehouseId: "wh-1", itemId: "item-forged", batchNo: "OPEN-02", quantity: "1", unitCost: "10" }] },
     });
-    expect(forgedItem.statusCode).toBe(500);
-    expect(forgedItem.json()).toMatchObject({ message: "item is inactive or not found" });
+    expect(forgedItem.statusCode).toBe(400);
+    expect(forgedItem.json()).toEqual({ error: "item is inactive or not found" });
     expect(store.batches()).toHaveLength(0);
     await app.close();
   });

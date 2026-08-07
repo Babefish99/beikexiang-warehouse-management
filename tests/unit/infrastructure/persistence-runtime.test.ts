@@ -93,4 +93,57 @@ describe("persistence adapters", () => {
       "auditLogs",
     ]);
   });
+
+  it("passes the expanded audit envelope through the prisma audit service JSON payload", async () => {
+    const auditCreate = vi.fn().mockResolvedValue(undefined);
+    const adapters = createPersistenceAdapters({
+      driver: "prisma",
+      prisma: {
+        auditLog: {
+          create: auditCreate,
+        },
+        user: {} as object,
+        warehouse: {} as object,
+        item: {} as object,
+        approvalRequest: {} as object,
+        procurementBatch: {} as object,
+        inventoryLedgerEntry: {} as object,
+        outboundOrder: {} as object,
+        transferOrder: {} as object,
+        returnOrder: {} as object,
+        stocktake: {} as object,
+        accountingPeriod: {} as object,
+        $disconnect: vi.fn(),
+      } as never,
+    });
+
+    await adapters.auditService.record({
+      actorUserId: "admin-1",
+      actorRole: "ADMIN",
+      action: "ITEM_CREATED",
+      entityType: "ITEM",
+      entityId: "item-1",
+      requestId: "req-1",
+      occurredAt: "2026-08-07T00:00:00.000Z",
+      status: "SUCCEEDED",
+      errorMessage: undefined,
+      afterData: { itemId: "item-1" },
+    });
+
+    expect(auditCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        actorUserId: "admin-1",
+        action: "ITEM_CREATED",
+        entityType: "ITEM",
+        entityId: "item-1",
+        requestId: "req-1",
+        afterData: expect.objectContaining({
+          itemId: "item-1",
+          actorRole: "ADMIN",
+          occurredAt: "2026-08-07T00:00:00.000Z",
+          status: "SUCCEEDED",
+        }),
+      }),
+    }));
+  });
 });

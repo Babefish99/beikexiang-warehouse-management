@@ -10,6 +10,8 @@ export interface AuditEvent {
   beforeData?: unknown;
   afterData?: unknown;
   occurredAt: string;
+  status?: "SUCCEEDED" | "FAILED";
+  errorMessage?: string;
 }
 
 export interface AuditService {

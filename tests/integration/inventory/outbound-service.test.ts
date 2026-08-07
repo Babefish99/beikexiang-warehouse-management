@@ -96,8 +96,8 @@ describe("outbound options route", () => {
     try {
       const response = await app.inject({ method: "GET", url: "/admin/outbound/missing-approval/options" });
 
-      expect(response.statusCode).toBe(500);
-      expect(response.json()).toMatchObject({ message: "approval not found: missing-approval" });
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toEqual({ error: "approval not found: missing-approval" });
     } finally {
       await app.close();
     }

@@ -59,8 +59,8 @@ describe("master data admin routes", () => {
       url: `/admin/items/${itemId}`,
       payload: { code: "TEA-0099", name: "Tea leaves premium", specification: "Iron Goddess", unit: "box", categoryId: "cat-tea" },
     });
-    expect(rejected.statusCode).toBe(500);
-    expect(rejected.json()).toMatchObject({ message: "item code cannot change after ledger activity" });
+    expect(rejected.statusCode).toBe(400);
+    expect(rejected.json()).toEqual({ error: "item code cannot change after ledger activity" });
 
     const deactivated = await app.inject({ method: "POST", url: `/admin/items/${itemId}/deactivate` });
     expect(deactivated.statusCode).toBe(204);

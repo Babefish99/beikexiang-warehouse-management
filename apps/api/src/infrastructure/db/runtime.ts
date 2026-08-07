@@ -78,6 +78,16 @@ function asJson(value: unknown): Prisma.InputJsonValue | Prisma.NullableJsonNull
   return value as Prisma.InputJsonValue;
 }
 
+function withAuditMetadata(event: AuditEvent): Record<string, unknown> {
+  return {
+    ...(typeof event.afterData === "object" && event.afterData !== null ? event.afterData as Record<string, unknown> : event.afterData === undefined ? {} : { value: event.afterData }),
+    actorRole: event.actorRole,
+    occurredAt: event.occurredAt,
+    status: event.status,
+    ...(event.errorMessage ? { errorMessage: event.errorMessage } : {}),
+  };
+}
+
 export function readServerConfig(env: Record<string, string | undefined>): ServerConfig {
   const nodeEnv = (env.NODE_ENV ?? "development").trim().toLowerCase();
   const persistenceDriver = parsePersistenceDriver(env.PERSISTENCE_DRIVER);
@@ -298,7 +308,7 @@ class PrismaAuditService implements AuditService {
         entityId: event.entityId,
         requestId: event.requestId,
         beforeData: asJson(structuredClone(event.beforeData)),
-        afterData: asJson(structuredClone(event.afterData)),
+        afterData: asJson(structuredClone(withAuditMetadata(event))),
       },
     });
   }
