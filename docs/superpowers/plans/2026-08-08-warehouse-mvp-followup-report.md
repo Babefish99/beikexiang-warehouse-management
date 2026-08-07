@@ -1,6 +1,6 @@
 # Warehouse MVP Follow-up Report
 
-> Saved under the requested `2026-08-08` filename. The implementation work summarized here was completed on **August 7, 2026**.
+> The implementation work summarized here was completed on **August 8, 2026**.
 
 ## Scope completed
 
@@ -27,6 +27,7 @@ This follow-up closed the broad review Critical/Important 1-2 items around share
 - `InMemoryApprovalSyncStore` now supports the shared approval state.
 - Saving an approved approval sync record makes it immediately visible to `/admin/outbound/pending`.
 - Closed-status protection is preserved when the same approval number is re-synchronized.
+- `ApprovalOutboundStatus` now reuses the shared-state type and preserves `COMPLETED`, `PARTIALLY_ISSUED`, `UNAVAILABLE`, and `VOIDED` during approved re-synchronization.
 - Approval lines are materialized into outbound line IDs so the same approval can flow directly into outbound confirmation.
 
 ## Pending/option synchronization results
@@ -49,11 +50,12 @@ This follow-up closed the broad review Critical/Important 1-2 items around share
 Focused red/green verification:
 
 - `corepack pnpm vitest run tests/unit/reports/report-query.test.ts tests/unit/wecom/approval-sync-service.test.ts tests/integration/inventory/shared-memory-state.test.ts tests/integration/reports/excel-export.test.ts`
+  - Follow-up regression covers all four closed outbound statuses, including `VOIDED` and `PARTIALLY_ISSUED`.
 
 Repository-wide unit/integration verification:
 
 - `corepack pnpm test`
-  - Result: `34` test files passed, `131` tests passed
+  - Result: `34` test files passed, `135` tests passed
 
 Relevant admin e2e verification:
 
@@ -71,6 +73,7 @@ All commands above completed successfully.
 ## Commits
 
 - Code implementation commit: `6018d46` (`fix: unify in-memory inventory state`)
+- Follow-up fix commit: `d5ab92f` (`fix: preserve closed approval outbound status`)
 
 ## Note
 
