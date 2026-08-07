@@ -36,6 +36,9 @@ importers:
       dotenv:
         specifier: ^16.6.0
         version: 16.6.0
+      fastify:
+        specifier: ^5.5.0
+        version: 5.11.2
       prisma:
         specifier: ^7.9.1
         version: 7.9.1(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@5.9.2)

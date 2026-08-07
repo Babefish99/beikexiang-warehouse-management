@@ -2,8 +2,14 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { RolePolicy, type AuthenticatedUser } from "./application/auth/role-service.js";
 import { SessionService } from "./application/auth/session-service.js";
+import { ApprovalSyncService, InMemoryApprovalSyncStore } from "./application/wecom/approval-sync-service.js";
 import { InMemoryAuditService } from "./infrastructure/audit/audit-service.js";
+import { HttpApprovalGateway } from "./infrastructure/wecom/approval-gateway.js";
+import { ApprovalParser } from "./infrastructure/wecom/approval-parser.js";
 import { WeComOAuthClient } from "./infrastructure/wecom/oauth-client.js";
+import { WeComSignatureVerifier } from "./infrastructure/wecom/signature-verifier.js";
+import { registerApprovalResyncRoute } from "./routes/admin/approvals-resync.js";
+import { registerApprovalCallbackRoute } from "./routes/wecom/approval-callback.js";
 
 const SESSION_COOKIE = "warehouse_session";
 
@@ -31,6 +37,12 @@ export function buildServer() {
     secret: process.env.WE_COM_SECRET ?? "",
     redirectUri: `${process.env.API_BASE_URL ?? "http://localhost:3001"}/auth/wecom/callback`,
   });
+  const approvalSyncService = new ApprovalSyncService({
+    gateway: new HttpApprovalGateway({ corpId: process.env.WE_COM_CORP_ID ?? "", secret: process.env.WE_COM_SECRET ?? "" }),
+    parser: new ApprovalParser(() => undefined),
+    store: new InMemoryApprovalSyncStore(),
+  });
+  const signatureVerifier = new WeComSignatureVerifier({ token: process.env.WE_COM_CALLBACK_TOKEN ?? "", encodingAesKey: process.env.WE_COM_ENCODING_AES_KEY ?? "", corpId: process.env.WE_COM_CORP_ID ?? "" });
 
   const getSessionUser = (request: { headers: { cookie?: string } }) => sessionService.readSession(readCookie(request.headers.cookie, SESSION_COOKIE) ?? "");
 
@@ -63,6 +75,9 @@ export function buildServer() {
     if (!user) return reply.code(401).send({ error: "unauthorized" });
     return { role: user.role, canViewAdmin: RolePolicy.can(user, "VIEW_ADMIN"), canViewReports: RolePolicy.can(user, "VIEW_REPORTS") };
   });
+
+  registerApprovalCallbackRoute(app, { verifier: signatureVerifier, syncService: approvalSyncService });
+  registerApprovalResyncRoute(app, { syncService: approvalSyncService });
 
   return app;
 }
