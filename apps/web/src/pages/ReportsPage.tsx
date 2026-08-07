@@ -45,11 +45,13 @@ export function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [queryAvailable, setQueryAvailable] = useState(true);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [queryAvailable, setQueryAvailable] = useState(false);
 
   const load = async () => {
     setLoading(true);
     setError(null);
+    setExportError(null);
     try {
       const [summaryResponse, transactionResponse] = await Promise.all([
         fetch(`${apiBaseUrl}/admin/reports/summary?period=${period}`, { credentials: "include" }),
@@ -74,7 +76,7 @@ export function ReportsPage() {
 
   const exportReport = async () => {
     setExporting(true);
-    setError(null);
+    setExportError(null);
     try {
       const response = await fetch(`${apiBaseUrl}/admin/reports/export?period=${period}&type=${type}`, { credentials: "include" });
       if (!response.ok) throw new Error(await readError(response));
@@ -87,10 +89,8 @@ export function ReportsPage() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      setQueryAvailable(true);
     } catch (exportError) {
-      setError(exportError instanceof Error ? exportError.message : "报表导出失败");
-      setQueryAvailable(false);
+      setExportError(exportError instanceof Error ? exportError.message : "报表导出失败");
     } finally {
       setExporting(false);
     }
@@ -122,6 +122,7 @@ export function ReportsPage() {
         </div>
 
         {error ? <div className="form-error">{error}</div> : null}
+        {exportError ? <div className="form-error">{exportError}</div> : null}
         {loading ? <div className="notice">正在查询……</div> : (
           <>
             <div className="table-wrap">

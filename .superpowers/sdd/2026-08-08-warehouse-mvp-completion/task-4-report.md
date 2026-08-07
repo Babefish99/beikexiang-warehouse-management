@@ -42,4 +42,11 @@
 
 ## Commit
 
-- `feat: wire live inventory reports and export` (current HEAD at delivery)
+- Base Task 4: `feat: wire live inventory reports and export`
+- Reviewer follow-up: `fix: keep report export enabled after export failure`
+
+## Reviewer follow-up
+
+- `queryAvailable` is now changed only by report query success/failure.
+- Export failures use the separate `exportError` state and leave the export button enabled for retry.
+- Regression coverage: `reports page keeps export enabled after export failure` proves the failed export is reported and a second export request is still sent.

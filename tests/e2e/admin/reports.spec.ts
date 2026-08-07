@@ -80,3 +80,42 @@ test("reports page enables export when queries are available", async ({ page }) 
 
   expect(download.suggestedFilename()).toBe("inventory-report-2026-08-all.csv");
 });
+
+test("reports page keeps export enabled after export failure", async ({ page }) => {
+  let exportRequests = 0;
+
+  await page.route("http://127.0.0.1:3001/admin/reports/summary?period=2026-08", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([{ itemId: "item-1", quantity: "11", amount: "230.00" }]),
+    });
+  });
+  await page.route("http://127.0.0.1:3001/admin/reports/transactions?period=2026-08&type=all", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([]),
+    });
+  });
+  await page.route("http://127.0.0.1:3001/admin/reports/export?period=2026-08&type=all", async (route) => {
+    exportRequests += 1;
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ message: "report export unavailable" }),
+    });
+  });
+
+  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Freports");
+  const exportButton = page.getByRole("button", { name: /导出/i });
+
+  await expect(exportButton).toBeEnabled();
+  await exportButton.click();
+  await expect(page.getByText("report export unavailable")).toBeVisible();
+  await expect(exportButton).toBeEnabled();
+
+  await exportButton.click();
+  await expect(page.getByText("report export unavailable")).toBeVisible();
+  expect(exportRequests).toBe(2);
+});
