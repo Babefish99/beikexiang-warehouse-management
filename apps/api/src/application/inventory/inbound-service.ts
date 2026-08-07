@@ -45,6 +45,8 @@ export class InMemoryInventoryEntryStore implements InventoryEntryStore {
   private readonly ledgerEntries: InventoryLedgerEntry[] = [];
   private sequence = 1;
 
+  constructor(private readonly options: { onRecordStockEntry?: (input: { itemId: string }) => void } = {}) {}
+
   async recordStockEntry(input: StockEntryInput): Promise<{ orderId: string; batchId: string }> {
     const batchId = `batch-${String(this.sequence).padStart(4, "0")}`;
     const orderId = `${input.referenceType.toLowerCase()}-${String(this.sequence).padStart(4, "0")}`;
@@ -55,6 +57,7 @@ export class InMemoryInventoryEntryStore implements InventoryEntryStore {
     const quantity = decimal(input.quantity);
     const unitCost = decimal(input.unitCost);
     this.ledgerEntries.push({ id: crypto.randomUUID(), warehouseId: input.warehouseId, itemId: input.itemId, batchId, type: input.ledgerType, quantity: quantity.toString(), unitCost: unitCost.toString(), amount: quantity.mul(unitCost).toFixed(2), referenceType: input.referenceType, referenceId: input.referenceId, occurredAt: input.occurredAt });
+    this.options.onRecordStockEntry?.({ itemId: input.itemId });
     return { orderId, batchId };
   }
 

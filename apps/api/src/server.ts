@@ -65,8 +65,9 @@ export function buildServer() {
   void app.register(cors, { origin: webBaseUrl, credentials: true });
   const sessionService = new SessionService(process.env.SESSION_SECRET ?? "local-development-session-secret");
   const auditService = new InMemoryAuditService();
-  const itemService = new ItemService(new InMemoryItemRepository());
-  const inventoryEntryStore = new InMemoryInventoryEntryStore();
+  const itemRepository = new InMemoryItemRepository();
+  const itemService = new ItemService(itemRepository);
+  const inventoryEntryStore = new InMemoryInventoryEntryStore({ onRecordStockEntry: ({ itemId }) => itemRepository.markLedgerActivity(itemId) });
   const inboundService = new InboundService(inventoryEntryStore);
   const openingStockService = new OpeningStockService(inventoryEntryStore);
   const outboundService = new OutboundService(new InMemoryOutboundStore());
