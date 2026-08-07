@@ -1,10 +1,29 @@
 import { Decimal } from "decimal.js";
 import type { InventoryLedgerEntry } from "../../domain/inventory/ledger.js";
 
-export interface MovementBalance { warehouseId: string; itemId: string; batchId: string; remainingQuantity: string; unitCost: string }
-export interface IssuedAllocation { id: string; outboundOrderId: string; warehouseId: string; itemId: string; batchId: string; issuedQuantity: string; unitCost: string }
+export interface MovementBalance {
+  warehouseId: string;
+  itemId: string;
+  batchId: string;
+  remainingQuantity: string;
+  unitCost: string;
+}
+
+export interface IssuedAllocation {
+  id: string;
+  outboundOrderId: string;
+  warehouseId: string;
+  itemId: string;
+  batchId: string;
+  issuedQuantity: string;
+  unitCost: string;
+}
 
 export interface MovementStore {
+  listBalances(): Promise<MovementBalance[]>;
+  listIssuedAllocations(): Promise<IssuedAllocation[]>;
+  getAllocation(id: string): IssuedAllocation | undefined;
+  getReturnedQuantity(allocationId: string): string;
   transfer(input: { itemId: string; batchId: string; sourceWarehouseId: string; destinationWarehouseId: string; quantity: string }): Promise<{ transferId: string; unitCost: string }>;
   returnStock(input: { allocation: IssuedAllocation; quantity: string; reason: string }): Promise<{ returnId: string; unitCost: string }>;
 }
@@ -15,11 +34,39 @@ export class InMemoryMovementStore implements MovementStore {
   private readonly returned = new Map<string, Decimal>();
   private readonly entries: InventoryLedgerEntry[] = [];
 
-  seedBalance(balance: MovementBalance): void { this.balances.set(`${balance.warehouseId}:${balance.batchId}`, structuredClone(balance)); }
-  seedIssuedAllocation(allocation: IssuedAllocation): void { this.allocations.set(allocation.id, structuredClone(allocation)); }
-  balance(warehouseId: string, batchId: string): MovementBalance | undefined { const balance = this.balances.get(`${warehouseId}:${batchId}`); return balance ? structuredClone(balance) : undefined; }
-  ledger(): InventoryLedgerEntry[] { return this.entries.map((entry) => ({ ...entry })); }
-  getAllocation(id: string): IssuedAllocation | undefined { const allocation = this.allocations.get(id); return allocation ? structuredClone(allocation) : undefined; }
+  seedBalance(balance: MovementBalance): void {
+    this.balances.set(`${balance.warehouseId}:${balance.batchId}`, structuredClone(balance));
+  }
+
+  seedIssuedAllocation(allocation: IssuedAllocation): void {
+    this.allocations.set(allocation.id, structuredClone(allocation));
+  }
+
+  balance(warehouseId: string, batchId: string): MovementBalance | undefined {
+    const balance = this.balances.get(`${warehouseId}:${batchId}`);
+    return balance ? structuredClone(balance) : undefined;
+  }
+
+  ledger(): InventoryLedgerEntry[] {
+    return this.entries.map((entry) => ({ ...entry }));
+  }
+
+  async listBalances(): Promise<MovementBalance[]> {
+    return [...this.balances.values()].map((balance) => structuredClone(balance));
+  }
+
+  async listIssuedAllocations(): Promise<IssuedAllocation[]> {
+    return [...this.allocations.values()].map((allocation) => structuredClone(allocation));
+  }
+
+  getAllocation(id: string): IssuedAllocation | undefined {
+    const allocation = this.allocations.get(id);
+    return allocation ? structuredClone(allocation) : undefined;
+  }
+
+  getReturnedQuantity(allocationId: string): string {
+    return (this.returned.get(allocationId) ?? new Decimal(0)).toString();
+  }
 
   async transfer(input: { itemId: string; batchId: string; sourceWarehouseId: string; destinationWarehouseId: string; quantity: string }): Promise<{ transferId: string; unitCost: string }> {
     if (input.sourceWarehouseId === input.destinationWarehouseId) throw new Error("source and destination warehouses must differ");
@@ -37,7 +84,34 @@ export class InMemoryMovementStore implements MovementStore {
     this.balances.set(sourceKey, { ...source, remainingQuantity: remaining.toString() });
     this.balances.set(destinationKey, { ...destination, remainingQuantity: new Decimal(destination.remainingQuantity).plus(quantity).toString() });
     const amount = quantity.mul(source.unitCost).toFixed(2);
-    this.entries.push({ id: crypto.randomUUID(), warehouseId: input.sourceWarehouseId, itemId: input.itemId, batchId: input.batchId, type: "TRANSFER_OUT", quantity: quantity.negated().toString(), unitCost: source.unitCost, amount, referenceType: "TRANSFER_ORDER", referenceId: transferId, occurredAt: new Date().toISOString() }, { id: crypto.randomUUID(), warehouseId: input.destinationWarehouseId, itemId: input.itemId, batchId: input.batchId, type: "TRANSFER_IN", quantity: quantity.toString(), unitCost: source.unitCost, amount, referenceType: "TRANSFER_ORDER", referenceId: transferId, occurredAt: new Date().toISOString() });
+    this.entries.push(
+      {
+        id: crypto.randomUUID(),
+        warehouseId: input.sourceWarehouseId,
+        itemId: input.itemId,
+        batchId: input.batchId,
+        type: "TRANSFER_OUT",
+        quantity: quantity.negated().toString(),
+        unitCost: source.unitCost,
+        amount,
+        referenceType: "TRANSFER_ORDER",
+        referenceId: transferId,
+        occurredAt: new Date().toISOString(),
+      },
+      {
+        id: crypto.randomUUID(),
+        warehouseId: input.destinationWarehouseId,
+        itemId: input.itemId,
+        batchId: input.batchId,
+        type: "TRANSFER_IN",
+        quantity: quantity.toString(),
+        unitCost: source.unitCost,
+        amount,
+        referenceType: "TRANSFER_ORDER",
+        referenceId: transferId,
+        occurredAt: new Date().toISOString(),
+      },
+    );
     return { transferId, unitCost: source.unitCost };
   }
 
@@ -53,7 +127,19 @@ export class InMemoryMovementStore implements MovementStore {
     const returnId = crypto.randomUUID();
     this.balances.set(key, { ...balance, remainingQuantity: new Decimal(balance.remainingQuantity).plus(quantity).toString() });
     this.returned.set(input.allocation.id, returned.plus(quantity));
-    this.entries.push({ id: crypto.randomUUID(), warehouseId: input.allocation.warehouseId, itemId: input.allocation.itemId, batchId: input.allocation.batchId, type: "RETURN", quantity: quantity.toString(), unitCost: input.allocation.unitCost, amount: quantity.mul(input.allocation.unitCost).toFixed(2), referenceType: "OUTBOUND_ALLOCATION", referenceId: input.allocation.id, occurredAt: new Date().toISOString() });
+    this.entries.push({
+      id: crypto.randomUUID(),
+      warehouseId: input.allocation.warehouseId,
+      itemId: input.allocation.itemId,
+      batchId: input.allocation.batchId,
+      type: "RETURN",
+      quantity: quantity.toString(),
+      unitCost: input.allocation.unitCost,
+      amount: quantity.mul(input.allocation.unitCost).toFixed(2),
+      referenceType: "OUTBOUND_ALLOCATION",
+      referenceId: input.allocation.id,
+      occurredAt: new Date().toISOString(),
+    });
     return { returnId, unitCost: input.allocation.unitCost };
   }
 }
@@ -61,7 +147,17 @@ export class InMemoryMovementStore implements MovementStore {
 export class TransferService {
   constructor(private readonly store: MovementStore) {}
 
-  async complete(input: { itemId: string; batchId: string; sourceWarehouseId: string; destinationWarehouseId: string; quantity: string }): Promise<{ transferId: string; status: "COMPLETED"; unitCost: string }> {
+  async listOptions(): Promise<{ balances: MovementBalance[] }> {
+    return {
+      balances: (await this.store.listBalances()).filter((balance) => new Decimal(balance.remainingQuantity).gt(0)),
+    };
+  }
+
+  async complete(input: { itemId: string; batchId: string; sourceWarehouseId: string; destinationWarehouseId: string; quantity: string; reason: string }): Promise<{ transferId: string; status: "COMPLETED"; unitCost: string }> {
+    if (!input.itemId.trim() || !input.batchId.trim() || !input.sourceWarehouseId.trim() || !input.destinationWarehouseId.trim()) {
+      throw new Error("warehouse, item, and batch are required");
+    }
+    if (!input.reason.trim()) throw new Error("reason is required");
     const result = await this.store.transfer(input);
     return { ...result, status: "COMPLETED" };
   }
