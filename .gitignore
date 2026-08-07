@@ -7,6 +7,7 @@ test-results/
 .env
 .env.*
 !.env.example
+appid.txt
 .superpowers/
 .tmp_excel_inspect/
 .tmp_runtime/

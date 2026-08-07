@@ -1,7 +1,8 @@
-import "dotenv/config";
-
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import dotenv from "dotenv";
 import { RolePolicy, type AuthenticatedUser } from "./application/auth/role-service.js";
 import { SessionService } from "./application/auth/session-service.js";
 import { ApprovalSyncService, InMemoryApprovalSyncStore } from "./application/wecom/approval-sync-service.js";
@@ -34,6 +35,8 @@ import { registerReportRoutes } from "./routes/admin/reports.js";
 import { registerApprovalCallbackRoute } from "./routes/wecom/approval-callback.js";
 
 const SESSION_COOKIE = "warehouse_session";
+
+dotenv.config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../.env") });
 
 function roleForUser(weComUserId: string): AuthenticatedUser["role"] {
   const adminIds = new Set((process.env.WE_COM_ADMIN_IDS ?? "").split(",").map((value) => value.trim()).filter(Boolean));
