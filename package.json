@@ -15,9 +15,13 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed"
   },
+  "dependencies": {
+    "@prisma/client": "^7.9.1"
+  },
   "devDependencies": {
     "@playwright/test": "^1.55.0",
     "@types/node": "^24.0.0",
+    "prisma": "^7.9.1",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0"
