@@ -13,6 +13,8 @@ model User {
   roleId     String
   isActive   Boolean  @default(true)
   createdAt  DateTime @default(now())
+  role       Role     @relation(fields: [roleId], references: [id])
+  auditLogs  AuditLog[]
 }
 
 model Role {
@@ -20,6 +22,7 @@ model Role {
   code      String   @unique
   name      String
   createdAt DateTime @default(now())
+  users     User[]
 }
 
 model Warehouse {
@@ -29,6 +32,15 @@ model Warehouse {
   isActive    Boolean  @default(true)
   isPlaceholder Boolean @default(false)
   createdAt   DateTime @default(now())
+  inboundOrders InboundOrder[]
+  stockBalances StockBalance[]
+  procurementBatches ProcurementBatch[]
+  outboundAllocations OutboundAllocation[]
+  transferSources TransferOrder[] @relation("TransferSource")
+  transferDestinations TransferOrder[] @relation("TransferDestination")
+  returnOrders ReturnOrder[]
+  stockAdjustments StockAdjustment[]
+  ledgerEntries InventoryLedgerEntry[]
 }
 
 model ItemCategory {
@@ -37,6 +49,7 @@ model ItemCategory {
   prefix    String   @unique
   name      String
   createdAt DateTime @default(now())
+  items     Item[]
 }
 
 model Item {
@@ -51,6 +64,16 @@ model Item {
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+  category        ItemCategory @relation(fields: [categoryId], references: [id])
+  inboundLines    InboundLine[]
+  approvalLines   ApprovalLine[]
+  procurementBatches ProcurementBatch[]
+  stockBalances   StockBalance[]
+  outboundAllocations OutboundAllocation[]
+  transferLines   TransferLine[]
+  returnLines     ReturnLine[]
+  stockAdjustments StockAdjustment[]
+  ledgerEntries   InventoryLedgerEntry[]
 }
 
 model ApprovalRequest {
@@ -65,6 +88,8 @@ model ApprovalRequest {
   approvedAt      DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+  lines           ApprovalLine[]
+  outboundOrder   OutboundOrder?
 }
 
 model ApprovalLine {
@@ -74,6 +99,9 @@ model ApprovalLine {
   requestedQuantity  Decimal
   unit               String
   createdAt          DateTime @default(now())
+  approvalRequest    ApprovalRequest @relation(fields: [approvalRequestId], references: [id])
+  item               Item @relation(fields: [itemId], references: [id])
+  outboundAllocations OutboundAllocation[]
 }
 
 model InboundOrder {
@@ -85,6 +113,8 @@ model InboundOrder {
   operatorId   String
   remark       String?
   createdAt    DateTime @default(now())
+  lines        InboundLine[]
+  warehouse    Warehouse @relation(fields: [warehouseId], references: [id])
 }
 
 model InboundLine {
@@ -95,6 +125,9 @@ model InboundLine {
   quantity       Decimal
   unitCost       Decimal
   amount         Decimal
+  inboundOrder   InboundOrder @relation(fields: [inboundOrderId], references: [id])
+  batch          ProcurementBatch @relation(fields: [batchId], references: [id])
+  item           Item @relation(fields: [itemId], references: [id])
 }
 
 model ProcurementBatch {
@@ -110,6 +143,15 @@ model ProcurementBatch {
   expiryDate        DateTime?
   purchaser         String?
   createdAt         DateTime @default(now())
+  warehouse         Warehouse @relation(fields: [warehouseId], references: [id])
+  item              Item @relation(fields: [itemId], references: [id])
+  inboundLines      InboundLine[]
+  stockBalances     StockBalance[]
+  outboundAllocations OutboundAllocation[]
+  transferLines     TransferLine[]
+  returnLines       ReturnLine[]
+  stockAdjustments  StockAdjustment[]
+  ledgerEntries     InventoryLedgerEntry[]
   @@unique([warehouseId, itemId, batchNo])
 }
 
@@ -121,6 +163,9 @@ model StockBalance {
   remainingQuantity Decimal
   unitCost          Decimal
   updatedAt         DateTime @updatedAt
+  warehouse         Warehouse @relation(fields: [warehouseId], references: [id])
+  item              Item @relation(fields: [itemId], references: [id])
+  batch             ProcurementBatch @relation(fields: [batchId], references: [id])
   @@unique([warehouseId, batchId])
 }
 
@@ -135,6 +180,9 @@ model OutboundOrder {
   issuedAt          DateTime?
   operatorId        String
   createdAt         DateTime @default(now())
+  approvalRequest   ApprovalRequest @relation(fields: [approvalRequestId], references: [id])
+  allocations       OutboundAllocation[]
+  returns           ReturnOrder[] @relation("OriginalOutbound")
 }
 
 model OutboundAllocation {
@@ -148,6 +196,12 @@ model OutboundAllocation {
   quantity          Decimal
   unitCost          Decimal
   amount            Decimal
+  outboundOrder     OutboundOrder @relation(fields: [outboundOrderId], references: [id])
+  approvalLine      ApprovalLine @relation(fields: [approvalLineId], references: [id])
+  warehouse         Warehouse @relation(fields: [warehouseId], references: [id])
+  item              Item @relation(fields: [itemId], references: [id])
+  batch             ProcurementBatch @relation(fields: [batchId], references: [id])
+  returnLines       ReturnLine[]
 }
 
 model TransferOrder {
@@ -160,6 +214,9 @@ model TransferOrder {
   operatorId          String
   completedAt         DateTime?
   createdAt           DateTime @default(now())
+  sourceWarehouse     Warehouse @relation("TransferSource", fields: [sourceWarehouseId], references: [id])
+  destinationWarehouse Warehouse @relation("TransferDestination", fields: [destinationWarehouseId], references: [id])
+  lines               TransferLine[]
 }
 
 model TransferLine {
@@ -170,6 +227,9 @@ model TransferLine {
   quantity        Decimal
   unitCost        Decimal
   amount          Decimal
+  transferOrder   TransferOrder @relation(fields: [transferOrderId], references: [id])
+  item            Item @relation(fields: [itemId], references: [id])
+  batch           ProcurementBatch @relation(fields: [batchId], references: [id])
 }
 
 model ReturnOrder {
@@ -181,6 +241,9 @@ model ReturnOrder {
   operatorId           String
   returnedAt           DateTime?
   createdAt            DateTime @default(now())
+  originalOutbound     OutboundOrder @relation("OriginalOutbound", fields: [originalOutboundId], references: [id])
+  warehouse            Warehouse @relation(fields: [warehouseId], references: [id])
+  lines                ReturnLine[]
 }
 
 model ReturnLine {
@@ -192,6 +255,10 @@ model ReturnLine {
   quantity              Decimal
   unitCost              Decimal
   amount                Decimal
+  returnOrder           ReturnOrder @relation(fields: [returnOrderId], references: [id])
+  outboundAllocation    OutboundAllocation @relation(fields: [outboundAllocationId], references: [id])
+  item                  Item @relation(fields: [itemId], references: [id])
+  batch                 ProcurementBatch @relation(fields: [batchId], references: [id])
 }
 
 model Stocktake {
@@ -202,6 +269,8 @@ model Stocktake {
   operatorId  String
   reason      String?
   createdAt   DateTime @default(now())
+  period      AccountingPeriod @relation(fields: [periodCode], references: [periodCode])
+  adjustments StockAdjustment[]
 }
 
 model StockAdjustment {
@@ -217,6 +286,11 @@ model StockAdjustment {
   reason      String
   operatorId  String
   createdAt   DateTime @default(now())
+  stocktake   Stocktake? @relation(fields: [stocktakeId], references: [id])
+  period      AccountingPeriod @relation(fields: [periodCode], references: [periodCode])
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+  item        Item @relation(fields: [itemId], references: [id])
+  batch       ProcurementBatch @relation(fields: [batchId], references: [id])
 }
 
 model InventoryLedgerEntry {
@@ -232,6 +306,9 @@ model InventoryLedgerEntry {
   referenceId   String
   occurredAt    DateTime
   createdAt     DateTime @default(now())
+  warehouse     Warehouse @relation(fields: [warehouseId], references: [id])
+  item          Item @relation(fields: [itemId], references: [id])
+  batch         ProcurementBatch? @relation(fields: [batchId], references: [id])
 }
 
 model AccountingPeriod {
@@ -241,6 +318,8 @@ model AccountingPeriod {
   openedAt   DateTime @default(now())
   closedAt   DateTime?
   closedBy   String?
+  stocktakes Stocktake[]
+  adjustments StockAdjustment[]
 }
 
 model SyncAttempt {
@@ -263,4 +342,5 @@ model AuditLog {
   beforeData  Json?
   afterData   Json?
   createdAt   DateTime @default(now())
+  actor       User @relation(fields: [actorUserId], references: [id])
 }

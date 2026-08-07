@@ -1,6 +1,7 @@
 import { Decimal } from "decimal.js";
 import type { ApprovalLine } from "../approvals/approval.js";
 import type { AccountingPeriod, AccountingPeriodService } from "../periods/accounting-period.js";
+import type { BatchBalance, StockBalanceRepository } from "./batch.js";
 import { assertPositive, decimal } from "./invariants.js";
 
 export interface InventoryLedgerEntry {
@@ -26,6 +27,40 @@ export interface OutboundAllocationInput {
   unitCost: string;
 }
 
+class LocalStockBalanceRepository implements StockBalanceRepository {
+  private readonly balances = new Map<string, BatchBalance>();
+
+  seed(balance: BatchBalance): void { this.balances.set(`${balance.warehouseId}:${balance.batchId}`, { ...balance }); }
+  get(warehouseId: string, batchId: string): BatchBalance | undefined { return this.balances.get(`${warehouseId}:${batchId}`); }
+  decrementMany(input: Array<{ warehouseId: string; itemId: string; batchId: string; quantity: string; expectedRemainingQuantity: string }>): void {
+    const next = new Map(this.balances);
+    for (const allocation of input) {
+      const key = `${allocation.warehouseId}:${allocation.batchId}`;
+      const current = next.get(key);
+      if (!current || current.itemId !== allocation.itemId) throw new Error("stock balance batch not found");
+      if (!decimal(current.remainingQuantity).eq(allocation.expectedRemainingQuantity)) throw new Error("stock balance changed; retry transaction");
+      const remaining = decimal(current.remainingQuantity).minus(allocation.quantity);
+      if (remaining.lt(0)) throw new Error("batch balance cannot become negative");
+      next.set(key, { ...current, remainingQuantity: remaining.toString() });
+    }
+    this.balances.clear();
+    for (const [key, value] of next) this.balances.set(key, value);
+  }
+  transfer(input: { sourceWarehouseId: string; destinationWarehouseId: string; itemId: string; batchId: string; quantity: string; unitCost: string }): void {
+    const sourceKey = `${input.sourceWarehouseId}:${input.batchId}`;
+    const destinationKey = `${input.destinationWarehouseId}:${input.batchId}`;
+    const source = this.balances.get(sourceKey);
+    if (!source || source.itemId !== input.itemId) throw new Error("source stock balance not found");
+    const quantity = decimal(input.quantity);
+    const remaining = decimal(source.remainingQuantity).minus(quantity);
+    if (remaining.lt(0)) throw new Error("batch balance cannot become negative");
+    const destination = this.balances.get(destinationKey) ?? { batchId: input.batchId, warehouseId: input.destinationWarehouseId, itemId: input.itemId, remainingQuantity: "0", unitCost: input.unitCost };
+    if (destination.unitCost !== input.unitCost) throw new Error("transferred batch cost cannot change");
+    this.balances.set(sourceKey, { ...source, remainingQuantity: remaining.toString() });
+    this.balances.set(destinationKey, { ...destination, remainingQuantity: decimal(destination.remainingQuantity).plus(quantity).toString() });
+  }
+}
+
 export interface InventoryTransactionService {
   recordInbound(input: { period: AccountingPeriod; warehouseId: string; itemId: string; batchId: string; quantity: string; unitCost: string; referenceId: string }): InventoryLedgerEntry[];
   recordOutbound(input: { period: AccountingPeriod; approvalLine: ApprovalLine; allocations: OutboundAllocationInput[]; reason?: string }): InventoryLedgerEntry[];
@@ -39,7 +74,7 @@ function amount(quantity: Decimal, unitCost: Decimal): string {
   return quantity.mul(unitCost).toFixed(2);
 }
 
-export function createInventoryTransactionService({ periodService }: { periodService: AccountingPeriodService }): InventoryTransactionService {
+export function createInventoryTransactionService({ periodService, stockBalanceRepository = new LocalStockBalanceRepository() }: { periodService: AccountingPeriodService; stockBalanceRepository?: StockBalanceRepository }): InventoryTransactionService {
   return {
     recordInbound(input) {
       periodService.assertOpen(input.period);
@@ -63,6 +98,12 @@ export function createInventoryTransactionService({ periodService }: { periodSer
         const unitCost = decimal(allocation.unitCost);
         entries.push({ id: crypto.randomUUID(), warehouseId: allocation.warehouseId, itemId: allocation.itemId, batchId: allocation.batchId, type: "OUTBOUND", quantity: quantity.negated().toString(), unitCost: unitCost.toString(), amount: amount(quantity, unitCost), referenceType: "OUTBOUND_ORDER", referenceId: input.approvalLine.approvalId, occurredAt: new Date().toISOString() });
       }
+      for (const allocation of input.allocations) {
+        if (!stockBalanceRepository.get(allocation.warehouseId, allocation.batchId)) {
+          stockBalanceRepository.seed({ batchId: allocation.batchId, warehouseId: allocation.warehouseId, itemId: allocation.itemId, remainingQuantity: allocation.remainingQuantity, unitCost: allocation.unitCost });
+        }
+      }
+      stockBalanceRepository.decrementMany(input.allocations.map((allocation) => ({ ...allocation, expectedRemainingQuantity: allocation.remainingQuantity })));
       return entries;
     },
     recordTransfer(input) {
@@ -72,6 +113,10 @@ export function createInventoryTransactionService({ periodService }: { periodSer
       if (!source.eq(destination)) throw new Error("source and destination quantities must be equal");
       if (input.sourceWarehouseId === input.destinationWarehouseId) throw new Error("source and destination warehouses must differ");
       const unitCost = decimal(input.unitCost);
+      if (!stockBalanceRepository.get(input.sourceWarehouseId, input.batchId)) {
+        stockBalanceRepository.seed({ batchId: input.batchId, warehouseId: input.sourceWarehouseId, itemId: input.itemId, remainingQuantity: source.toString(), unitCost: unitCost.toString() });
+      }
+      stockBalanceRepository.transfer({ sourceWarehouseId: input.sourceWarehouseId, destinationWarehouseId: input.destinationWarehouseId, itemId: input.itemId, batchId: input.batchId, quantity: source.toString(), unitCost: unitCost.toString() });
       return [
         { id: crypto.randomUUID(), warehouseId: input.sourceWarehouseId, itemId: input.itemId, batchId: input.batchId, type: "TRANSFER_OUT", quantity: source.negated().toString(), unitCost: unitCost.toString(), amount: amount(source, unitCost), referenceType: "TRANSFER_ORDER", referenceId: input.referenceId, occurredAt: new Date().toISOString() },
         { id: crypto.randomUUID(), warehouseId: input.destinationWarehouseId, itemId: input.itemId, batchId: input.batchId, type: "TRANSFER_IN", quantity: destination.toString(), unitCost: unitCost.toString(), amount: amount(destination, unitCost), referenceType: "TRANSFER_ORDER", referenceId: input.referenceId, occurredAt: new Date().toISOString() },
