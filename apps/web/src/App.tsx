@@ -12,6 +12,7 @@ import { TransfersPage } from "./pages/TransfersPage";
 import { ReturnsPage } from "./pages/ReturnsPage";
 import { StocktakePage } from "./pages/StocktakePage";
 import { PeriodClosePage } from "./pages/PeriodClosePage";
+import { ReportsPage } from "./pages/ReportsPage";
 
 type WebUser = { id: string; weComUserId: string; name: string; role: "APPLICANT" | "ADMIN" | "FINANCE" };
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
@@ -46,6 +47,7 @@ export default function App() {
 
   if (loading) return <main className="login-page"><p>正在检查企业微信登录状态…</p></main>;
   if (!user) return <LoginPage authorizeUrl={authorizeUrl} />;
+  if (user.role === "FINANCE" && window.location.pathname === "/admin/reports") return <AdminLayout user={{ name: user.name, roleLabel: "财务" }}><ReportsPage /></AdminLayout>;
   if (user.role === "APPLICANT") return <main className="login-page"><section className="login-card"><ShieldAlert size={36} color="var(--orange)" /><h1>暂无后台权限</h1><p>当前企业微信账号只能发起和查看领用申请。</p></section></main>;
   if (user.role === "FINANCE") return <AdminLayout user={{ name: user.name, roleLabel: "财务" }}><div className="page"><PageHeader title="报表中心" description="财务可查询和导出已结账期间的库存报表。" /><section className="panel"><div className="notice"><FileSpreadsheet size={24} color="var(--orange)" /><strong>月度库存报表</strong><p>报表下载功能将在月结账后开放，财务账号不具备库存修改权限。</p></div></section></div></AdminLayout>;
 
@@ -58,6 +60,7 @@ export default function App() {
   if (window.location.pathname === "/admin/returns") return <AdminLayout user={{ name: user.name, roleLabel: "库存管理员" }}><ReturnsPage /></AdminLayout>;
   if (window.location.pathname === "/admin/stocktake") return <AdminLayout user={{ name: user.name, roleLabel: "库存管理员" }}><StocktakePage /></AdminLayout>;
   if (window.location.pathname === "/admin/period-close") return <AdminLayout user={{ name: user.name, roleLabel: "库存管理员" }}><PeriodClosePage /></AdminLayout>;
+  if (window.location.pathname === "/admin/reports") return <AdminLayout user={{ name: user.name, roleLabel: "库存管理员" }}><ReportsPage /></AdminLayout>;
 
   return (
     <AdminLayout user={{ name: "管理员", roleLabel: "库存管理员" }}>

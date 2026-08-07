@@ -12,6 +12,7 @@ import { InMemoryMovementStore, TransferService } from "./application/inventory/
 import { ReturnService } from "./application/inventory/return-service.js";
 import { InMemoryStocktakeStore, StocktakeService } from "./application/inventory/stocktake-service.js";
 import { PeriodCloseService } from "./application/periods/period-close-service.js";
+import { InventoryReportService, TransactionReportService } from "./application/reports/report-query-service.js";
 import { InMemoryAuditService } from "./infrastructure/audit/audit-service.js";
 import { HttpApprovalGateway } from "./infrastructure/wecom/approval-gateway.js";
 import { ApprovalParser } from "./infrastructure/wecom/approval-parser.js";
@@ -27,6 +28,7 @@ import { registerTransferRoutes } from "./routes/admin/transfers.js";
 import { registerReturnRoutes } from "./routes/admin/returns.js";
 import { registerStocktakeRoutes } from "./routes/admin/stocktake.js";
 import { registerPeriodCloseRoutes } from "./routes/admin/period-close.js";
+import { registerReportRoutes } from "./routes/admin/reports.js";
 import { registerApprovalCallbackRoute } from "./routes/wecom/approval-callback.js";
 
 const SESSION_COOKIE = "warehouse_session";
@@ -59,6 +61,8 @@ export function buildServer() {
   const returnService = new ReturnService(movementStore);
   const stocktakeService = new StocktakeService(new InMemoryStocktakeStore());
   const periodCloseService = new PeriodCloseService();
+  const inventoryReportService = new InventoryReportService(async () => []);
+  const transactionReportService = new TransactionReportService(async () => []);
   const warehouseService = new WarehouseService(new InMemoryWarehouseRepository([
     { id: "warehouse-1", code: "WH-01", name: "待配置仓库一", isActive: true, isPlaceholder: true },
     { id: "warehouse-2", code: "WH-02", name: "待配置仓库二", isActive: true, isPlaceholder: true },
@@ -120,6 +124,7 @@ export function buildServer() {
   registerReturnRoutes(app, { returnService });
   registerStocktakeRoutes(app, { stocktakeService });
   registerPeriodCloseRoutes(app, { periodCloseService });
+  registerReportRoutes(app, { inventoryReportService, transactionReportService });
 
   return app;
 }
