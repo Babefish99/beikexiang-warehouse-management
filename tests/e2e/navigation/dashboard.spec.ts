@@ -1,42 +1,137 @@
 import { test, expect } from "@playwright/test";
 
 test("dashboard quick actions open the corresponding operation pages", async ({ page }) => {
+  const itemsRoute = /http:\/\/127\.0\.0\.1:3001\/admin\/items\?includeInactive=true(?:&warehouseId=.*)?$/;
+  const dashboardItemsHandler = async (route: Parameters<Parameters<typeof page.route>[1]>[0]) => {
+    const url = new URL(route.request().url());
+    expect(url.searchParams.get("includeInactive")).toBe("true");
+    expect(url.searchParams.get("warehouseId")).toBe("all");
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify([
+        {
+          id: "item-1",
+          code: "TEA-001",
+          name: "Tea Leaf",
+          specification: "500g",
+          unit: "bag",
+          categoryId: "cat-tea",
+          weComOptionKey: "tea_leaf",
+          minimumStock: "5",
+          isActive: true,
+        },
+      ]),
+    });
+  };
+  await page.route(itemsRoute, dashboardItemsHandler);
+  await page.route(/http:\/\/127\.0\.0\.1:3001\/admin\/outbound\/pending.*/, async (route) => {
+    const url = new URL(route.request().url());
+    expect([null, "all"]).toContain(url.searchParams.get("warehouseId"));
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify([{ id: "approval-1" }]),
+    });
+  });
+  await page.route(/http:\/\/127\.0\.0\.1:3001\/admin\/reports\/transactions.*/, async (route) => {
+    const url = new URL(route.request().url());
+    expect(url.searchParams.get("period")).toBe("2026-08");
+    expect(url.searchParams.get("warehouseId")).toBe("all");
+
+    if (url.searchParams.get("type") === "inbound") {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify([{ quantity: "12", amount: "120.00" }]),
+      });
+      return;
+    }
+
+    if (url.searchParams.get("type") === "outbound") {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify([{ quantity: "3", amount: "30.00" }]),
+      });
+      return;
+    }
+
+    await route.fallback();
+  });
   await page.route("http://127.0.0.1:3001/admin/reports/warehouses", async (route) => {
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify([
-        { id: "warehouse-1", code: "WH-01", name: "杭州一仓", isActive: true },
-        { id: "warehouse-2", code: "WH-02", name: "上海二仓", isActive: true },
+        { id: "warehouse-1", code: "WH-01", name: "Warehouse 1", isActive: true },
+        { id: "warehouse-2", code: "WH-02", name: "Warehouse 2", isActive: true },
       ]),
     });
   });
 
   await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2F");
-  await expect(page.getByRole("heading", { name: "库存总览" })).toBeVisible();
+  await expect(page.locator(".page-header h1")).toBeVisible();
   await expect(page.locator(".metric")).toHaveCount(4);
+  await expect(page.locator(".metric .metric__label")).toHaveCount(4);
+  await expect(page.locator(".metric .metric__value")).toHaveCount(4);
   await expect(page.locator(".metric--inventory")).toHaveCount(1);
   await expect(page.locator(".metric--approval")).toHaveCount(1);
   await expect(page.locator(".metric--inbound")).toHaveCount(1);
   await expect(page.locator(".metric--outbound")).toHaveCount(1);
-  await expect(page.getByRole("button", { name: /全部仓库/ })).toBeVisible();
-  const userButton = page.getByRole("button", { name: /本地管理员/ });
-  await expect(userButton).toBeVisible();
-  await expect(userButton).toContainText("库存管理员");
-  await expect(page.getByRole("button", { name: "通知中心" })).toBeVisible();
-  await expect(page.getByText("当前运行状态")).toBeVisible();
-  await expect(page.getByText("月末盘点与结账")).toBeVisible();
+  const metricOrder = await page.locator(".metric").evaluateAll((metrics) => metrics.map((metric) =>
+    Array.from(metric.querySelectorAll(".metric__label, .metric__value")).map((node) => node.className),
+  ));
+  expect(metricOrder).toEqual([
+    ["metric__label", "metric__value"],
+    ["metric__label", "metric__value"],
+    ["metric__label", "metric__value"],
+    ["metric__label", "metric__value"],
+  ]);
+  await expect(page.locator(".topbar-selector")).toBeVisible();
+  await expect(page.locator(".workspace-user-button")).toBeVisible();
+  await expect(page.locator(".system-status__item")).toHaveCount(3);
 
   const destinations = [
-    { label: "登记入库", path: "/admin/inbound", heading: "登记入库" },
-    { label: "办理出库", path: "/admin/outbound", heading: "办理出库" },
-    { label: "录入期初库存", path: "/admin/opening-stock", heading: "录入期初库存" },
+    { path: "/admin/inbound", selector: '.quick-actions a[href="/admin/inbound"]' },
+    { path: "/admin/outbound", selector: '.quick-actions a[href="/admin/outbound"]' },
+    { path: "/admin/opening-stock", selector: '.quick-actions a[href="/admin/opening-stock"]' },
   ];
 
   for (const destination of destinations) {
-    await page.getByRole("link", { name: destination.label }).click();
+    await page.locator(destination.selector).click();
     await expect(page).toHaveURL(new RegExp(`${destination.path}$`));
-    await expect(page.getByRole("heading", { name: destination.heading })).toBeVisible();
-    await page.goto("/");
-    await expect(page.getByRole("heading", { name: "库存总览" })).toBeVisible();
+    await expect(page.locator(".page-header h1")).toBeVisible();
+    await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2F");
+    await expect(page.locator(".page-header h1")).toBeVisible();
   }
+
+  await page.unroute(itemsRoute, dashboardItemsHandler);
+  const itemPageWarehouseIds: Array<string | null> = [];
+  await page.route(itemsRoute, async (route) => {
+    const url = new URL(route.request().url());
+    expect(url.searchParams.get("includeInactive")).toBe("true");
+    itemPageWarehouseIds.push(url.searchParams.get("warehouseId"));
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify([
+        {
+          id: "item-1",
+          code: "TEA-001",
+          name: "Tea Leaf",
+          specification: "500g",
+          unit: "bag",
+          categoryId: "cat-tea",
+          weComOptionKey: "tea_leaf",
+          minimumStock: "5",
+          isActive: true,
+        },
+      ]),
+    });
+  });
+  await page.goto(new URL("/admin/items?search=TEA-001", page.url()).toString());
+  await expect(page.locator(".master-data-panel .master-data-toolbar input")).toHaveValue("TEA-001");
+  expect(itemPageWarehouseIds).toContain(null);
+
+  const createForm = page.locator(".master-data-form-panel .form-grid").first();
+  expect(await createForm.evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(" ").filter(Boolean).length)).toBe(2);
+
+  await page.locator(".table-actions button").first().click();
+  const editForm = page.locator(".master-data-form-panel .form-grid").nth(1);
+  expect(await editForm.evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(" ").filter(Boolean).length)).toBe(2);
 });

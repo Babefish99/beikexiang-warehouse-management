@@ -37,7 +37,7 @@ function readFilename(response: Response, period: string, type: TransactionFilte
   return matched?.[1] ?? `inventory-report-${period}-${type}.csv`;
 }
 
-export function ReportsPage() {
+export function ReportsPage({ warehouseId }: { warehouseId: string }) {
   const [summary, setSummary] = useState<SummaryRow[]>([]);
   const [transactions, setTransactions] = useState<TransactionRow[]>([]);
   const [period, setPeriod] = useState(new Date().toISOString().slice(0, 7));
@@ -47,6 +47,7 @@ export function ReportsPage() {
   const [error, setError] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [queryAvailable, setQueryAvailable] = useState(false);
+  const encodedWarehouseId = encodeURIComponent(warehouseId);
 
   const load = async () => {
     setLoading(true);
@@ -54,8 +55,8 @@ export function ReportsPage() {
     setExportError(null);
     try {
       const [summaryResponse, transactionResponse] = await Promise.all([
-        fetch(`${apiBaseUrl}/admin/reports/summary?period=${period}`, { credentials: "include" }),
-        fetch(`${apiBaseUrl}/admin/reports/transactions?period=${period}&type=${type}`, { credentials: "include" }),
+        fetch(`${apiBaseUrl}/admin/reports/summary?period=${period}&warehouseId=${encodedWarehouseId}`, { credentials: "include" }),
+        fetch(`${apiBaseUrl}/admin/reports/transactions?period=${period}&type=${type}&warehouseId=${encodedWarehouseId}`, { credentials: "include" }),
       ]);
       if (!summaryResponse.ok) throw new Error(await readError(summaryResponse));
       if (!transactionResponse.ok) throw new Error(await readError(transactionResponse));
@@ -72,13 +73,13 @@ export function ReportsPage() {
 
   useEffect(() => {
     void load();
-  }, [period, type]);
+  }, [period, type, warehouseId]);
 
   const exportReport = async () => {
     setExporting(true);
     setExportError(null);
     try {
-      const response = await fetch(`${apiBaseUrl}/admin/reports/export?period=${period}&type=${type}`, { credentials: "include" });
+      const response = await fetch(`${apiBaseUrl}/admin/reports/export?period=${period}&type=${type}&warehouseId=${encodedWarehouseId}`, { credentials: "include" });
       if (!response.ok) throw new Error(await readError(response));
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
@@ -97,16 +98,28 @@ export function ReportsPage() {
   };
 
   return (
-    <div className="page">
+    <div className="page reports-page">
       <PageHeader
         title="报表中心"
         description="按期间和交易类型查询数量与金额；调拨、退库、盘点调整单独列示。"
-        actions={<button className="button button--secondary" type="button" onClick={() => void load()}><RefreshCw size={15} />刷新</button>}
       />
-      <section className="panel">
-        <div className="master-data-toolbar">
+      <section className="panel report-filter-panel">
+        <header className="panel__header report-panel__header">
+          <div>
+            <h2>查询条件</h2>
+            <small>选择期间和流水类型，查看对应库存数据</small>
+          </div>
+          <div className="report-actions">
+            <button className="button button--secondary" type="button" onClick={() => void load()}><RefreshCw size={15} />刷新查询</button>
+            <button className="button button--primary" type="button" disabled={exporting || !queryAvailable} onClick={() => void exportReport()}>
+              <FileSpreadsheet size={15} />
+              {exporting ? "导出中…" : "导出 Excel 兼容报表"}
+            </button>
+          </div>
+        </header>
+        <div className="master-data-toolbar report-toolbar">
           <label className="search-field">
-            <span>期间</span>
+            <span>统计期间</span>
             <input type="month" value={period} onChange={(event) => setPeriod(event.target.value)} />
           </label>
           <label className="search-field">
@@ -115,16 +128,22 @@ export function ReportsPage() {
               {transactionFilters.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
-          <button className="button button--secondary" type="button" disabled={exporting || !queryAvailable} onClick={() => void exportReport()}>
-            <FileSpreadsheet size={15} />
-            {exporting ? "导出中…" : "导出 Excel 兼容报表"}
-          </button>
         </div>
 
-        {error ? <div className="form-error">{error}</div> : null}
-        {exportError ? <div className="form-error">{exportError}</div> : null}
-        {loading ? <div className="notice">正在查询……</div> : (
-          <>
+        {error ? <div className="form-error report-feedback">{error}</div> : null}
+        {exportError ? <div className="form-error report-feedback">{exportError}</div> : null}
+      </section>
+
+      {loading ? <section className="panel report-loading-panel"><div className="notice">正在查询……</div></section> : (
+        <>
+          <section className="panel report-section">
+            <header className="panel__header report-panel__header">
+              <div>
+                <h2>库存汇总</h2>
+                <small>截至所选期间末的库存数量与金额</small>
+              </div>
+              <span className="report-section__meta">{summary.length} 项物品</span>
+            </header>
             <div className="table-wrap">
               <table>
                 <thead>
@@ -145,7 +164,16 @@ export function ReportsPage() {
                 </tbody>
               </table>
             </div>
+          </section>
 
+          <section className="panel report-section">
+            <header className="panel__header report-panel__header">
+              <div>
+                <h2>出入库流水</h2>
+                <small>入库、出库、调拨、退库和盘点调整明细</small>
+              </div>
+              <span className="report-section__meta">{transactions.length} 条流水</span>
+            </header>
             <div className="table-wrap">
               <table>
                 <thead>
@@ -176,9 +204,9 @@ export function ReportsPage() {
                 </tbody>
               </table>
             </div>
-          </>
-        )}
-      </section>
+          </section>
+        </>
+      )}
     </div>
   );
 }

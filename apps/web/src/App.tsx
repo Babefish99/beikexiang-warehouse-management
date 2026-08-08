@@ -116,12 +116,13 @@ export default function App() {
     if (!user || user.role !== "ADMIN" || pathname !== "/") return;
     let active = true;
     const loadDashboard = async () => {
+      const encodedWarehouseId = encodeURIComponent(selectedWarehouseId);
       try {
         const [itemsResponse, pendingResponse, inboundResponse, outboundResponse] = await Promise.all([
-          fetch(`${apiBaseUrl}/admin/items?includeInactive=true`, { credentials: "include" }),
-          fetch(`${apiBaseUrl}/admin/outbound/pending`, { credentials: "include" }),
-          fetch(`${apiBaseUrl}/admin/reports/transactions?period=${currentPeriod}&type=inbound`, { credentials: "include" }),
-          fetch(`${apiBaseUrl}/admin/reports/transactions?period=${currentPeriod}&type=outbound`, { credentials: "include" }),
+          fetch(`${apiBaseUrl}/admin/items?includeInactive=true&warehouseId=${encodedWarehouseId}`, { credentials: "include" }),
+          fetch(`${apiBaseUrl}/admin/outbound/pending?warehouseId=${encodedWarehouseId}`, { credentials: "include" }),
+          fetch(`${apiBaseUrl}/admin/reports/transactions?period=${currentPeriod}&type=inbound&warehouseId=${encodedWarehouseId}`, { credentials: "include" }),
+          fetch(`${apiBaseUrl}/admin/reports/transactions?period=${currentPeriod}&type=outbound&warehouseId=${encodedWarehouseId}`, { credentials: "include" }),
         ]);
         if (!itemsResponse.ok || !pendingResponse.ok || !inboundResponse.ok || !outboundResponse.ok) throw new Error("dashboard query failed");
         const items = await itemsResponse.json() as ItemRow[];
@@ -150,7 +151,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [pathname, user]);
+  }, [pathname, selectedWarehouseId, user]);
 
   const onSelectWarehouse = (warehouseId: string) => {
     setSelectedWarehouseId(warehouseId);
@@ -185,7 +186,7 @@ export default function App() {
   const workspaceUser = toWorkspaceUser(user);
 
   if (user.role === "FINANCE" && pathname === "/admin/reports") {
-    return renderAdminLayout(workspaceUser, <ReportsPage />);
+    return renderAdminLayout(workspaceUser, <ReportsPage warehouseId={selectedWarehouseId} />);
   }
 
   if (user.role === "FINANCE") {
@@ -213,7 +214,7 @@ export default function App() {
   if (pathname === "/admin/returns") return renderAdminLayout(workspaceUser, <ReturnsPage />);
   if (pathname === "/admin/stocktake") return renderAdminLayout(workspaceUser, <StocktakePage />);
   if (pathname === "/admin/period-close") return renderAdminLayout(workspaceUser, <PeriodClosePage />);
-  if (pathname === "/admin/reports") return renderAdminLayout(workspaceUser, <ReportsPage />);
+  if (pathname === "/admin/reports") return renderAdminLayout(workspaceUser, <ReportsPage warehouseId={selectedWarehouseId} />);
 
   return renderAdminLayout(
     workspaceUser,
@@ -229,10 +230,12 @@ export default function App() {
           return (
             <div className={`metric metric--${card.tone}`} key={card.label}>
               <span className="metric__icon"><MetricIcon size={18} /></span>
-              <div>
-                <strong>{card.value}</strong>
-                <span>{card.label}</span>
-                <small>{card.hint}</small>
+              <div className="metric__content">
+                <span className="metric__label">{card.label}</span>
+                <div className="metric__value">
+                  <strong>{card.value}</strong>
+                </div>
+                <span className="metric__hint">{card.hint}</span>
               </div>
             </div>
           );
