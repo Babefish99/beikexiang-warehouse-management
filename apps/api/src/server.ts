@@ -10,8 +10,10 @@ import { classifyAdminBusinessError } from "./application/errors/business-rule-e
 import type { ItemRepository } from "./application/items/item-service.js";
 import { ItemService } from "./application/items/item-service.js";
 import { InMemoryInventoryEntryStore, InboundService } from "./application/inventory/inbound-service.js";
+import { AlertService } from "./application/inventory/alert-service.js";
 import { createInventoryMemoryState } from "./application/inventory/inventory-memory-state.js";
 import { InventoryQueryService } from "./application/inventory/inventory-query-service.js";
+import { NotificationService } from "./application/inventory/notification-service.js";
 import { OpeningStockService } from "./application/inventory/opening-stock-service.js";
 import { InMemoryOutboundStore, OutboundService } from "./application/inventory/outbound-service.js";
 import { ReturnService } from "./application/inventory/return-service.js";
@@ -31,6 +33,7 @@ import "./routes/admin/admin-request-context.js";
 import { registerInboundRoutes } from "./routes/admin/inbound.js";
 import { registerItemRoutes } from "./routes/admin/items.js";
 import { registerOpeningStockRoutes } from "./routes/admin/opening-stock.js";
+import { registerNotificationRoutes } from "./routes/admin/notifications.js";
 import { registerOutboundRoutes } from "./routes/admin/outbound.js";
 import { registerPeriodCloseRoutes } from "./routes/admin/period-close.js";
 import { registerReportRoutes } from "./routes/admin/reports.js";
@@ -123,6 +126,17 @@ export function buildServer() {
     listWarehouses: () => warehouseService.listActive(),
     listBatches: () => inventoryEntryStore.batches(),
     listBalances: () => inventoryEntryStore.balances(),
+  });
+  const alertService = new AlertService({
+    listBalances: () => inventoryEntryStore.balances(),
+    listItems: () => itemService.list(true),
+  });
+  const notificationService = new NotificationService({
+    getPendingOutboundCount: async () => [...inventoryState.approvals.values()].filter((approval) => approval.outboundStatus === "PENDING_OUTBOUND").length,
+    listLowStock: () => alertService.listLowStock(),
+    getPeriodStatus: async () => periodStore.getOrCreate(new Date().toISOString().slice(0, 7)),
+    getStocktakeNotice: async () => ({ count: inventoryState.stocktakeAdjustments.length, href: "/admin/stocktake" }),
+    getAnomalyCount: async () => inventoryState.stocktakeAdjustments.filter((adjustment) => adjustment.quantityDelta !== "0").length,
   });
   const listReportEntries = async (): Promise<ReportEntry[]> => inventoryState.ledger.map(toReportEntry);
   const inventoryReportService = new InventoryReportService(listReportEntries);
@@ -235,6 +249,7 @@ export function buildServer() {
   registerWarehouseRoutes(app, { warehouseService });
   registerInboundRoutes(app, { inboundService });
   registerOpeningStockRoutes(app, { openingStockService });
+  registerNotificationRoutes(app, { notificationService });
   registerOutboundRoutes(app, { outboundService });
   registerTransferRoutes(app, { transferService });
   registerReturnRoutes(app, { returnService });

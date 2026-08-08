@@ -13,6 +13,16 @@ async function createAdminSessionCookie(app: ReturnType<typeof buildServer>): Pr
   return response.headers["set-cookie"] as string;
 }
 
+async function createSessionCookie(app: ReturnType<typeof buildServer>, role: "ADMIN" | "FINANCE" = "ADMIN"): Promise<string> {
+  const response = await app.inject({
+    method: "GET",
+    url: `/auth/local?returnTo=/admin/notifications&role=${role}`,
+    remoteAddress: "127.0.0.1",
+    headers: { host: "localhost:3001" },
+  });
+  return response.headers["set-cookie"] as string;
+}
+
 describe("admin mutation audit", () => {
   beforeEach(() => {
     vi.stubEnv("NODE_ENV", "test");
@@ -153,6 +163,35 @@ describe("admin mutation audit", () => {
 
       expect(response.statusCode).toBe(500);
       expect(response.json()).toEqual({ error: "unexpected admin failure" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("allows admins and rejects finance for inventory notifications", async () => {
+    const app = buildServer();
+
+    try {
+      const [adminCookie, financeCookie] = await Promise.all([
+        createSessionCookie(app, "ADMIN"),
+        createSessionCookie(app, "FINANCE"),
+      ]);
+
+      const [adminResponse, financeResponse] = await Promise.all([
+        app.inject({ method: "GET", url: "/admin/notifications", headers: { cookie: adminCookie } }),
+        app.inject({ method: "GET", url: "/admin/notifications", headers: { cookie: financeCookie } }),
+      ]);
+
+      expect(adminResponse.statusCode).toBe(200);
+      expect(adminResponse.json()).toEqual([
+        expect.objectContaining({
+          kind: "PERIOD_CLOSE",
+          href: "/admin/period-close",
+          priority: 3,
+        }),
+      ]);
+      expect(financeResponse.statusCode).toBe(403);
+      expect(financeResponse.json()).toEqual({ error: "forbidden" });
     } finally {
       await app.close();
     }
