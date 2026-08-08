@@ -133,7 +133,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     listBalances: () => inventoryEntryStore.balances(),
   });
   const alertService = new AlertService({
-    listBalances: () => inventoryEntryStore.balances(),
+    listBalances: async () => inventoryEntryStore.balances(),
     listItems: () => itemService.list(true),
   });
   const notificationService = new NotificationService({
