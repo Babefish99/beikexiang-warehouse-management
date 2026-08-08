@@ -11,6 +11,7 @@ import type { ItemRepository } from "./application/items/item-service.js";
 import { ItemService } from "./application/items/item-service.js";
 import { InMemoryInventoryEntryStore, InboundService } from "./application/inventory/inbound-service.js";
 import { createInventoryMemoryState } from "./application/inventory/inventory-memory-state.js";
+import { InventoryQueryService } from "./application/inventory/inventory-query-service.js";
 import { OpeningStockService } from "./application/inventory/opening-stock-service.js";
 import { InMemoryOutboundStore, OutboundService } from "./application/inventory/outbound-service.js";
 import { ReturnService } from "./application/inventory/return-service.js";
@@ -117,6 +118,12 @@ export function buildServer() {
   });
   const inboundService = new InboundService(inventoryEntryStore, { warehouseService, itemService }, assertCurrentPeriodOpen);
   const openingStockService = new OpeningStockService(inventoryEntryStore, { warehouseService, itemService }, assertCurrentPeriodOpen);
+  const inventoryQueryService = new InventoryQueryService({
+    listItems: () => itemService.list(true),
+    listWarehouses: () => warehouseService.listActive(),
+    listBatches: () => inventoryEntryStore.batches(),
+    listBalances: () => inventoryEntryStore.balances(),
+  });
   const listReportEntries = async (): Promise<ReportEntry[]> => inventoryState.ledger.map(toReportEntry);
   const inventoryReportService = new InventoryReportService(listReportEntries);
   const transactionReportService = new TransactionReportService(listReportEntries);
@@ -233,7 +240,12 @@ export function buildServer() {
   registerReturnRoutes(app, { returnService });
   registerStocktakeRoutes(app, { stocktakeService });
   registerPeriodCloseRoutes(app, { periodCloseService });
-  registerReportRoutes(app, { inventoryReportService, transactionReportService });
+  registerReportRoutes(app, {
+    inventoryReportService,
+    transactionReportService,
+    inventoryQueryService,
+    listReportWarehouses: () => warehouseService.listActive(),
+  });
 
   return app;
 }

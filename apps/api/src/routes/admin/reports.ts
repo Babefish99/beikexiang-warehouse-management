@@ -1,8 +1,11 @@
 import type { FastifyInstance } from "fastify";
+import type { InventoryQueryService } from "../../application/inventory/inventory-query-service.js";
 import type { InventoryReportService, TransactionReportService, TransactionReportType } from "../../application/reports/report-query-service.js";
+import type { WarehouseDefinition } from "../../domain/warehouses/warehouse.js";
 import { buildExcelCompatibleReport } from "../../infrastructure/export/report-export.js";
 
 interface ReportQuery { period?: string; type?: TransactionReportType; warehouseId?: string }
+interface InventorySearchQuery { query?: string; warehouseId?: string }
 
 function readPeriod(period?: string): string {
   return period ?? new Date().toISOString().slice(0, 7);
@@ -12,11 +15,20 @@ function readType(type?: TransactionReportType): TransactionReportType {
   return type ?? "all";
 }
 
-export function registerReportRoutes(app: FastifyInstance, dependencies: { inventoryReportService: InventoryReportService; transactionReportService: TransactionReportService }): void {
+export function registerReportRoutes(app: FastifyInstance, dependencies: {
+  inventoryReportService: InventoryReportService;
+  transactionReportService: TransactionReportService;
+  inventoryQueryService: InventoryQueryService;
+  listReportWarehouses: () => Promise<WarehouseDefinition[]>;
+}): void {
   app.get<{ Querystring: ReportQuery }>("/admin/reports/summary", async (request) => dependencies.inventoryReportService.getSummary(readPeriod(request.query.period), request.query.warehouseId));
   app.get<{ Querystring: ReportQuery }>("/admin/reports/transactions", async (request) => {
     return dependencies.transactionReportService.getByType(readPeriod(request.query.period), readType(request.query.type), request.query.warehouseId);
   });
+  app.get<{ Querystring: InventorySearchQuery }>("/admin/reports/inventory-search", async (request) => {
+    return dependencies.inventoryQueryService.search(request.query.query ?? "", request.query.warehouseId);
+  });
+  app.get("/admin/reports/warehouses", async () => dependencies.listReportWarehouses());
   app.get<{ Querystring: ReportQuery }>("/admin/reports/export", async (request, reply) => {
     const period = readPeriod(request.query.period);
     const type = readType(request.query.type);
