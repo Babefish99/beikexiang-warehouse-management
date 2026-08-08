@@ -19,7 +19,7 @@ import { InMemoryOutboundStore, OutboundService } from "./application/inventory/
 import { ReturnService } from "./application/inventory/return-service.js";
 import { InMemoryStocktakeStore, StocktakeService } from "./application/inventory/stocktake-service.js";
 import { InMemoryMovementStore, TransferService } from "./application/inventory/transfer-service.js";
-import { InMemoryAccountingPeriodStore, PeriodCloseService } from "./application/periods/period-close-service.js";
+import { InMemoryAccountingPeriodStore, PeriodCloseService, type AccountingPeriodStore } from "./application/periods/period-close-service.js";
 import { InventoryReportService, TransactionReportService, type ReportEntry } from "./application/reports/report-query-service.js";
 import { WarehouseService } from "./application/warehouses/warehouse-service.js";
 import { ApprovalSyncService, InMemoryApprovalSyncStore } from "./application/wecom/approval-sync-service.js";
@@ -75,7 +75,11 @@ function toReportEntry(entry: { id: string; occurredAt: string; warehouseId: str
   };
 }
 
-export function buildServer() {
+interface BuildServerOptions {
+  periodStore?: AccountingPeriodStore;
+}
+
+export function buildServer(options: BuildServerOptions = {}) {
   const config = readServerConfig(process.env);
   const app = Fastify({ logger: true });
   const persistence = config.persistenceDriver === "prisma"
@@ -95,9 +99,10 @@ export function buildServer() {
   const itemRepository = persistence.repositories.items;
   const itemService = new ItemService(itemRepository);
   const inventoryState = createInventoryMemoryState();
-  const periodStore = new InMemoryAccountingPeriodStore();
+  const periodStore = options.periodStore ?? new InMemoryAccountingPeriodStore();
+  const currentPeriodCode = () => new Date().toISOString().slice(0, 7);
   const assertCurrentPeriodOpen = () => {
-    const periodCode = new Date().toISOString().slice(0, 7);
+    const periodCode = currentPeriodCode();
     const period = periodStore.getOrCreate(periodCode);
     if (period.status !== "OPEN") throw new Error(`closed period: ${period.code}`);
   };
@@ -134,7 +139,10 @@ export function buildServer() {
   const notificationService = new NotificationService({
     getPendingOutboundCount: async () => [...inventoryState.approvals.values()].filter((approval) => approval.outboundStatus === "PENDING_OUTBOUND").length,
     listLowStock: () => alertService.listLowStock(),
-    getPeriodStatus: async () => periodStore.getOrCreate(new Date().toISOString().slice(0, 7)),
+    getPeriodStatus: async () => {
+      const code = currentPeriodCode();
+      return periodStore.get(code) ?? { code, status: "OPEN" as const };
+    },
     getStocktakeNotice: async () => ({ count: inventoryState.stocktakeAdjustments.length, href: "/admin/stocktake" }),
     getAnomalyCount: async () => inventoryState.stocktakeAdjustments.filter((adjustment) => adjustment.quantityDelta !== "0").length,
   });

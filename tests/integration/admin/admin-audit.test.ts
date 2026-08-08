@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createAccountingPeriod } from "../../../apps/api/src/domain/periods/accounting-period.js";
 import { buildServer } from "../../../apps/api/src/server.js";
 import { InMemoryAuditService } from "../../../apps/api/src/infrastructure/audit/audit-service.js";
 
@@ -192,6 +193,40 @@ describe("admin mutation audit", () => {
       ]);
       expect(financeResponse.statusCode).toBe(403);
       expect(financeResponse.json()).toEqual({ error: "forbidden" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("does not create or save a current period when notifications are read", async () => {
+    const currentPeriodCode = new Date().toISOString().slice(0, 7);
+    const periodStore = {
+      get: vi.fn().mockReturnValue(undefined),
+      getOrCreate: vi.fn((code: string) => createAccountingPeriod({ code })),
+      save: vi.fn(),
+    };
+    const app = (buildServer as (options?: { periodStore?: typeof periodStore }) => ReturnType<typeof buildServer>)({ periodStore });
+
+    try {
+      const cookie = await createSessionCookie(app, "ADMIN");
+      const response = await app.inject({
+        method: "GET",
+        url: "/admin/notifications",
+        headers: { cookie },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual([
+        expect.objectContaining({
+          id: `period-close-${currentPeriodCode}`,
+          kind: "PERIOD_CLOSE",
+          href: "/admin/period-close",
+          priority: 3,
+        }),
+      ]);
+      expect(periodStore.get).toHaveBeenCalledWith(currentPeriodCode);
+      expect(periodStore.getOrCreate).not.toHaveBeenCalled();
+      expect(periodStore.save).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }
