@@ -1,11 +1,29 @@
 import type { ReactNode } from "react";
-import { AppShell } from "../components/AppShell";
+import { AppShell, type WarehouseOption, type WorkspaceUser } from "../components/AppShell";
 
-export interface AdminLayoutUser {
-  name: string;
-  roleLabel: string;
-}
+export type { WarehouseOption, WorkspaceUser };
 
-export function AdminLayout({ children, user }: { children: ReactNode; user: AdminLayoutUser }) {
-  return <AppShell>{children}<span className="sr-only">当前登录：{user.name}（{user.roleLabel}）</span></AppShell>;
+export function AdminLayout({
+  children,
+  user,
+  warehouses,
+  selectedWarehouseId,
+  onSelectWarehouse,
+}: {
+  children: ReactNode;
+  user: WorkspaceUser;
+  warehouses: WarehouseOption[];
+  selectedWarehouseId: string;
+  onSelectWarehouse(warehouseId: string): void;
+}) {
+  return (
+    <AppShell
+      user={user}
+      warehouses={warehouses}
+      selectedWarehouseId={selectedWarehouseId}
+      onSelectWarehouse={onSelectWarehouse}
+    >
+      {children}
+    </AppShell>
+  );
 }
