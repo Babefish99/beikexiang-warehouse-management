@@ -119,8 +119,8 @@ export default function App() {
       const encodedWarehouseId = encodeURIComponent(selectedWarehouseId);
       try {
         const [itemsResponse, pendingResponse, inboundResponse, outboundResponse] = await Promise.all([
-          fetch(`${apiBaseUrl}/admin/items?includeInactive=true&warehouseId=${encodedWarehouseId}`, { credentials: "include" }),
-          fetch(`${apiBaseUrl}/admin/outbound/pending?warehouseId=${encodedWarehouseId}`, { credentials: "include" }),
+          fetch(`${apiBaseUrl}/admin/items?includeInactive=true`, { credentials: "include" }),
+          fetch(`${apiBaseUrl}/admin/outbound/pending`, { credentials: "include" }),
           fetch(`${apiBaseUrl}/admin/reports/transactions?period=${currentPeriod}&type=inbound&warehouseId=${encodedWarehouseId}`, { credentials: "include" }),
           fetch(`${apiBaseUrl}/admin/reports/transactions?period=${currentPeriod}&type=outbound&warehouseId=${encodedWarehouseId}`, { credentials: "include" }),
         ]);
