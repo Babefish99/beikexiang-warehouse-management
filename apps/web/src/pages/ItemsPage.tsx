@@ -71,7 +71,7 @@ function toPayload(form: ItemFormState) {
 
 export function ItemsPage() {
   const [items, setItems] = useState<ItemRow[]>([]);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get("search")?.trim() ?? "");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -228,7 +228,12 @@ export function ItemsPage() {
         <div className="master-data-toolbar">
           <label className="search-field">
             <Search size={16} />
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索编码、名称或选项 key" />
+            <input
+              aria-label="物品搜索"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="搜索编码、名称或选项 key"
+            />
           </label>
           <span className="toolbar-count">共 {filteredItems.length} 项</span>
         </div>

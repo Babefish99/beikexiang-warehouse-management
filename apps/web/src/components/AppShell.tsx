@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Bell, BarChart3, Building2, ChevronDown, LayoutDashboard, Menu, PackageSearch, Search, Settings, ShieldCheck, UserCircle, Warehouse, X } from "lucide-react";
 
 export type WarehouseOption = { id: string; code: string; name: string; isActive: boolean };
@@ -92,27 +92,31 @@ export function AppShell({
   const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchPopoverOpen, setSearchPopoverOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<InventorySearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<InventoryNotification[]>([]);
   const [notificationError, setNotificationError] = useState<string | null>(null);
   const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
+  const searchRequestVersion = useRef(0);
 
   useEffect(() => {
     const query = searchQuery.trim();
+    searchRequestVersion.current += 1;
+    const requestVersion = searchRequestVersion.current;
+    setSearchResults([]);
+    setSearchError(null);
+
     if (!query) {
-      setSearchResults([]);
       setSearchLoading(false);
-      setSearchError(null);
+      setSearchPopoverOpen(false);
       return;
     }
 
-    let active = true;
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setSearchLoading(true);
-      setSearchError(null);
       try {
         const params = new URLSearchParams({
           query,
@@ -123,23 +127,53 @@ export function AppShell({
           signal: controller.signal,
         });
         if (!response.ok) throw new Error("全局搜索加载失败");
-        if (!active) return;
-        setSearchResults(await response.json() as InventorySearchResult[]);
+        const payload = await response.json() as InventorySearchResult[];
+        if (controller.signal.aborted || searchRequestVersion.current !== requestVersion) return;
+        setSearchResults(payload);
       } catch (error) {
-        if (!active || controller.signal.aborted) return;
+        if (controller.signal.aborted || searchRequestVersion.current !== requestVersion) return;
         setSearchResults([]);
         setSearchError(error instanceof Error ? error.message : "全局搜索加载失败");
       } finally {
-        if (active) setSearchLoading(false);
+        if (!controller.signal.aborted && searchRequestVersion.current === requestVersion) setSearchLoading(false);
       }
     }, 250);
 
     return () => {
-      active = false;
       controller.abort();
       window.clearTimeout(timer);
     };
   }, [searchQuery, selectedWarehouseId]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (mobileMenuOpen) {
+        setMobileMenuOpen(false);
+        return;
+      }
+      if (warehouseMenuOpen) {
+        setWarehouseMenuOpen(false);
+        return;
+      }
+      if (searchPopoverOpen) {
+        setSearchPopoverOpen(false);
+        return;
+      }
+      if (notificationMenuOpen) {
+        setNotificationMenuOpen(false);
+        return;
+      }
+      if (userMenuOpen) {
+        setUserMenuOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [mobileMenuOpen, notificationMenuOpen, searchPopoverOpen, userMenuOpen, warehouseMenuOpen]);
 
   useEffect(() => {
     if (user.role !== "ADMIN") {
@@ -173,12 +207,13 @@ export function AppShell({
     };
   }, [user.role]);
 
-  const showSearchPopover = searchQuery.trim().length > 0;
+  const showSearchPopover = searchPopoverOpen && searchQuery.trim().length > 0;
 
   const clearSearch = () => {
     setSearchQuery("");
     setSearchResults([]);
     setSearchError(null);
+    setSearchPopoverOpen(false);
   };
 
   const navigateToSearchResult = (code: string) => {
@@ -266,6 +301,7 @@ export function AppShell({
                 aria-expanded={warehouseMenuOpen}
                 onClick={() => {
                   setWarehouseMenuOpen((open) => !open);
+                  setSearchPopoverOpen(false);
                   setNotificationMenuOpen(false);
                   setUserMenuOpen(false);
                 }}
@@ -284,6 +320,7 @@ export function AppShell({
                     onClick={() => {
                       onSelectWarehouse("all");
                       setWarehouseMenuOpen(false);
+                      if (searchQuery.trim()) setSearchPopoverOpen(true);
                     }}
                   >
                     <span>全部仓库</span>
@@ -299,6 +336,7 @@ export function AppShell({
                       onClick={() => {
                         onSelectWarehouse(warehouse.id);
                         setWarehouseMenuOpen(false);
+                        if (searchQuery.trim()) setSearchPopoverOpen(true);
                       }}
                     >
                       <span>{warehouse.code} · {warehouse.name}</span>
@@ -315,11 +353,16 @@ export function AppShell({
               <Search size={16} className="workspace-search__icon" />
               <input
                 aria-label="全局搜索"
+                aria-expanded={showSearchPopover}
                 type="search"
                 value={searchQuery}
                 placeholder="搜索编码、名称、批次或仓库"
-                onChange={(event) => setSearchQuery(event.target.value)}
+                onChange={(event) => {
+                  setSearchQuery(event.target.value);
+                  setSearchPopoverOpen(event.target.value.trim().length > 0);
+                }}
                 onFocus={() => {
+                  if (searchQuery.trim()) setSearchPopoverOpen(true);
                   setWarehouseMenuOpen(false);
                   setNotificationMenuOpen(false);
                   setUserMenuOpen(false);
@@ -374,6 +417,7 @@ export function AppShell({
                   onClick={() => {
                     setNotificationMenuOpen((open) => !open);
                     setWarehouseMenuOpen(false);
+                    setSearchPopoverOpen(false);
                     setUserMenuOpen(false);
                   }}
                 >
@@ -412,6 +456,7 @@ export function AppShell({
                 onClick={() => {
                   setUserMenuOpen((open) => !open);
                   setWarehouseMenuOpen(false);
+                  setSearchPopoverOpen(false);
                   setNotificationMenuOpen(false);
                 }}
               >
