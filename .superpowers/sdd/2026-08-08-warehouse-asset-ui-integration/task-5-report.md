@@ -122,3 +122,17 @@ $ tsc -b --pretty false
 
 - The dashboard now appends `warehouseId` to `/admin/items` and `/admin/outbound/pending` per the task brief, but current backend routes do not use that parameter yet. This is harmless today and keeps the UI contract ready if backend filtering is added later.
 - The focused dashboard E2E intentionally allows both scoped and unscoped `/admin/outbound/pending` callers because the dashboard and outbound page currently share that endpoint while only the dashboard behavior was in scope for this task.
+
+## Fix round 1
+
+The review identified that the standard item master and pending outbound approval list are group-wide endpoints. The dashboard now leaves `warehouseId` off both requests and keeps it only on the warehouse-scoped transaction queries. The dashboard E2E now asserts this boundary, verifies report transactions change with the warehouse selector, and uses a contract-complete pending approval fixture so the quick-action navigation test also exercises the outbound page safely.
+
+Verification:
+
+```text
+corepack pnpm exec playwright test tests/e2e/admin/reports.spec.ts tests/e2e/navigation/dashboard.spec.ts --reporter=line
+5 passed (3.2s)
+
+corepack pnpm --filter @warehouse/web typecheck
+$ tsc -b --pretty false
+```
