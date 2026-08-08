@@ -96,8 +96,9 @@ export class StocktakeService {
     const period = this.periodStore.getOrCreate(periodCode);
     if (period.status !== "OPEN") throw new Error(`closed period: ${period.code}`);
     if (!input.warehouseId.trim() || !input.itemId.trim() || !input.batchId.trim()) throw new Error("warehouse, item, and batch are required");
-    const difference = new Decimal(input.actualQuantity).minus(input.bookQuantity);
-    if (!difference.isFinite()) throw new Error("stocktake quantity is invalid");
+    const actualQuantity = new Decimal(input.actualQuantity);
+    if (!actualQuantity.isFinite() || actualQuantity.isNegative()) throw new Error("stocktake quantity is invalid");
+    const difference = actualQuantity.minus(input.bookQuantity);
     if (!difference.isZero() && !input.reason?.trim()) throw new Error("reason is required");
     const balance = this.store.balance(input.warehouseId, input.batchId);
     if (!balance || balance.itemId !== input.itemId) throw new Error("stocktake balance not found");

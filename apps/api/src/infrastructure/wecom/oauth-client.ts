@@ -1,3 +1,4 @@
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { AuthenticatedUser } from "../../application/auth/role-service.js";
 
 interface WeComOAuthResponse {
@@ -26,6 +27,26 @@ function safeReturnTo(value: string): string {
   }
 }
 
+type OAuthStatePayload = { nonce: string; returnTo: string };
+
+function encodeState(returnTo: string): string {
+  const payload: OAuthStatePayload = {
+    nonce: randomBytes(32).toString("base64url"),
+    returnTo: safeReturnTo(returnTo),
+  };
+  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+}
+
+function decodeState(state: string): OAuthStatePayload | null {
+  try {
+    const payload = JSON.parse(Buffer.from(state, "base64url").toString("utf8")) as Partial<OAuthStatePayload>;
+    if (typeof payload.nonce !== "string" || payload.nonce.length < 32 || typeof payload.returnTo !== "string") return null;
+    return { nonce: payload.nonce, returnTo: safeReturnTo(payload.returnTo) };
+  } catch {
+    return null;
+  }
+}
+
 export class WeComOAuthClient {
   private readonly fetcher: typeof fetch;
 
@@ -39,18 +60,27 @@ export class WeComOAuthClient {
     url.searchParams.set("appid", this.options.corpId);
     url.searchParams.set("agentid", this.options.agentId);
     url.searchParams.set("redirect_uri", this.options.redirectUri);
-    url.searchParams.set("state", Buffer.from(safeReturnTo(returnTo), "utf8").toString("base64url"));
+    url.searchParams.set("state", encodeState(returnTo));
     return url.toString();
   }
 
   decodeReturnTo(state?: string): string {
     if (!state) return "/";
+    const payload = decodeState(state);
+    if (payload) return payload.returnTo;
     try {
       const returnTo = Buffer.from(state, "base64url").toString("utf8");
       return safeReturnTo(returnTo);
     } catch {
       return "/";
     }
+  }
+
+  validateState(state?: string, expectedState?: string): boolean {
+    if (!state || !expectedState || !decodeState(state)) return false;
+    const actual = Buffer.from(state, "utf8");
+    const expected = Buffer.from(expectedState, "utf8");
+    return actual.length === expected.length && timingSafeEqual(actual, expected);
   }
 
   async exchangeCode(code: string): Promise<{ weComUserId: string; name: string }> {

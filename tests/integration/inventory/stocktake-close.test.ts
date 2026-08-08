@@ -36,6 +36,24 @@ describe("stocktake and period close", () => {
     await expect(service.close({ period, pendingOutboundCount: 0, unpostedAdjustmentCount: 0 })).resolves.toMatchObject({ status: "CLOSED", code: "2026-08" });
   });
 
+  it("rejects a negative physical stock quantity", async () => {
+    const store = new InMemoryStocktakeStore();
+    store.seedBalance({ warehouseId: "wh-1", itemId: "item-1", batchId: "batch-1", bookQuantity: "10", unitCost: "20" });
+    const service = new StocktakeService(store);
+
+    await expect(service.record({
+      periodCode: "2026-08",
+      operatorId: "admin-1",
+      warehouseId: "wh-1",
+      itemId: "item-1",
+      batchId: "batch-1",
+      bookQuantity: "10",
+      actualQuantity: "-1",
+      reason: "invalid physical count",
+    })).rejects.toThrow("stocktake quantity is invalid");
+    expect(store.balance("wh-1", "batch-1")?.bookQuantity).toBe("10");
+  });
+
   it("uses server-side close checks instead of trusting client counts", async () => {
     const service = new PeriodCloseService(new InMemoryAccountingPeriodStore(), {
       getPendingOutboundCount: () => 1,

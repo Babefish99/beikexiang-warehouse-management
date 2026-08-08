@@ -45,6 +45,8 @@ import { registerLocalAuthRoutes } from "./routes/auth/local-auth.js";
 import { registerApprovalCallbackRoute } from "./routes/wecom/approval-callback.js";
 
 const SESSION_COOKIE = "warehouse_session";
+const WECOM_OAUTH_STATE_COOKIE = "wecom_oauth_state";
+const WECOM_OAUTH_STATE_TTL_SECONDS = 10 * 60;
 
 dotenv.config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../.env") });
 
@@ -59,6 +61,18 @@ function roleForUser(weComUserId: string): AuthenticatedUser["role"] {
 function readCookie(header: string | undefined, name: string): string | null {
   const value = header?.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${name}=`));
   return value ? decodeURIComponent(value.slice(name.length + 1)) : null;
+}
+
+function serializeCookie(name: string, value: string, options: { httpOnly: boolean; sameSite: "lax"; secure: boolean; path: string; maxAge: number }): string {
+  const attributes = [
+    `${name}=${encodeURIComponent(value)}`,
+    ...(options.httpOnly ? ["HttpOnly"] : []),
+    `Path=${options.path}`,
+    `SameSite=${options.sameSite[0].toUpperCase()}${options.sameSite.slice(1)}`,
+    `Max-Age=${options.maxAge}`,
+  ];
+  if (options.secure) attributes.push("Secure");
+  return attributes.join("; ");
 }
 
 function toReportEntry(entry: { id: string; occurredAt: string; warehouseId: string; itemId: string; type: string; quantity: string; unitCost: string; amount: string; referenceType: string }): ReportEntry {
@@ -196,8 +210,19 @@ export function buildServer(options: BuildServerOptions = {}) {
   app.get("/health", async () => ({ status: "ok", service: "warehouse-api", persistenceDriver: persistence.driver }));
   app.get<{ Querystring: { returnTo?: string } }>("/auth/wecom/authorize", async (request, reply) => {
     try {
+      const authorizeUrl = oauthClient.getAuthorizeUrl(request.query.returnTo ?? "/");
+      const state = new URL(authorizeUrl).searchParams.get("state");
+      if (!state) throw new Error("enterprise WeChat OAuth state is missing");
+      const secureCookies = config.apiBaseUrl.startsWith("https://");
+      reply.header("set-cookie", serializeCookie(WECOM_OAUTH_STATE_COOKIE, state, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: secureCookies,
+        path: "/auth/wecom/callback",
+        maxAge: WECOM_OAUTH_STATE_TTL_SECONDS,
+      }));
       return {
-        authorizeUrl: oauthClient.getAuthorizeUrl(request.query.returnTo ?? "/"),
+        authorizeUrl,
         ...(config.localAuthEnabled ? { localAuthUrl: `${config.apiBaseUrl}/auth/local?returnTo=${encodeURIComponent(request.query.returnTo ?? "/")}` } : {}),
       };
     } catch (error) {
@@ -209,6 +234,8 @@ export function buildServer(options: BuildServerOptions = {}) {
   });
   app.get<{ Querystring: { code?: string; state?: string } }>("/auth/wecom/callback", async (request, reply) => {
     if (!request.query.code) return reply.code(400).send({ error: "code is required" });
+    const expectedState = readCookie(request.headers.cookie, WECOM_OAUTH_STATE_COOKIE);
+    if (!oauthClient.validateState(request.query.state, expectedState ?? undefined)) return reply.code(400).send({ error: "invalid_oauth_state" });
     const identity = await oauthClient.exchangeCode(request.query.code);
     const user: AuthenticatedUser = {
       id: identity.weComUserId,
@@ -217,7 +244,17 @@ export function buildServer(options: BuildServerOptions = {}) {
       role: roleForUser(identity.weComUserId),
     };
     const token = sessionService.createSession(user);
-    reply.header("set-cookie", `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${sessionService.cookieOptions(false).maxAge}`);
+    const secureCookies = config.apiBaseUrl.startsWith("https://");
+    reply.header("set-cookie", [
+      serializeCookie(SESSION_COOKIE, token, sessionService.cookieOptions(secureCookies)),
+      serializeCookie(WECOM_OAUTH_STATE_COOKIE, "", {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: secureCookies,
+        path: "/auth/wecom/callback",
+        maxAge: 0,
+      }),
+    ]);
     await auditService.record({
       actorUserId: user.id,
       actorRole: user.role,

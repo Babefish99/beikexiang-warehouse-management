@@ -19,13 +19,18 @@ describe("enterprise WeChat OAuth client", () => {
     expect(url.searchParams.get("appid")).toBe("corp-1");
     expect(url.searchParams.get("agentid")).toBe("agent-1");
     expect(url.searchParams.get("redirect_uri")).toBe("https://warehouse.example.com/auth/callback");
-    expect(url.searchParams.get("state")).toBe(Buffer.from("/admin/reports").toString("base64url"));
+    const state = url.searchParams.get("state");
+    expect(state).toBeTruthy();
+    expect(client.decodeReturnTo(state ?? undefined)).toBe("/admin/reports");
+    expect(client.validateState(state ?? undefined, state ?? undefined)).toBe(true);
   });
 
   it("rejects external and backslash-based return paths", () => {
     const client = new WeComOAuthClient({ corpId: "corp-1", agentId: "agent-1", secret: "secret", redirectUri: "https://warehouse.example.com/auth/callback" });
 
-    expect(new URL(client.getAuthorizeUrl("//evil.example.com")).searchParams.get("state")).toBe(Buffer.from("/").toString("base64url"));
+    const state = new URL(client.getAuthorizeUrl("//evil.example.com")).searchParams.get("state");
+    expect(client.decodeReturnTo(state ?? undefined)).toBe("/");
+    expect(client.validateState(state ?? undefined, "different-state")).toBe(false);
     expect(client.decodeReturnTo(Buffer.from("/\\evil.example.com").toString("base64url"))).toBe("/");
   });
 

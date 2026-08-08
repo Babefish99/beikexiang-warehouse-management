@@ -61,7 +61,7 @@ export default function App() {
       try {
         const [sessionResponse, authorizeResponse] = await Promise.all([
           fetch(`${apiBaseUrl}/auth/session`, { credentials: "include" }),
-          fetch(`${apiBaseUrl}/auth/wecom/authorize?returnTo=${encodeURIComponent(pathname)}`),
+          fetch(`${apiBaseUrl}/auth/wecom/authorize?returnTo=${encodeURIComponent(pathname)}`, { credentials: "include" }),
         ]);
         if (sessionResponse.ok) setUser((await sessionResponse.json()).user as WebUser);
         if (authorizeResponse.ok) {
