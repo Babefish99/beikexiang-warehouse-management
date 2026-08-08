@@ -37,12 +37,16 @@ function isOnOrBeforePeriodEnd(entry: ReportEntry, period: string): boolean {
   return new Date(entry.occurredAt) < endExclusive;
 }
 
+function matchesWarehouse(entry: ReportEntry, warehouseId?: string): boolean {
+  return !warehouseId || warehouseId === "all" || entry.warehouseId === warehouseId;
+}
+
 export class InventoryReportService {
   constructor(private readonly listEntries: () => Promise<ReportEntry[]>) {}
 
-  async getSummary(period: string): Promise<Array<{ itemId: string; quantity: string; amount: string }>> {
+  async getSummary(period: string, warehouseId?: string): Promise<Array<{ itemId: string; quantity: string; amount: string }>> {
     const grouped = new Map<string, { quantity: Decimal; amount: Decimal }>();
-    for (const entry of (await this.listEntries()).filter((candidate) => isOnOrBeforePeriodEnd(candidate, period))) {
+    for (const entry of (await this.listEntries()).filter((candidate) => matchesWarehouse(candidate, warehouseId) && isOnOrBeforePeriodEnd(candidate, period))) {
       const current = grouped.get(entry.itemId) ?? { quantity: new Decimal(0), amount: new Decimal(0) };
       current.quantity = current.quantity.plus(entry.quantity);
       current.amount = current.amount.plus(new Decimal(entry.quantity).mul(entry.unitCost));
@@ -57,10 +61,10 @@ export class InventoryReportService {
 export class TransactionReportService {
   constructor(private readonly listEntries: () => Promise<ReportEntry[]>) {}
 
-  async getByType(period: string, type: TransactionReportType): Promise<ReportEntry[]> {
+  async getByType(period: string, type: TransactionReportType, warehouseId?: string): Promise<ReportEntry[]> {
     const allowedTypes = transactionTypeMap[type];
     return (await this.listEntries())
-      .filter((entry) => inPeriod(entry, period) && (!allowedTypes || allowedTypes.includes(entry.type)))
+      .filter((entry) => matchesWarehouse(entry, warehouseId) && inPeriod(entry, period) && (!allowedTypes || allowedTypes.includes(entry.type)))
       .sort((left, right) => left.occurredAt.localeCompare(right.occurredAt) || left.id.localeCompare(right.id));
   }
 

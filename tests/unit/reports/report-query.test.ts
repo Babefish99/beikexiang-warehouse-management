@@ -20,6 +20,14 @@ describe("inventory report queries", () => {
     await expect(service.getSummary("2026-08")).resolves.toEqual([{ itemId: "item-1", quantity: "18", amount: "356.00" }]);
   });
 
+  it("filters month-end summary to one warehouse", async () => {
+    const service = new InventoryReportService(async () => entries);
+
+    await expect(service.getSummary("2026-08", "wh-1")).resolves.toEqual([
+      { itemId: "item-1", quantity: "16", amount: "316.00" },
+    ]);
+  });
+
   it("keeps transfer, return, and adjustment rows separately", async () => {
     const service = new TransactionReportService(async () => entries);
 
@@ -39,6 +47,14 @@ describe("inventory report queries", () => {
       expect.objectContaining({ id: "5", type: "TRANSFER_IN", quantity: "2", amount: "40.00" }),
       expect.objectContaining({ id: "6", type: "RETURN", quantity: "1", amount: "20.00" }),
       expect.objectContaining({ id: "7", type: "ADJUSTMENT", quantity: "-1", amount: "20.00" }),
+    ]);
+  });
+
+  it("filters transactions to one warehouse without changing the default query", async () => {
+    const service = new TransactionReportService(async () => entries);
+
+    await expect(service.getByType("2026-08", "transfers", "wh-2")).resolves.toEqual([
+      expect.objectContaining({ id: "5", warehouseId: "wh-2", type: "TRANSFER_IN" }),
     ]);
   });
 
