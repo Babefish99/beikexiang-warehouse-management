@@ -2,11 +2,12 @@ import { expect, test } from "@playwright/test";
 
 test.describe("master data administration", () => {
   test("item and warehouse APIs remain administrator-only", async ({ request }) => {
-    const [itemList, itemCreate, itemUpdate, itemDeactivate, warehouseList, warehouseUpdate] = await Promise.all([
+    const [itemList, itemCreate, itemUpdate, itemDeactivate, itemActivate, warehouseList, warehouseUpdate] = await Promise.all([
       request.get("http://127.0.0.1:3001/admin/items"),
       request.post("http://127.0.0.1:3001/admin/items", { data: {} }),
       request.patch("http://127.0.0.1:3001/admin/items/item-1", { data: {} }),
       request.post("http://127.0.0.1:3001/admin/items/item-1/deactivate"),
+      request.post("http://127.0.0.1:3001/admin/items/item-1/activate"),
       request.get("http://127.0.0.1:3001/admin/warehouses"),
       request.patch("http://127.0.0.1:3001/admin/warehouses/warehouse-1", { data: {} }),
     ]);
@@ -15,11 +16,36 @@ test.describe("master data administration", () => {
     expect(itemCreate.status()).toBe(401);
     expect(itemUpdate.status()).toBe(401);
     expect(itemDeactivate.status()).toBe(401);
+    expect(itemActivate.status()).toBe(401);
     expect(warehouseList.status()).toBe(401);
     expect(warehouseUpdate.status()).toBe(401);
   });
 
-  test("item page creates items and preserves edit input when the API rejects an immutable code change", async ({ page }) => {
+  test("uses consistent item action labels and reactivates an inactive item", async ({ page }) => {
+    let items = [
+      { id: "item-1", code: "TEA-0001", name: "Tea leaves", specification: "Iron Goddess", unit: "box", categoryId: "cat-tea", isActive: false },
+    ];
+
+    await page.route("http://127.0.0.1:3001/admin/items?includeInactive=true", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(items) });
+    });
+    await page.route("http://127.0.0.1:3001/admin/items/item-1/activate", async (route) => {
+      items = items.map((item) => ({ ...item, isActive: true }));
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(items[0]) });
+    });
+
+    await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Fitems");
+
+    const row = page.locator("tbody tr").first();
+    await expect(row.getByRole("button", { name: "编辑", exact: true })).toBeVisible();
+    await expect(row.getByRole("button", { name: "启用", exact: true })).toBeVisible();
+    await expect(row.getByRole("button", { name: "停用", exact: true })).toHaveCount(0);
+
+    await row.getByRole("button", { name: "启用", exact: true }).click();
+    await expect(row.getByRole("button", { name: "停用", exact: true })).toBeVisible();
+  });
+
+  test("item page opens the edit modal and preserves edit input when the API rejects an immutable code change", async ({ page }) => {
     let items = [
       { id: "item-1", code: "TEA-0001", name: "Tea leaves", specification: "Iron Goddess", unit: "box", categoryId: "cat-tea", weComOptionKey: "opt-tea", minimumStock: "3", isActive: true },
     ];
@@ -56,8 +82,13 @@ test.describe("master data administration", () => {
 
     await expect(page.locator("tbody").getByText("Green tea", { exact: true })).toBeVisible();
 
-    await page.getByRole("button", { name: "编辑 Tea leaves" }).click();
-    const editForm = page.locator("form").nth(1);
+    await page.getByRole("button", { name: "编辑", exact: true }).first().click();
+    const dialog = page.getByRole("dialog", { name: "编辑物品" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("分类前缀", { exact: true })).toHaveCount(0);
+    await expect(dialog.getByLabel("分类", { exact: true })).toHaveCount(0);
+    await expect(page.locator(".master-data-form-panel")).toHaveCount(1);
+    const editForm = dialog.locator("form");
     await editForm.getByLabel("编码").fill("TEA-0099");
     await editForm.getByLabel("名称").fill("Tea leaves premium");
     await editForm.getByRole("button", { name: "保存修改" }).click();

@@ -114,3 +114,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .workspace-user-button strong, .workspace-user-button small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .workspace-popover { left: auto; right: 0; }
 }
+
+.modal-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 24px; background: rgba(24, 32, 56, .42); }
+.modal-dialog { width: min(760px, 100%); max-height: min(720px, calc(100vh - 48px)); overflow: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: 0 24px 70px rgba(24, 32, 56, .22); }
+.modal-dialog__header { min-height: 72px; padding: 18px 22px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--border); }
+.modal-dialog__header strong, .modal-dialog__header small { display: block; }.modal-dialog__header strong { font-size: 15px; }.modal-dialog__header small { margin-top: 5px; color: var(--muted); font-size: 11px; }
+.modal-dialog__close { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); font-size: 22px; line-height: 1; }.modal-dialog__close:hover { border-color: var(--border); background: #f8fafc; color: var(--navy); }
+.modal-dialog__form { padding: 20px 22px 22px; }.modal-dialog__error { margin-top: 0; padding: 10px 12px; border-radius: 7px; background: #fff4f1; }
+@media (max-width: 640px) { .modal-backdrop { padding: 12px; }.modal-dialog { max-height: calc(100vh - 24px); }.modal-dialog__header { padding-inline: 18px; }.modal-dialog__form { grid-template-columns: 1fr; padding: 18px; } }

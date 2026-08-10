@@ -170,6 +170,26 @@ export function ItemsPage() {
     }
   };
 
+  const activateItem = async (itemId: string) => {
+    setSubmitting(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const response = await fetch(`${apiBaseUrl}/admin/items/${itemId}/activate`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      setMessage("物品已启用");
+      if (editingItemId === itemId) setEditingItemId(null);
+      await loadItems();
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "物品启用失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className="page">
       <PageHeader
@@ -200,28 +220,30 @@ export function ItemsPage() {
       </section>
 
       {editingItemId ? (
-        <section className="panel form-panel master-data-form-panel">
-          <header className="panel__header">
-            <div>
-              <strong>编辑物品</strong>
-              <small>有库存流水后，物品编码不可变。</small>
-            </div>
-          </header>
-          <form className="form-grid" onSubmit={submitEdit}>
-            <label><span>编码</span><input required value={editForm.code} onChange={(event) => setEditForm({ ...editForm, code: event.target.value })} /></label>
-            <label><span>分类前缀</span><input value={editForm.categoryPrefix} onChange={(event) => setEditForm({ ...editForm, categoryPrefix: event.target.value })} /></label>
-            <label><span>名称</span><input required value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })} /></label>
-            <label><span>规格</span><input value={editForm.specification} onChange={(event) => setEditForm({ ...editForm, specification: event.target.value })} /></label>
-            <label><span>单位</span><input required value={editForm.unit} onChange={(event) => setEditForm({ ...editForm, unit: event.target.value })} /></label>
-            <label><span>分类</span><input required value={editForm.categoryId} onChange={(event) => setEditForm({ ...editForm, categoryId: event.target.value })} /></label>
-            <label><span>企业微信选项 key</span><input value={editForm.weComOptionKey} onChange={(event) => setEditForm({ ...editForm, weComOptionKey: event.target.value })} /></label>
-            <label><span>最低库存</span><input value={editForm.minimumStock} onChange={(event) => setEditForm({ ...editForm, minimumStock: event.target.value })} /></label>
-            <div className="form-grid__wide form-actions form-actions--split">
-              <button className="button button--secondary" type="button" onClick={() => setEditingItemId(null)}>取消</button>
-              <button className="button button--primary" type="submit" disabled={submitting}>保存修改</button>
-            </div>
-          </form>
-        </section>
+        <div className="modal-backdrop">
+          <section className="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-item-dialog-title">
+            <header className="modal-dialog__header">
+              <div>
+                <strong id="edit-item-dialog-title">编辑物品</strong>
+                <small>有库存流水后，物品编码不可变。</small>
+              </div>
+              <button className="modal-dialog__close" type="button" aria-label="关闭编辑物品" onClick={() => setEditingItemId(null)}>×</button>
+            </header>
+            <form className="form-grid modal-dialog__form" onSubmit={submitEdit}>
+              <label><span>编码</span><input required value={editForm.code} onChange={(event) => setEditForm({ ...editForm, code: event.target.value })} /></label>
+              <label><span>名称</span><input required value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })} /></label>
+              <label><span>规格</span><input value={editForm.specification} onChange={(event) => setEditForm({ ...editForm, specification: event.target.value })} /></label>
+              <label><span>单位</span><input required value={editForm.unit} onChange={(event) => setEditForm({ ...editForm, unit: event.target.value })} /></label>
+              <label><span>企业微信选项 key</span><input value={editForm.weComOptionKey} onChange={(event) => setEditForm({ ...editForm, weComOptionKey: event.target.value })} /></label>
+              <label><span>最低库存</span><input value={editForm.minimumStock} onChange={(event) => setEditForm({ ...editForm, minimumStock: event.target.value })} /></label>
+              {error ? <div className="form-grid__wide form-error modal-dialog__error">{error}</div> : null}
+              <div className="form-grid__wide form-actions form-actions--split">
+                <button className="button button--secondary" type="button" onClick={() => setEditingItemId(null)}>取消</button>
+                <button className="button button--primary" type="submit" disabled={submitting}>保存修改</button>
+              </div>
+            </form>
+          </section>
+        </div>
       ) : null}
 
       <section className="panel master-data-panel">
@@ -238,7 +260,7 @@ export function ItemsPage() {
           <span className="toolbar-count">共 {filteredItems.length} 项</span>
         </div>
         {message ? <div className="success-notice">{message}</div> : null}
-        {error ? <div className="form-error">{error}</div> : null}
+        {error && !editingItemId ? <div className="form-error">{error}</div> : null}
         {loading ? <div className="notice">正在加载物品……</div> : (
           <div className="table-wrap">
             <table>
@@ -274,16 +296,27 @@ export function ItemsPage() {
                             setMessage(null);
                           }}
                         >
-                          编辑 {item.name}
+                          编辑
                         </button>
-                        <button
-                          className="button button--secondary button--small"
-                          type="button"
-                          disabled={!item.isActive || submitting}
-                          onClick={() => void deactivateItem(item.id)}
-                        >
-                          停用
-                        </button>
+                        {item.isActive ? (
+                          <button
+                            className="button button--secondary button--small"
+                            type="button"
+                            disabled={submitting}
+                            onClick={() => void deactivateItem(item.id)}
+                          >
+                            停用
+                          </button>
+                        ) : (
+                          <button
+                            className="button button--secondary button--small"
+                            type="button"
+                            disabled={submitting}
+                            onClick={() => void activateItem(item.id)}
+                          >
+                            启用
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
