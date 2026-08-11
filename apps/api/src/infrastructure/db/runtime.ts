@@ -2,6 +2,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, type Prisma } from "@prisma/client";
 
 import { isLocalAuthEnabled } from "../../application/auth/local-auth.js";
+import type { AuthenticatedUser, UserRole } from "../../application/auth/role-service.js";
 import { InMemoryItemRepository, type ItemRepository } from "../../application/items/item-service.js";
 import { InMemoryWarehouseRepository, type WarehouseRepository } from "../../application/warehouses/warehouse-service.js";
 import type { ItemDefinition } from "../../domain/items/item.js";
@@ -35,8 +36,10 @@ export interface CoreEntityRepository<TRecord extends CoreEntityRecord = CoreEnt
 }
 
 export interface CoreRepositorySeam {
+  roles: CoreEntityRepository;
   users: CoreEntityRepository;
   warehouses: WarehouseRepository;
+  categories: CoreEntityRepository;
   items: ItemRepository;
   approvals: CoreEntityRepository;
   batches: CoreEntityRepository;
@@ -49,9 +52,14 @@ export interface CoreRepositorySeam {
   auditLogs: CoreEntityRepository;
 }
 
+export interface IdentityService {
+  ensureUser(user: AuthenticatedUser): Promise<void>;
+}
+
 export interface PersistenceAdapters {
   driver: PersistenceDriver;
   repositories: CoreRepositorySeam;
+  identityService: IdentityService;
   auditService: AuditService;
   disconnect(): Promise<void>;
 }
@@ -61,6 +69,12 @@ const DEFAULT_WAREHOUSES: WarehouseDefinition[] = [
   { id: "warehouse-2", code: "WH-02", name: "待配置仓库二", isActive: true, isPlaceholder: true },
   { id: "warehouse-3", code: "WH-03", name: "待配置仓库三", isActive: true, isPlaceholder: true },
 ];
+
+const ROLE_DEFINITIONS: Record<UserRole, { id: string; code: UserRole; name: string }> = {
+  ADMIN: { id: "role-admin", code: "ADMIN", name: "管理员" },
+  FINANCE: { id: "role-finance", code: "FINANCE", name: "财务" },
+  APPLICANT: { id: "role-applicant", code: "APPLICANT", name: "领用人" },
+};
 
 function parsePersistenceDriver(value?: string): PersistenceDriver {
   const normalized = value?.trim().toLowerCase();
@@ -296,20 +310,69 @@ class PrismaItemRepository implements ItemRepository {
   }
 }
 
+type PrismaIdentityClient = Pick<PrismaClient, "role" | "user">;
+
+interface IdentityInput {
+  id: string;
+  weComUserId?: string;
+  name?: string;
+  role: UserRole;
+}
+
+async function ensurePrismaIdentity(prisma: PrismaIdentityClient, identity: IdentityInput): Promise<void> {
+  const role = ROLE_DEFINITIONS[identity.role];
+  await prisma.role.upsert({
+    where: { id: role.id },
+    update: { code: role.code, name: role.name },
+    create: role,
+  });
+  await prisma.user.upsert({
+    where: { id: identity.id },
+    update: {
+      ...(identity.weComUserId ? { weComUserId: identity.weComUserId } : {}),
+      ...(identity.name ? { name: identity.name } : {}),
+      roleId: role.id,
+      isActive: true,
+    },
+    create: {
+      id: identity.id,
+      weComUserId: identity.weComUserId ?? identity.id,
+      name: identity.name ?? identity.id,
+      roleId: role.id,
+      isActive: true,
+    },
+  });
+}
+
+class PrismaIdentityService implements IdentityService {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async ensureUser(user: AuthenticatedUser): Promise<void> {
+    await ensurePrismaIdentity(this.prisma, user);
+  }
+}
+
 class PrismaAuditService implements AuditService {
   constructor(private readonly prisma: PrismaClient) {}
 
   async record(event: AuditEvent): Promise<void> {
-    await this.prisma.auditLog.create({
-      data: {
-        actorUserId: event.actorUserId,
-        action: event.action,
-        entityType: event.entityType,
-        entityId: event.entityId,
-        requestId: event.requestId,
-        beforeData: asJson(structuredClone(event.beforeData)),
-        afterData: asJson(structuredClone(withAuditMetadata(event))),
-      },
+    await this.prisma.$transaction(async (transaction) => {
+      await ensurePrismaIdentity(transaction, {
+        id: event.actorUserId,
+        name: event.actorName,
+        role: event.actorRole,
+      });
+      await transaction.auditLog.create({
+        data: {
+          actorUserId: event.actorUserId,
+          action: event.action,
+          entityType: event.entityType,
+          entityId: event.entityId,
+          requestId: event.requestId,
+          beforeData: asJson(structuredClone(event.beforeData)),
+          afterData: asJson(structuredClone(withAuditMetadata(event))),
+        },
+      });
     });
   }
 }
@@ -321,11 +384,15 @@ function createPrismaClient(connectionString: string): PrismaClient {
 
 export function createPersistenceAdapters(options: { driver: "memory" } | { driver: "prisma"; connectionString?: string; prisma?: PrismaClient }): PersistenceAdapters {
   if (options.driver === "memory") {
+    const roles = new InMemoryCoreEntityRepository();
+    const users = new InMemoryCoreEntityRepository();
     return {
       driver: "memory",
       repositories: {
-        users: new InMemoryCoreEntityRepository(),
+        roles,
+        users,
         warehouses: new InMemoryWarehouseRepository(DEFAULT_WAREHOUSES),
+        categories: new InMemoryCoreEntityRepository(),
         items: new InMemoryItemRepository(),
         approvals: new InMemoryCoreEntityRepository(),
         batches: new InMemoryCoreEntityRepository(),
@@ -337,6 +404,13 @@ export function createPersistenceAdapters(options: { driver: "memory" } | { driv
         periods: new InMemoryCoreEntityRepository(),
         auditLogs: new InMemoryCoreEntityRepository(),
       },
+      identityService: {
+        async ensureUser(user) {
+          const role = ROLE_DEFINITIONS[user.role];
+          await roles.save(role);
+          await users.save({ ...user, roleId: role.id, isActive: true });
+        },
+      },
       auditService: new InMemoryAuditService(),
       async disconnect() {},
     };
@@ -347,8 +421,10 @@ export function createPersistenceAdapters(options: { driver: "memory" } | { driv
   return {
     driver: "prisma",
     repositories: {
+      roles: new PrismaByIdRepository(prisma.role),
       users: new PrismaByIdRepository(prisma.user),
       warehouses: new PrismaWarehouseRepository(prisma),
+      categories: new PrismaByIdRepository(prisma.itemCategory),
       items: new PrismaItemRepository(prisma),
       approvals: new PrismaByIdRepository(prisma.approvalRequest),
       batches: new PrismaByIdRepository(prisma.procurementBatch),
@@ -360,6 +436,7 @@ export function createPersistenceAdapters(options: { driver: "memory" } | { driv
       periods: new PrismaByIdRepository(prisma.accountingPeriod),
       auditLogs: new PrismaByIdRepository(prisma.auditLog),
     },
+    identityService: new PrismaIdentityService(prisma),
     auditService: new PrismaAuditService(prisma),
     async disconnect() {
       await prisma.$disconnect();

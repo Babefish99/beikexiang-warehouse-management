@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -11,6 +11,11 @@ const prismaConfigPath = resolve(process.cwd(), "prisma.config.ts");
 const prismaConfig = readFileSync(prismaConfigPath, "utf8");
 const migrationPath = resolve(process.cwd(), "prisma/migrations/00000000000000_init/migration.sql");
 const migrationLockPath = resolve(process.cwd(), "prisma/migrations/migration_lock.toml");
+const productionMigrationDirectory = readdirSync(resolve(process.cwd(), "prisma/migrations"))
+  .find((entry) => entry.endsWith("_production_persistence"));
+const productionMigrationPath = productionMigrationDirectory
+  ? resolve(process.cwd(), "prisma/migrations", productionMigrationDirectory, "migration.sql")
+  : "";
 
 function modelBody(modelName: string): string {
   return schema.match(new RegExp(`model ${modelName} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? "";
@@ -88,6 +93,13 @@ describe("database schema contract", () => {
     expect(schema).toMatch(/actor\s+User\s+@relation\(fields: \[actorUserId\], references: \[id\], onDelete: Restrict\)/);
   });
 
+  it("tracks warehouse outbound lifecycle separately from Enterprise WeChat approval status", () => {
+    const approvalRequest = modelBody("ApprovalRequest");
+
+    expect(approvalRequest).toMatch(/^\s*outboundStatus\s+String\s+@default\("NONE"\)\s*$/m);
+    expect(approvalRequest).toMatch(/^\s*cancelReason\s+String\?\s*$/m);
+  });
+
   it("requires restrictive stocktake and batch lineage for confirmed records", () => {
     const stockAdjustment = modelBody("StockAdjustment");
     const ledgerEntry = modelBody("InventoryLedgerEntry");
@@ -127,12 +139,35 @@ describe("database schema contract", () => {
     expect(migration).toContain('CREATE UNIQUE INDEX "StockBalance_warehouseId_itemId_batchId_key"');
   });
 
+  it("checks in a production persistence migration for the approval lifecycle fields", () => {
+    expect(productionMigrationDirectory).toBeTruthy();
+    expect(existsSync(productionMigrationPath)).toBe(true);
+
+    const migration = existsSync(productionMigrationPath) ? readFileSync(productionMigrationPath, "utf8") : "";
+    expect(migration).toContain('ADD COLUMN "outboundStatus" TEXT NOT NULL DEFAULT \'NONE\'');
+    expect(migration).toContain('ADD COLUMN "cancelReason" TEXT');
+  });
+
   it("seeds only structural placeholder data", () => {
     const seedData = getStructuralSeedData();
 
+    expect(seedData.roles).toEqual([
+      { id: "role-admin", code: "ADMIN", name: "管理员" },
+      { id: "role-finance", code: "FINANCE", name: "财务" },
+      { id: "role-applicant", code: "APPLICANT", name: "领用人" },
+    ]);
     expect(seedData.warehouses).toHaveLength(3);
+    expect(seedData.warehouses.map(({ id, code }) => ({ id, code }))).toEqual([
+      { id: "warehouse-1", code: "WH-01" },
+      { id: "warehouse-2", code: "WH-02" },
+      { id: "warehouse-3", code: "WH-03" },
+    ]);
     expect(seedData.warehouses.every((warehouse) => warehouse.isPlaceholder)).toBe(true);
-    expect(seedData.categories.map((category) => category.prefix)).toEqual(["BJ", "CY", "WP"]);
+    expect(seedData.categories.map(({ id, code, prefix }) => ({ id, code, prefix }))).toEqual([
+      { id: "category-bj", code: "CATEGORY_BJ", prefix: "BJ" },
+      { id: "category-cy", code: "CATEGORY_CY", prefix: "CY" },
+      { id: "category-wp", code: "CATEGORY_WP", prefix: "WP" },
+    ]);
     expect(seedData.historicalRows).toEqual([]);
   });
 });

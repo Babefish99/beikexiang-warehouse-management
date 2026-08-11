@@ -7,15 +7,15 @@ datasource db {
 }
 
 model User {
-  id         String   @id @default(cuid())
-  weComUserId String  @unique
-  name       String
-  roleId     String
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  role       Role     @relation(fields: [roleId], references: [id])
+  id               String            @id @default(cuid())
+  weComUserId      String            @unique
+  name             String
+  roleId           String
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  role             Role              @relation(fields: [roleId], references: [id])
   approvalRequests ApprovalRequest[]
-  auditLogs  AuditLog[]
+  auditLogs        AuditLog[]
 }
 
 model Role {
@@ -27,21 +27,21 @@ model Role {
 }
 
 model Warehouse {
-  id          String   @id @default(cuid())
-  code        String   @unique
-  name        String
-  isActive    Boolean  @default(true)
-  isPlaceholder Boolean @default(false)
-  createdAt   DateTime @default(now())
-  inboundOrders InboundOrder[]
-  stockBalances StockBalance[]
-  procurementBatches ProcurementBatch[]
-  outboundAllocations OutboundAllocation[]
-  transferSources TransferOrder[] @relation("TransferSource")
-  transferDestinations TransferOrder[] @relation("TransferDestination")
-  returnOrders ReturnOrder[]
-  stockAdjustments StockAdjustment[]
-  ledgerEntries InventoryLedgerEntry[]
+  id                   String                 @id @default(cuid())
+  code                 String                 @unique
+  name                 String
+  isActive             Boolean                @default(true)
+  isPlaceholder        Boolean                @default(false)
+  createdAt            DateTime               @default(now())
+  inboundOrders        InboundOrder[]
+  stockBalances        StockBalance[]
+  procurementBatches   ProcurementBatch[]
+  outboundAllocations  OutboundAllocation[]
+  transferSources      TransferOrder[]        @relation("TransferSource")
+  transferDestinations TransferOrder[]        @relation("TransferDestination")
+  returnOrders         ReturnOrder[]
+  stockAdjustments     StockAdjustment[]
+  ledgerEntries        InventoryLedgerEntry[]
 }
 
 model ItemCategory {
@@ -54,273 +54,277 @@ model ItemCategory {
 }
 
 model Item {
-  id              String   @id @default(cuid())
-  code            String   @unique
-  name            String
-  specification   String?
-  unit            String
-  categoryId      String
-  weComOptionKey  String?  @unique
-  minimumStock    Decimal? @db.Decimal(18, 4)
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  category        ItemCategory @relation(fields: [categoryId], references: [id])
-  inboundLines    InboundLine[]
-  approvalLines   ApprovalLine[]
-  procurementBatches ProcurementBatch[]
-  stockBalances   StockBalance[]
+  id                  String                 @id @default(cuid())
+  code                String                 @unique
+  name                String
+  specification       String?
+  unit                String
+  categoryId          String
+  weComOptionKey      String?                @unique
+  minimumStock        Decimal?               @db.Decimal(18, 4)
+  isActive            Boolean                @default(true)
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+  category            ItemCategory           @relation(fields: [categoryId], references: [id])
+  inboundLines        InboundLine[]
+  approvalLines       ApprovalLine[]
+  procurementBatches  ProcurementBatch[]
+  stockBalances       StockBalance[]
   outboundAllocations OutboundAllocation[]
-  transferLines   TransferLine[]
-  returnLines     ReturnLine[]
-  stockAdjustments StockAdjustment[]
-  ledgerEntries   InventoryLedgerEntry[]
+  transferLines       TransferLine[]
+  returnLines         ReturnLine[]
+  stockAdjustments    StockAdjustment[]
+  ledgerEntries       InventoryLedgerEntry[]
 }
 
 model ApprovalRequest {
-  id              String   @id @default(cuid())
-  weComSpNo       String   @unique
+  id              String         @id @default(cuid())
+  weComSpNo       String         @unique
   applicantUserId String
   applicantName   String
   department      String?
   purpose         String
   status          String
+  outboundStatus  String         @default("NONE")
+  cancelReason    String?
   submittedAt     DateTime
   approvedAt      DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  applicant       User     @relation(fields: [applicantUserId], references: [id], onDelete: Restrict)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  applicant       User           @relation(fields: [applicantUserId], references: [id], onDelete: Restrict)
   lines           ApprovalLine[]
   outboundOrder   OutboundOrder?
 }
 
 model ApprovalLine {
-  id                 String   @id @default(cuid())
-  approvalRequestId  String
-  itemId             String
-  requestedQuantity  Decimal  @db.Decimal(18, 4)
-  unit               String
-  createdAt          DateTime @default(now())
-  approvalRequest    ApprovalRequest @relation(fields: [approvalRequestId], references: [id], onDelete: Restrict)
-  item               Item @relation(fields: [itemId], references: [id])
+  id                  String               @id @default(cuid())
+  approvalRequestId   String
+  itemId              String
+  requestedQuantity   Decimal              @db.Decimal(18, 4)
+  unit                String
+  createdAt           DateTime             @default(now())
+  approvalRequest     ApprovalRequest      @relation(fields: [approvalRequestId], references: [id], onDelete: Restrict)
+  item                Item                 @relation(fields: [itemId], references: [id])
   outboundAllocations OutboundAllocation[]
 }
 
 model InboundOrder {
-  id           String   @id @default(cuid())
-  warehouseId  String
-  orderNo      String   @unique
-  source       String
-  receivedAt   DateTime
-  operatorId   String
-  remark       String?
-  createdAt    DateTime @default(now())
-  lines        InboundLine[]
-  warehouse    Warehouse @relation(fields: [warehouseId], references: [id])
+  id          String        @id @default(cuid())
+  warehouseId String
+  orderNo     String        @unique
+  source      String
+  receivedAt  DateTime
+  operatorId  String
+  remark      String?
+  createdAt   DateTime      @default(now())
+  lines       InboundLine[]
+  warehouse   Warehouse     @relation(fields: [warehouseId], references: [id])
 }
 
 model InboundLine {
-  id             String   @id @default(cuid())
+  id             String           @id @default(cuid())
   inboundOrderId String
   itemId         String
   batchId        String
-  quantity       Decimal  @db.Decimal(18, 4)
-  unitCost       Decimal  @db.Decimal(18, 4)
-  amount         Decimal  @db.Decimal(18, 2)
-  inboundOrder   InboundOrder @relation(fields: [inboundOrderId], references: [id])
+  quantity       Decimal          @db.Decimal(18, 4)
+  unitCost       Decimal          @db.Decimal(18, 4)
+  amount         Decimal          @db.Decimal(18, 2)
+  inboundOrder   InboundOrder     @relation(fields: [inboundOrderId], references: [id])
   batch          ProcurementBatch @relation(fields: [batchId], references: [id])
-  item           Item @relation(fields: [itemId], references: [id])
+  item           Item             @relation(fields: [itemId], references: [id])
 }
 
 model ProcurementBatch {
-  id                String   @id @default(cuid())
-  warehouseId       String
-  itemId            String
-  batchNo           String
-  quantity          Decimal  @db.Decimal(18, 4)
-  remainingQuantity Decimal  @db.Decimal(18, 4)
-  unitCost          Decimal  @db.Decimal(18, 4)
-  purchasedAt       DateTime
-  productionDate    DateTime?
-  expiryDate        DateTime?
-  purchaser         String?
-  createdAt         DateTime @default(now())
-  warehouse         Warehouse @relation(fields: [warehouseId], references: [id])
-  item              Item @relation(fields: [itemId], references: [id])
-  inboundLines      InboundLine[]
-  stockBalances     StockBalance[]
+  id                  String                 @id @default(cuid())
+  warehouseId         String
+  itemId              String
+  batchNo             String
+  quantity            Decimal                @db.Decimal(18, 4)
+  remainingQuantity   Decimal                @db.Decimal(18, 4)
+  unitCost            Decimal                @db.Decimal(18, 4)
+  purchasedAt         DateTime
+  productionDate      DateTime?
+  expiryDate          DateTime?
+  purchaser           String?
+  createdAt           DateTime               @default(now())
+  warehouse           Warehouse              @relation(fields: [warehouseId], references: [id])
+  item                Item                   @relation(fields: [itemId], references: [id])
+  inboundLines        InboundLine[]
+  stockBalances       StockBalance[]
   outboundAllocations OutboundAllocation[]
-  transferLines     TransferLine[]
-  returnLines       ReturnLine[]
-  stockAdjustments  StockAdjustment[]
-  ledgerEntries     InventoryLedgerEntry[]
+  transferLines       TransferLine[]
+  returnLines         ReturnLine[]
+  stockAdjustments    StockAdjustment[]
+  ledgerEntries       InventoryLedgerEntry[]
+
   @@unique([warehouseId, itemId, batchNo])
 }
 
 model StockBalance {
-  id                String   @id @default(cuid())
+  id                String           @id @default(cuid())
   warehouseId       String
   itemId            String
   batchId           String
-  remainingQuantity Decimal  @db.Decimal(18, 4)
-  unitCost          Decimal  @db.Decimal(18, 4)
-  updatedAt         DateTime @updatedAt
-  warehouse         Warehouse @relation(fields: [warehouseId], references: [id])
-  item              Item @relation(fields: [itemId], references: [id])
+  remainingQuantity Decimal          @db.Decimal(18, 4)
+  unitCost          Decimal          @db.Decimal(18, 4)
+  updatedAt         DateTime         @updatedAt
+  warehouse         Warehouse        @relation(fields: [warehouseId], references: [id])
+  item              Item             @relation(fields: [itemId], references: [id])
   batch             ProcurementBatch @relation(fields: [batchId], references: [id])
+
   @@unique([warehouseId, itemId, batchId])
 }
 
 model OutboundOrder {
-  id                String   @id @default(cuid())
-  approvalRequestId String   @unique
-  orderNo           String   @unique
+  id                String               @id @default(cuid())
+  approvalRequestId String               @unique
+  orderNo           String               @unique
   status            String
-  actualQuantity    Decimal  @db.Decimal(18, 4)
-  amount            Decimal  @db.Decimal(18, 2)
+  actualQuantity    Decimal              @db.Decimal(18, 4)
+  amount            Decimal              @db.Decimal(18, 2)
   reason            String?
   issuedAt          DateTime?
   operatorId        String
-  createdAt         DateTime @default(now())
-  approvalRequest   ApprovalRequest @relation(fields: [approvalRequestId], references: [id], onDelete: Restrict)
+  createdAt         DateTime             @default(now())
+  approvalRequest   ApprovalRequest      @relation(fields: [approvalRequestId], references: [id], onDelete: Restrict)
   allocations       OutboundAllocation[]
-  returns           ReturnOrder[] @relation("OriginalOutbound")
+  returns           ReturnOrder[]        @relation("OriginalOutbound")
 }
 
 model OutboundAllocation {
-  id                String   @id @default(cuid())
-  outboundOrderId   String
-  approvalLineId    String
-  warehouseId       String
-  itemId            String
-  batchId           String
-  originalQuantity  Decimal  @db.Decimal(18, 4)
-  quantity          Decimal  @db.Decimal(18, 4)
-  unitCost          Decimal  @db.Decimal(18, 4)
-  amount            Decimal  @db.Decimal(18, 2)
-  outboundOrder     OutboundOrder @relation(fields: [outboundOrderId], references: [id], onDelete: Restrict)
-  approvalLine      ApprovalLine @relation(fields: [approvalLineId], references: [id])
-  warehouse         Warehouse @relation(fields: [warehouseId], references: [id])
-  item              Item @relation(fields: [itemId], references: [id])
-  batch             ProcurementBatch @relation(fields: [batchId], references: [id])
-  returnLines       ReturnLine[]
+  id               String           @id @default(cuid())
+  outboundOrderId  String
+  approvalLineId   String
+  warehouseId      String
+  itemId           String
+  batchId          String
+  originalQuantity Decimal          @db.Decimal(18, 4)
+  quantity         Decimal          @db.Decimal(18, 4)
+  unitCost         Decimal          @db.Decimal(18, 4)
+  amount           Decimal          @db.Decimal(18, 2)
+  outboundOrder    OutboundOrder    @relation(fields: [outboundOrderId], references: [id], onDelete: Restrict)
+  approvalLine     ApprovalLine     @relation(fields: [approvalLineId], references: [id])
+  warehouse        Warehouse        @relation(fields: [warehouseId], references: [id])
+  item             Item             @relation(fields: [itemId], references: [id])
+  batch            ProcurementBatch @relation(fields: [batchId], references: [id])
+  returnLines      ReturnLine[]
 }
 
 model TransferOrder {
-  id                  String   @id @default(cuid())
-  transferNo          String   @unique
-  sourceWarehouseId   String
+  id                     String         @id @default(cuid())
+  transferNo             String         @unique
+  sourceWarehouseId      String
   destinationWarehouseId String
-  status              String
-  reason              String
-  operatorId          String
-  completedAt         DateTime?
-  createdAt           DateTime @default(now())
-  sourceWarehouse     Warehouse @relation("TransferSource", fields: [sourceWarehouseId], references: [id])
-  destinationWarehouse Warehouse @relation("TransferDestination", fields: [destinationWarehouseId], references: [id])
-  lines               TransferLine[]
+  status                 String
+  reason                 String
+  operatorId             String
+  completedAt            DateTime?
+  createdAt              DateTime       @default(now())
+  sourceWarehouse        Warehouse      @relation("TransferSource", fields: [sourceWarehouseId], references: [id])
+  destinationWarehouse   Warehouse      @relation("TransferDestination", fields: [destinationWarehouseId], references: [id])
+  lines                  TransferLine[]
 }
 
 model TransferLine {
-  id              String   @id @default(cuid())
+  id              String           @id @default(cuid())
   transferOrderId String
   itemId          String
   batchId         String
-  quantity        Decimal  @db.Decimal(18, 4)
-  unitCost        Decimal  @db.Decimal(18, 4)
-  amount          Decimal  @db.Decimal(18, 2)
-  transferOrder   TransferOrder @relation(fields: [transferOrderId], references: [id])
-  item            Item @relation(fields: [itemId], references: [id])
+  quantity        Decimal          @db.Decimal(18, 4)
+  unitCost        Decimal          @db.Decimal(18, 4)
+  amount          Decimal          @db.Decimal(18, 2)
+  transferOrder   TransferOrder    @relation(fields: [transferOrderId], references: [id])
+  item            Item             @relation(fields: [itemId], references: [id])
   batch           ProcurementBatch @relation(fields: [batchId], references: [id])
 }
 
 model ReturnOrder {
-  id                   String   @id @default(cuid())
-  returnNo             String   @unique
-  originalOutboundId   String
-  warehouseId          String
-  reason               String
-  operatorId           String
-  returnedAt           DateTime?
-  createdAt            DateTime @default(now())
-  originalOutbound     OutboundOrder @relation("OriginalOutbound", fields: [originalOutboundId], references: [id])
-  warehouse            Warehouse @relation(fields: [warehouseId], references: [id])
-  lines                ReturnLine[]
+  id                 String        @id @default(cuid())
+  returnNo           String        @unique
+  originalOutboundId String
+  warehouseId        String
+  reason             String
+  operatorId         String
+  returnedAt         DateTime?
+  createdAt          DateTime      @default(now())
+  originalOutbound   OutboundOrder @relation("OriginalOutbound", fields: [originalOutboundId], references: [id])
+  warehouse          Warehouse     @relation(fields: [warehouseId], references: [id])
+  lines              ReturnLine[]
 }
 
 model ReturnLine {
-  id                    String   @id @default(cuid())
-  returnOrderId         String
-  outboundAllocationId  String
-  itemId                String
-  batchId               String
-  quantity              Decimal  @db.Decimal(18, 4)
-  unitCost              Decimal  @db.Decimal(18, 4)
-  amount                Decimal  @db.Decimal(18, 2)
-  returnOrder           ReturnOrder @relation(fields: [returnOrderId], references: [id])
-  outboundAllocation    OutboundAllocation @relation(fields: [outboundAllocationId], references: [id], onDelete: Restrict)
-  item                  Item @relation(fields: [itemId], references: [id])
-  batch                 ProcurementBatch @relation(fields: [batchId], references: [id])
+  id                   String             @id @default(cuid())
+  returnOrderId        String
+  outboundAllocationId String
+  itemId               String
+  batchId              String
+  quantity             Decimal            @db.Decimal(18, 4)
+  unitCost             Decimal            @db.Decimal(18, 4)
+  amount               Decimal            @db.Decimal(18, 2)
+  returnOrder          ReturnOrder        @relation(fields: [returnOrderId], references: [id])
+  outboundAllocation   OutboundAllocation @relation(fields: [outboundAllocationId], references: [id], onDelete: Restrict)
+  item                 Item               @relation(fields: [itemId], references: [id])
+  batch                ProcurementBatch   @relation(fields: [batchId], references: [id])
 }
 
 model Stocktake {
-  id          String   @id @default(cuid())
-  stocktakeNo String   @unique
+  id          String            @id @default(cuid())
+  stocktakeNo String            @unique
   periodCode  String
   status      String
   operatorId  String
   reason      String?
-  createdAt   DateTime @default(now())
-  period      AccountingPeriod @relation(fields: [periodCode], references: [periodCode])
+  createdAt   DateTime          @default(now())
+  period      AccountingPeriod  @relation(fields: [periodCode], references: [periodCode])
   adjustments StockAdjustment[]
 }
 
 model StockAdjustment {
-  id          String   @id @default(cuid())
+  id          String           @id @default(cuid())
   stocktakeId String
   periodCode  String
   warehouseId String
   itemId      String
   batchId     String
-  quantity    Decimal  @db.Decimal(18, 4)
-  unitCost    Decimal  @db.Decimal(18, 4)
-  amount      Decimal  @db.Decimal(18, 2)
+  quantity    Decimal          @db.Decimal(18, 4)
+  unitCost    Decimal          @db.Decimal(18, 4)
+  amount      Decimal          @db.Decimal(18, 2)
   reason      String
   operatorId  String
-  createdAt   DateTime @default(now())
-  stocktake   Stocktake @relation(fields: [stocktakeId], references: [id], onDelete: Restrict)
+  createdAt   DateTime         @default(now())
+  stocktake   Stocktake        @relation(fields: [stocktakeId], references: [id], onDelete: Restrict)
   period      AccountingPeriod @relation(fields: [periodCode], references: [periodCode])
-  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
-  item        Item @relation(fields: [itemId], references: [id])
+  warehouse   Warehouse        @relation(fields: [warehouseId], references: [id])
+  item        Item             @relation(fields: [itemId], references: [id])
   batch       ProcurementBatch @relation(fields: [batchId], references: [id])
 }
 
 model InventoryLedgerEntry {
-  id            String   @id @default(cuid())
+  id            String           @id @default(cuid())
   warehouseId   String
   itemId        String
   batchId       String
   type          String
-  quantity      Decimal  @db.Decimal(18, 4)
-  unitCost      Decimal  @db.Decimal(18, 4)
-  amount        Decimal  @db.Decimal(18, 2)
+  quantity      Decimal          @db.Decimal(18, 4)
+  unitCost      Decimal          @db.Decimal(18, 4)
+  amount        Decimal          @db.Decimal(18, 2)
   referenceType String
   referenceId   String
   occurredAt    DateTime
-  createdAt     DateTime @default(now())
-  warehouse     Warehouse @relation(fields: [warehouseId], references: [id])
-  item          Item @relation(fields: [itemId], references: [id])
+  createdAt     DateTime         @default(now())
+  warehouse     Warehouse        @relation(fields: [warehouseId], references: [id])
+  item          Item             @relation(fields: [itemId], references: [id])
   batch         ProcurementBatch @relation(fields: [batchId], references: [id], onDelete: Restrict)
 }
 
 model AccountingPeriod {
-  id         String   @id @default(cuid())
-  periodCode String   @unique
-  status     String
-  openedAt   DateTime @default(now())
-  closedAt   DateTime?
-  closedBy   String?
-  stocktakes Stocktake[]
+  id          String            @id @default(cuid())
+  periodCode  String            @unique
+  status      String
+  openedAt    DateTime          @default(now())
+  closedAt    DateTime?
+  closedBy    String?
+  stocktakes  Stocktake[]
   adjustments StockAdjustment[]
 }
 
@@ -344,5 +348,5 @@ model AuditLog {
   beforeData  Json?
   afterData   Json?
   createdAt   DateTime @default(now())
-  actor       User @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+  actor       User     @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
 }

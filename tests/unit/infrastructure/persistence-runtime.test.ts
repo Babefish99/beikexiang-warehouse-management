@@ -79,8 +79,10 @@ describe("persistence adapters", () => {
 
     expect(adapters.auditService).toBeInstanceOf(InMemoryAuditService);
     expect(Object.keys(adapters.repositories)).toEqual([
+      "roles",
       "users",
       "warehouses",
+      "categories",
       "items",
       "approvals",
       "batches",
@@ -95,26 +97,37 @@ describe("persistence adapters", () => {
   });
 
   it("passes the expanded audit envelope through the prisma audit service JSON payload", async () => {
+    const roleUpsert = vi.fn().mockResolvedValue(undefined);
+    const userUpsert = vi.fn().mockResolvedValue(undefined);
     const auditCreate = vi.fn().mockResolvedValue(undefined);
+    const prisma = {
+      role: { upsert: roleUpsert },
+      user: { upsert: userUpsert },
+      auditLog: { create: auditCreate },
+      itemCategory: {} as object,
+      warehouse: {} as object,
+      item: {} as object,
+      approvalRequest: {} as object,
+      procurementBatch: {} as object,
+      inventoryLedgerEntry: {} as object,
+      outboundOrder: {} as object,
+      transferOrder: {} as object,
+      returnOrder: {} as object,
+      stocktake: {} as object,
+      accountingPeriod: {} as object,
+      $transaction: vi.fn(async (operation: (transaction: unknown) => Promise<unknown>) => operation(prisma)),
+      $disconnect: vi.fn(),
+    };
     const adapters = createPersistenceAdapters({
       driver: "prisma",
-      prisma: {
-        auditLog: {
-          create: auditCreate,
-        },
-        user: {} as object,
-        warehouse: {} as object,
-        item: {} as object,
-        approvalRequest: {} as object,
-        procurementBatch: {} as object,
-        inventoryLedgerEntry: {} as object,
-        outboundOrder: {} as object,
-        transferOrder: {} as object,
-        returnOrder: {} as object,
-        stocktake: {} as object,
-        accountingPeriod: {} as object,
-        $disconnect: vi.fn(),
-      } as never,
+      prisma: prisma as never,
+    });
+
+    await adapters.identityService.ensureUser({
+      id: "admin-1",
+      weComUserId: "admin-1",
+      name: "仓库管理员",
+      role: "ADMIN",
     });
 
     await adapters.auditService.record({
@@ -129,6 +142,15 @@ describe("persistence adapters", () => {
       errorMessage: undefined,
       afterData: { itemId: "item-1" },
     });
+
+    expect(roleUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "role-admin" },
+      create: { id: "role-admin", code: "ADMIN", name: "管理员" },
+    }));
+    expect(userUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "admin-1" },
+      create: expect.objectContaining({ name: "仓库管理员", roleId: "role-admin" }),
+    }));
 
     expect(auditCreate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({

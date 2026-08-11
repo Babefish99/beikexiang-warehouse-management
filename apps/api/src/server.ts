@@ -107,6 +107,7 @@ export function buildServer(options: BuildServerOptions = {}) {
   void app.register(cors, { origin: config.webBaseUrl, credentials: true });
 
   const sessionService = new SessionService(config.sessionSecret);
+  const identityService = persistence.identityService;
   const auditService = persistence.auditService;
   app.decorateRequest("adminUser", undefined);
   app.decorate("auditService", auditService);
@@ -243,6 +244,7 @@ export function buildServer(options: BuildServerOptions = {}) {
       name: identity.name,
       role: roleForUser(identity.weComUserId),
     };
+    await identityService.ensureUser(user);
     const token = sessionService.createSession(user);
     const secureCookies = config.apiBaseUrl.startsWith("https://");
     reply.header("set-cookie", [
@@ -258,6 +260,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     await auditService.record({
       actorUserId: user.id,
       actorRole: user.role,
+      actorName: user.name,
       action: "LOGIN",
       entityType: "SESSION",
       entityId: user.id,
@@ -286,6 +289,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     apiBaseUrl: config.apiBaseUrl,
     webBaseUrl: config.webBaseUrl,
     sessionService,
+    identityService,
     auditService,
   });
   registerApprovalCallbackRoute(app, { verifier: signatureVerifier, syncService: approvalSyncService });
