@@ -76,6 +76,23 @@ cp "$COMPOSE_FILE" "$release_stage/docker-compose.prod.yml"
 chmod 600 "$release_stage/.env.production" "$release_stage/docker-compose.prod.yml"
 
 export RELEASE_TAG=$release_tag
+migrate_image=$IMAGE_PREFIX_LITERAL/migrate:$release_tag
+api_image=$IMAGE_PREFIX_LITERAL/api:$release_tag
+web_image=$IMAGE_PREFIX_LITERAL/web:$release_tag
+
+prebuilt_mode=0
+image_source=build
+if [ -n "${PREBUILT_MIGRATE_IMAGE:-}${PREBUILT_API_IMAGE:-}${PREBUILT_WEB_IMAGE:-}" ]; then
+  [ -n "${PREBUILT_MIGRATE_IMAGE:-}" ] || fail "PREBUILT_MIGRATE_IMAGE is required when using prebuilt images"
+  [ -n "${PREBUILT_API_IMAGE:-}" ] || fail "PREBUILT_API_IMAGE is required when using prebuilt images"
+  [ -n "${PREBUILT_WEB_IMAGE:-}" ] || fail "PREBUILT_WEB_IMAGE is required when using prebuilt images"
+  prebuilt_mode=1
+  image_source=prebuilt
+  docker image inspect "$PREBUILT_MIGRATE_IMAGE" >/dev/null
+  docker image inspect "$PREBUILT_API_IMAGE" >/dev/null
+  docker image inspect "$PREBUILT_WEB_IMAGE" >/dev/null
+fi
+
 postgres_was_stopped=0
 deployment_complete=0
 recover_postgres() {
@@ -105,14 +122,18 @@ log "stopping PostgreSQL while images build to preserve host memory"
 compose stop postgres >> "$log_file" 2>&1
 postgres_was_stopped=1
 
-for build_service in migrate api web; do
-  log "building $build_service image for release $release_tag"
-  compose build "$build_service" >> "$log_file" 2>&1
-done
+if [ "$prebuilt_mode" = "1" ]; then
+  log "tagging operator-supplied prebuilt images for release $release_tag"
+  docker image tag "$PREBUILT_MIGRATE_IMAGE" "$migrate_image" >> "$log_file" 2>&1
+  docker image tag "$PREBUILT_API_IMAGE" "$api_image" >> "$log_file" 2>&1
+  docker image tag "$PREBUILT_WEB_IMAGE" "$web_image" >> "$log_file" 2>&1
+else
+  for build_service in migrate api web; do
+    log "building $build_service image for release $release_tag"
+    compose build "$build_service" >> "$log_file" 2>&1
+  done
+fi
 
-migrate_image=$IMAGE_PREFIX_LITERAL/migrate:$release_tag
-api_image=$IMAGE_PREFIX_LITERAL/api:$release_tag
-web_image=$IMAGE_PREFIX_LITERAL/web:$release_tag
 migrate_image_id=$(docker image inspect --format '{{.Id}}' "$migrate_image")
 api_image_id=$(docker image inspect --format '{{.Id}}' "$api_image")
 web_image_id=$(docker image inspect --format '{{.Id}}' "$web_image")
@@ -123,6 +144,10 @@ web_image_id=$(docker image inspect --format '{{.Id}}' "$web_image")
   printf 'source_revision=%s\n' "$source_revision"
   printf 'compose_project_name=%s\n' "$COMPOSE_PROJECT_NAME_LITERAL"
   printf 'pre_upgrade_backup=%s\n' "$backup_file"
+  printf 'image_source=%s\n' "$image_source"
+  printf 'prebuilt_migrate_source=%s\n' "${PREBUILT_MIGRATE_IMAGE:-}"
+  printf 'prebuilt_api_source=%s\n' "${PREBUILT_API_IMAGE:-}"
+  printf 'prebuilt_web_source=%s\n' "${PREBUILT_WEB_IMAGE:-}"
   printf 'migrate_image=%s\n' "$migrate_image"
   printf 'migrate_image_id=%s\n' "$migrate_image_id"
   printf 'api_image=%s\n' "$api_image"

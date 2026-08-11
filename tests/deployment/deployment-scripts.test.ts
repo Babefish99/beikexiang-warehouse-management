@@ -87,6 +87,9 @@ test -s "$PROJECT_DIR/deploy/releases/$first_release/release.meta"
 test -s "$PROJECT_DIR/deploy/releases/$first_release/backup.manifest"
 
 export SOURCE_REVISION=secondrevision
+export PREBUILT_MIGRATE_IMAGE=prebuilt/migrate:fixture
+export PREBUILT_API_IMAGE=prebuilt/api:fixture
+export PREBUILT_WEB_IMAGE=prebuilt/web:fixture
 "$PROJECT_DIR/deploy/scripts/deploy.sh"
 second_release=$(sed -n '1p' "$PROJECT_DIR/deploy/state/current-release")
 test "$second_release" != "$first_release"
@@ -127,6 +130,12 @@ test "$build_migrate" -lt "$build_api"
 test "$build_api" -lt "$build_web"
 test "$build_web" -lt "$start_postgres"
 test "$start_postgres" -lt "$run_migrate"
+test "$(grep -c ' build migrate$' "$fixture_root/docker.log")" = 1
+test "$(grep -c ' build api$' "$fixture_root/docker.log")" = 1
+test "$(grep -c ' build web$' "$fixture_root/docker.log")" = 1
+grep -Eq '^image tag prebuilt/migrate:fixture warehouse-test/migrate:' "$fixture_root/docker.log"
+grep -Eq '^image tag prebuilt/api:fixture warehouse-test/api:' "$fixture_root/docker.log"
+grep -Eq '^image tag prebuilt/web:fixture warehouse-test/web:' "$fixture_root/docker.log"
 
 printf 'first=%s\nsecond=%s\n' "$first_release" "$second_release"
 `;
