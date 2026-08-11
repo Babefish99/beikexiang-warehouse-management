@@ -188,7 +188,7 @@ export function readServerConfig(env: Record<string, string | undefined>): Serve
       }
     }
     try {
-      decodeWeComEncodingAesKey(env.WE_COM_ENCODING_AES_KEY!.trim());
+      decodeWeComEncodingAesKey(env.WE_COM_ENCODING_AES_KEY!);
     } catch {
       throw new Error("WE_COM_ENCODING_AES_KEY must be an unpadded base64 value that decodes to exactly 32 bytes in production");
     }

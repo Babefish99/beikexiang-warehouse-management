@@ -89,6 +89,13 @@ describe("server runtime configuration", () => {
     expect(() => readServerConfig(productionEnvironment)).not.toThrow();
   });
 
+  it("accepts surrounding whitespace around a valid production EncodingAESKey", () => {
+    expect(() => readServerConfig({
+      ...productionEnvironment,
+      WE_COM_ENCODING_AES_KEY: ` \t${validEncodingAesKey}\r\n`,
+    })).not.toThrow();
+  });
+
   it.each([
     "A",
     Buffer.alloc(31, 1).toString("base64").replace(/=+$/, ""),

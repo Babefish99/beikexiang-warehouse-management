@@ -7,12 +7,13 @@ export interface WeComSignatureVerifierOptions {
 }
 
 export function decodeWeComEncodingAesKey(encodingAesKey: string): Buffer {
-  if (!/^[A-Za-z0-9+/]{43}$/.test(encodingAesKey)) {
+  const normalizedEncodingAesKey = encodingAesKey.trim();
+  if (!/^[A-Za-z0-9+/]{43}$/.test(normalizedEncodingAesKey)) {
     throw new Error("enterprise WeChat encoding AES key is invalid");
   }
-  const key = Buffer.from(`${encodingAesKey}=`, "base64");
+  const key = Buffer.from(`${normalizedEncodingAesKey}=`, "base64");
   const canonicalValue = key.toString("base64").replace(/=+$/, "");
-  if (key.length !== 32 || canonicalValue !== encodingAesKey) {
+  if (key.length !== 32 || canonicalValue !== normalizedEncodingAesKey) {
     throw new Error("enterprise WeChat encoding AES key is invalid");
   }
   return key;

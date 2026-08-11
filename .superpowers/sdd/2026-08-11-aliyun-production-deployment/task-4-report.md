@@ -381,3 +381,112 @@ TASK4_FIX_SCOPE_CHECK=PASS
 - Independent reviewer dispatch is unavailable in this runtime; the complete fix diff was reviewed requirement-by-requirement locally and no additional Critical or Important issue was found.
 
 Fix-round concern: none beyond the previously documented local unbounded-test contention and external production-operator work.
+
+## Fix round 2: canonical EncodingAESKey normalization
+
+Status: DONE. Fix base: `0a970cc`. Surrounding whitespace is now normalized exactly once inside `decodeWeComEncodingAesKey`; production startup and callback decryption both pass the raw configured value to that helper and therefore share identical normalization, canonical Base64, and exact 32-byte validation behavior.
+
+### Changed files
+
+- `apps/api/src/infrastructure/db/runtime.ts`
+- `apps/api/src/infrastructure/wecom/signature-verifier.ts`
+- `tests/unit/infrastructure/persistence-runtime.test.ts`
+- `tests/unit/wecom/signature-verifier.test.ts`
+- `.superpowers/sdd/2026-08-11-aliyun-production-deployment/task-4-report.md`
+
+### RED evidence
+
+Command:
+
+```powershell
+corepack pnpm vitest run tests/unit/infrastructure/persistence-runtime.test.ts tests/unit/wecom/signature-verifier.test.ts --reporter=verbose
+```
+
+Output (exit 1):
+
+```text
+Test Files  1 failed | 1 passed (2)
+Tests       1 failed | 31 passed (32)
+
+FAIL tests/unit/wecom/signature-verifier.test.ts
+normalizes surrounding EncodingAESKey whitespace before decrypting a callback
+Error: enterprise WeChat encoding AES key is invalid
+```
+
+The production configuration regression already passed because `readServerConfig` trimmed before calling the helper. The real callback regression failed because `WeComSignatureVerifier` passed the raw environment value to a decoder that did not trim. Existing malformed-key and administrator cases remained passing in this RED run.
+
+### Focused GREEN evidence
+
+Command:
+
+```powershell
+corepack pnpm vitest run tests/unit/infrastructure/persistence-runtime.test.ts tests/unit/wecom/signature-verifier.test.ts --reporter=verbose
+```
+
+Output (exit 0):
+
+```text
+Test Files  2 passed (2)
+Tests       32 passed (32)
+Duration    1.23s
+```
+
+The decoder trims once, then enforces exactly 43 standard Base64 characters, decodes exactly 32 bytes, and verifies canonical unpadded round-trip equality. Startup no longer performs caller-side trimming. Both the configuration and real encrypted-callback tests accept the same whitespace-wrapped valid key, while malformed keys remain rejected.
+
+### PostgreSQL reconstruction acceptance
+
+Command:
+
+```powershell
+$env:TEST_DATABASE_URL='postgresql://warehouse:warehouse@127.0.0.1:5432/warehouse'
+corepack pnpm vitest run tests/integration/db/prisma-restart-persistence.test.ts --reporter=verbose
+```
+
+Output (exit 0):
+
+```text
+Test Files  1 passed (1)
+Tests       1 passed (1)
+Duration    2.09s
+```
+
+### Full fix-round verification
+
+PostgreSQL-enabled bounded suite:
+
+```powershell
+$env:TEST_DATABASE_URL='postgresql://warehouse:warehouse@127.0.0.1:5432/warehouse'
+corepack pnpm vitest run --maxWorkers=4 --reporter=dot
+```
+
+```text
+Test Files  43 passed (43)
+Tests       207 passed (207)
+Duration    6.95s
+```
+
+Typecheck, build, diff, and scope output (exit 0):
+
+```text
+apps/api typecheck: Done
+apps/web typecheck: Done
+apps/api build: Done
+apps/web build: 1595 modules transformed
+apps/web build: built in 2.04s
+apps/web build: Done
+git diff --check: no whitespace errors (Windows LF/CRLF conversion notices only)
+TASK4_FIX2_SCOPE_CHECK=PASS
+```
+
+### Fix-round self-review
+
+- `decodeWeComEncodingAesKey` is the only EncodingAESKey normalization location; repository search found no caller-side `WE_COM_ENCODING_AES_KEY` trim.
+- Both startup and `WeComSignatureVerifier.decrypt` pass raw configured values to the same helper.
+- Trimming occurs before the unchanged 43-character alphabet check, 32-byte check, and canonical unpadded round-trip check; validation strength was not reduced.
+- The focused run includes all malformed-key and production administrator cases from fix round 1, all of which remain green.
+- The real callback test encrypts with the canonical key and decrypts through a verifier configured with surrounding spaces, tab, CR, and LF.
+- PostgreSQL reconstruction, memory behavior, the bounded full suite, typecheck, and builds remain green.
+- No Docker, Compose, deployment, reverse-proxy, schema, migration, or other Task 5+ file changed.
+- Independent reviewer dispatch remains unavailable in this runtime; requirement-by-requirement local diff review found no additional Critical or Important issue.
+
+Fix-round 2 concern: none beyond the previously documented local unbounded-test contention and external production-operator work.

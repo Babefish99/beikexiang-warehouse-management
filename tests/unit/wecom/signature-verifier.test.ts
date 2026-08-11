@@ -37,4 +37,16 @@ describe("enterprise WeChat callback signature verifier", () => {
 
     expect(verifier.decrypt(encrypted)).toBe('{"SpNo":"202607230021"}');
   });
+
+  it("normalizes surrounding EncodingAESKey whitespace before decrypting a callback", () => {
+    const encodingAesKey = randomBytes(32).toString("base64").replace(/=+$/, "");
+    const verifier = new WeComSignatureVerifier({
+      token: "callback-token",
+      encodingAesKey: ` \t${encodingAesKey}\r\n`,
+      corpId: "corp-1",
+    });
+    const encrypted = encryptWeComMessage("{\"SpNo\":\"202607230022\"}", "corp-1", encodingAesKey);
+
+    expect(verifier.decrypt(encrypted)).toBe('{"SpNo":"202607230022"}');
+  });
 });
