@@ -35,6 +35,22 @@ if [ "${VALIDATE_ONLY:-0}" = "1" ]; then
   exit 0
 fi
 
+prebuilt_mode=0
+image_source=build
+prebuilt_migrate_image_id=
+prebuilt_api_image_id=
+prebuilt_web_image_id=
+if [ -n "${PREBUILT_MIGRATE_IMAGE:-}${PREBUILT_API_IMAGE:-}${PREBUILT_WEB_IMAGE:-}" ]; then
+  [ -n "${PREBUILT_MIGRATE_IMAGE:-}" ] || fail "PREBUILT_MIGRATE_IMAGE is required when using prebuilt images"
+  [ -n "${PREBUILT_API_IMAGE:-}" ] || fail "PREBUILT_API_IMAGE is required when using prebuilt images"
+  [ -n "${PREBUILT_WEB_IMAGE:-}" ] || fail "PREBUILT_WEB_IMAGE is required when using prebuilt images"
+  prebuilt_mode=1
+  image_source=prebuilt
+  prebuilt_migrate_image_id=$(docker image inspect --format '{{.Id}}' "$PREBUILT_MIGRATE_IMAGE") || fail "prebuilt migrate image is unavailable: $PREBUILT_MIGRATE_IMAGE"
+  prebuilt_api_image_id=$(docker image inspect --format '{{.Id}}' "$PREBUILT_API_IMAGE") || fail "prebuilt API image is unavailable: $PREBUILT_API_IMAGE"
+  prebuilt_web_image_id=$(docker image inspect --format '{{.Id}}' "$PREBUILT_WEB_IMAGE") || fail "prebuilt Web image is unavailable: $PREBUILT_WEB_IMAGE"
+fi
+
 mkdir -p "$STATE_DIR" "$RELEASES_DIR" "$LOG_DIR"
 chmod 700 "$STATE_DIR" "$RELEASES_DIR" "$LOG_DIR"
 log_file="$LOG_DIR/deploy-$(date -u +%Y%m%dT%H%M%SZ)-$$.log"
@@ -80,17 +96,11 @@ migrate_image=$IMAGE_PREFIX_LITERAL/migrate:$release_tag
 api_image=$IMAGE_PREFIX_LITERAL/api:$release_tag
 web_image=$IMAGE_PREFIX_LITERAL/web:$release_tag
 
-prebuilt_mode=0
-image_source=build
-if [ -n "${PREBUILT_MIGRATE_IMAGE:-}${PREBUILT_API_IMAGE:-}${PREBUILT_WEB_IMAGE:-}" ]; then
-  [ -n "${PREBUILT_MIGRATE_IMAGE:-}" ] || fail "PREBUILT_MIGRATE_IMAGE is required when using prebuilt images"
-  [ -n "${PREBUILT_API_IMAGE:-}" ] || fail "PREBUILT_API_IMAGE is required when using prebuilt images"
-  [ -n "${PREBUILT_WEB_IMAGE:-}" ] || fail "PREBUILT_WEB_IMAGE is required when using prebuilt images"
-  prebuilt_mode=1
-  image_source=prebuilt
-  docker image inspect "$PREBUILT_MIGRATE_IMAGE" >/dev/null
-  docker image inspect "$PREBUILT_API_IMAGE" >/dev/null
-  docker image inspect "$PREBUILT_WEB_IMAGE" >/dev/null
+if [ "$prebuilt_mode" = "1" ]; then
+  log "tagging immutable prebuilt image IDs for release $release_tag before the service stop"
+  docker image tag "$prebuilt_migrate_image_id" "$migrate_image" >> "$log_file" 2>&1
+  docker image tag "$prebuilt_api_image_id" "$api_image" >> "$log_file" 2>&1
+  docker image tag "$prebuilt_web_image_id" "$web_image" >> "$log_file" 2>&1
 fi
 
 postgres_was_stopped=0
@@ -123,10 +133,7 @@ compose stop postgres >> "$log_file" 2>&1
 postgres_was_stopped=1
 
 if [ "$prebuilt_mode" = "1" ]; then
-  log "tagging operator-supplied prebuilt images for release $release_tag"
-  docker image tag "$PREBUILT_MIGRATE_IMAGE" "$migrate_image" >> "$log_file" 2>&1
-  docker image tag "$PREBUILT_API_IMAGE" "$api_image" >> "$log_file" 2>&1
-  docker image tag "$PREBUILT_WEB_IMAGE" "$web_image" >> "$log_file" 2>&1
+  log "using pre-resolved prebuilt images for release $release_tag"
 else
   for build_service in migrate api web; do
     log "building $build_service image for release $release_tag"
@@ -148,6 +155,9 @@ web_image_id=$(docker image inspect --format '{{.Id}}' "$web_image")
   printf 'prebuilt_migrate_source=%s\n' "${PREBUILT_MIGRATE_IMAGE:-}"
   printf 'prebuilt_api_source=%s\n' "${PREBUILT_API_IMAGE:-}"
   printf 'prebuilt_web_source=%s\n' "${PREBUILT_WEB_IMAGE:-}"
+  printf 'prebuilt_migrate_source_id=%s\n' "$prebuilt_migrate_image_id"
+  printf 'prebuilt_api_source_id=%s\n' "$prebuilt_api_image_id"
+  printf 'prebuilt_web_source_id=%s\n' "$prebuilt_web_image_id"
   printf 'migrate_image=%s\n' "$migrate_image"
   printf 'migrate_image_id=%s\n' "$migrate_image_id"
   printf 'api_image=%s\n' "$api_image"

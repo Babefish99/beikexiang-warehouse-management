@@ -45,15 +45,17 @@ printf '%s\n' "$*" >> "$FIXTURE_ROOT/docker.log"
 all_args=$*
 last_arg=
 for argument in "$@"; do last_arg=$argument; done
+[ "$last_arg" != "prebuilt/missing:fixture" ] || exit 1
 case " $all_args " in
   *" compose "*" ps -q "*) printf 'fake-%s\n' "$last_arg" ;;
   *" compose "*" exec -T postgres "*" pg_dump "*) printf '%s\n' 'CREATE TABLE restored (id integer);' ;;
   *" compose "*" exec -T postgres "*" psql "*) cat >/dev/null ;;
-  *" image inspect "*" --format "*) printf '%s\n' 'sha256:fixture-image-id' ;;
+  *" image inspect --format "*) printf '%s\n' 'sha256:fixture-image-id' ;;
   *" inspect --format "*) printf '%s\n' 'healthy' ;;
 esac
 FAKE_DOCKER
 chmod +x "$fixture_root/bin/docker"
+: > "$fixture_root/docker.log"
 
 cat > "$fixture_root/bin/stat" <<'FAKE_STAT'
 #!/bin/sh
@@ -80,6 +82,18 @@ if ENV_FILE="$fixture_root/duplicate.env" VALIDATE_ONLY=1 "$PROJECT_DIR/deploy/s
   exit 1
 fi
 
+preflight_start=$(wc -l < "$fixture_root/docker.log" 2>/dev/null || printf 0)
+if PREBUILT_MIGRATE_IMAGE=prebuilt/migrate:fixture SOURCE_REVISION=partial-migrate "$PROJECT_DIR/deploy/scripts/deploy.sh" >/dev/null 2>&1; then echo partial-migrate-accepted >&2; exit 1; fi
+if PREBUILT_API_IMAGE=prebuilt/api:fixture SOURCE_REVISION=partial-api "$PROJECT_DIR/deploy/scripts/deploy.sh" >/dev/null 2>&1; then echo partial-api-accepted >&2; exit 1; fi
+if PREBUILT_WEB_IMAGE=prebuilt/web:fixture SOURCE_REVISION=partial-web "$PROJECT_DIR/deploy/scripts/deploy.sh" >/dev/null 2>&1; then echo partial-web-accepted >&2; exit 1; fi
+if PREBUILT_MIGRATE_IMAGE=prebuilt/migrate:fixture PREBUILT_API_IMAGE=prebuilt/api:fixture SOURCE_REVISION=partial-no-web "$PROJECT_DIR/deploy/scripts/deploy.sh" >/dev/null 2>&1; then echo partial-no-web-accepted >&2; exit 1; fi
+if PREBUILT_MIGRATE_IMAGE=prebuilt/migrate:fixture PREBUILT_WEB_IMAGE=prebuilt/web:fixture SOURCE_REVISION=partial-no-api "$PROJECT_DIR/deploy/scripts/deploy.sh" >/dev/null 2>&1; then echo partial-no-api-accepted >&2; exit 1; fi
+if PREBUILT_API_IMAGE=prebuilt/api:fixture PREBUILT_WEB_IMAGE=prebuilt/web:fixture SOURCE_REVISION=partial-no-migrate "$PROJECT_DIR/deploy/scripts/deploy.sh" >/dev/null 2>&1; then echo partial-no-migrate-accepted >&2; exit 1; fi
+if PREBUILT_MIGRATE_IMAGE=prebuilt/migrate:fixture PREBUILT_API_IMAGE=prebuilt/missing:fixture PREBUILT_WEB_IMAGE=prebuilt/web:fixture SOURCE_REVISION=missing-api "$PROJECT_DIR/deploy/scripts/deploy.sh" >/dev/null 2>&1; then echo missing-api-accepted >&2; exit 1; fi
+preflight_first=$((preflight_start + 1))
+tail -n +"$preflight_first" "$fixture_root/docker.log" > "$fixture_root/preflight-failures.log"
+! grep -Eq ' stop postgres$| build (migrate|api|web)$|^image tag ' "$fixture_root/preflight-failures.log"
+
 "$PROJECT_DIR/deploy/scripts/deploy.sh"
 first_release=$(sed -n '1p' "$PROJECT_DIR/deploy/state/current-release")
 test -d "$PROJECT_DIR/deploy/releases/$first_release"
@@ -90,10 +104,21 @@ export SOURCE_REVISION=secondrevision
 export PREBUILT_MIGRATE_IMAGE=prebuilt/migrate:fixture
 export PREBUILT_API_IMAGE=prebuilt/api:fixture
 export PREBUILT_WEB_IMAGE=prebuilt/web:fixture
+prebuilt_start=$(wc -l < "$fixture_root/docker.log")
 "$PROJECT_DIR/deploy/scripts/deploy.sh"
+prebuilt_first=$((prebuilt_start + 1))
+tail -n +"$prebuilt_first" "$fixture_root/docker.log" > "$fixture_root/prebuilt-release.log"
 second_release=$(sed -n '1p' "$PROJECT_DIR/deploy/state/current-release")
 test "$second_release" != "$first_release"
 test "$(sed -n '1p' "$PROJECT_DIR/deploy/state/previous-release")" = "$first_release"
+second_meta="$PROJECT_DIR/deploy/releases/$second_release/release.meta"
+grep -Fxq 'image_source=prebuilt' "$second_meta"
+grep -Fxq 'prebuilt_migrate_source=prebuilt/migrate:fixture' "$second_meta"
+grep -Fxq 'prebuilt_api_source=prebuilt/api:fixture' "$second_meta"
+grep -Fxq 'prebuilt_web_source=prebuilt/web:fixture' "$second_meta"
+grep -Fxq 'prebuilt_migrate_source_id=sha256:fixture-image-id' "$second_meta"
+grep -Fxq 'prebuilt_api_source_id=sha256:fixture-image-id' "$second_meta"
+grep -Fxq 'prebuilt_web_source_id=sha256:fixture-image-id' "$second_meta"
 
 sed -i 's/COMPOSE_PROJECT_NAME=warehouse-safe/COMPOSE_PROJECT_NAME=warehouse-mutated/' "$ENV_FILE"
 "$PROJECT_DIR/deploy/scripts/rollback.sh"
@@ -133,9 +158,15 @@ test "$start_postgres" -lt "$run_migrate"
 test "$(grep -c ' build migrate$' "$fixture_root/docker.log")" = 1
 test "$(grep -c ' build api$' "$fixture_root/docker.log")" = 1
 test "$(grep -c ' build web$' "$fixture_root/docker.log")" = 1
-grep -Eq '^image tag prebuilt/migrate:fixture warehouse-test/migrate:' "$fixture_root/docker.log"
-grep -Eq '^image tag prebuilt/api:fixture warehouse-test/api:' "$fixture_root/docker.log"
-grep -Eq '^image tag prebuilt/web:fixture warehouse-test/web:' "$fixture_root/docker.log"
+prebuilt_stop=$(grep -n -m1 ' stop postgres$' "$fixture_root/prebuilt-release.log" | cut -d: -f1)
+for source_image in prebuilt/migrate:fixture prebuilt/api:fixture prebuilt/web:fixture; do
+  inspect_line=$(grep -n -m1 "^image inspect --format {{.Id}} $source_image$" "$fixture_root/prebuilt-release.log" | cut -d: -f1)
+  test "$inspect_line" -lt "$prebuilt_stop"
+done
+for target_service in migrate api web; do
+  tag_line=$(grep -n -m1 "^image tag sha256:fixture-image-id warehouse-test/$target_service:" "$fixture_root/prebuilt-release.log" | cut -d: -f1)
+  test "$tag_line" -lt "$prebuilt_stop"
+done
 
 printf 'first=%s\nsecond=%s\n' "$first_release" "$second_release"
 `;
@@ -144,11 +175,12 @@ printf 'first=%s\nsecond=%s\n' "$first_release" "$second_release"
   const shell = process.platform === "win32" && existsSync(windowsShell) ? windowsShell : "sh";
   const result = spawnSync(
     shell,
-    ["-c", fixture],
+    ["-s"],
     {
       cwd: repositoryRoot,
       encoding: "utf8",
       env: { ...process.env, ENV_FILE_BASE64: envFile },
+      input: fixture,
       timeout: 60_000,
     },
   );
