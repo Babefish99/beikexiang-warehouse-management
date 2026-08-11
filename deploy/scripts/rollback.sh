@@ -4,69 +4,84 @@ set -eu
 umask 077
 
 PROJECT_DIR=${PROJECT_DIR:-/opt/beikexiang-warehouse}
-COMPOSE_FILE=${COMPOSE_FILE:-$PROJECT_DIR/docker-compose.prod.yml}
-ENV_FILE=${ENV_FILE:-$PROJECT_DIR/deploy/.env.production}
 STATE_DIR=$PROJECT_DIR/deploy/state
+RELEASES_DIR=$PROJECT_DIR/deploy/releases
 SCRIPT_DIR=$PROJECT_DIR/deploy/scripts
+COMMON_SCRIPT=$SCRIPT_DIR/common.sh
 
 fail() {
   printf 'ERROR: %s\n' "$*" >&2
   exit 1
 }
 
-[ -f "$COMPOSE_FILE" ] || fail "compose file not found: $COMPOSE_FILE"
-[ -f "$ENV_FILE" ] || fail "environment file not found: $ENV_FILE"
-[ "$(stat -c '%a' "$ENV_FILE")" = "600" ] || fail "$ENV_FILE must have mode 600"
+[ -f "$COMMON_SCRIPT" ] || fail "common script not found: $COMMON_SCRIPT"
+. "$COMMON_SCRIPT"
 
-set -a
-# shellcheck disable=SC1090
-. "$ENV_FILE"
-set +a
-
-current_release_file="$STATE_DIR/current-release"
-previous_release_file="$STATE_DIR/previous-release"
+current_release_file=$STATE_DIR/current-release
+previous_release_file=$STATE_DIR/previous-release
+[ -s "$current_release_file" ] || fail "no current-release record exists"
 [ -s "$previous_release_file" ] || fail "no previous-release record exists"
-
+current_release=$(sed -n '1p' "$current_release_file")
 previous_release=$(sed -n '1p' "$previous_release_file")
-current_release=""
-if [ -s "$current_release_file" ]; then
-  current_release=$(sed -n '1p' "$current_release_file")
-fi
+require_release_name "$current_release"
+require_release_name "$previous_release"
+
+current_dir=$RELEASES_DIR/$current_release
+previous_dir=$RELEASES_DIR/$previous_release
+current_env=$current_dir/.env.production
+current_compose=$current_dir/docker-compose.prod.yml
+previous_env=$previous_dir/.env.production
+previous_compose=$previous_dir/docker-compose.prod.yml
+previous_meta=$previous_dir/release.meta
+for required_file in "$current_env" "$current_compose" "$previous_env" "$previous_compose" "$previous_meta"; do
+  [ -f "$required_file" ] || fail "release snapshot file is missing: $required_file"
+done
+require_mode_600 "$current_env"
+require_mode_600 "$previous_env"
+require_mode_600 "$previous_compose"
+read_deployment_identity "$previous_env"
+validate_application_safety "$previous_env"
+snapshot_project=$COMPOSE_PROJECT_NAME_LITERAL
 
 compose() {
-  docker compose --project-directory "$PROJECT_DIR" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+  docker compose --project-directory "$PROJECT_DIR" --project-name "$snapshot_project" --env-file "$previous_env" -f "$previous_compose" "$@"
 }
 
-for image_name in api web; do
-  docker image inspect "${IMAGE_PREFIX:-warehouse}/$image_name:$previous_release" >/dev/null 2>&1 \
-    || fail "rollback image is missing: ${IMAGE_PREFIX:-warehouse}/$image_name:$previous_release"
+compose config --quiet
+if [ "${VALIDATE_ONLY:-0}" = "1" ]; then
+  printf 'Rollback configuration is valid for release %s.\n' "$previous_release"
+  exit 0
+fi
+
+api_image=$(read_literal_value "$previous_meta" api_image) || fail "previous API image metadata is invalid"
+api_image_id=$(read_literal_value "$previous_meta" api_image_id) || fail "previous API image identity is invalid"
+web_image=$(read_literal_value "$previous_meta" web_image) || fail "previous Web image metadata is invalid"
+web_image_id=$(read_literal_value "$previous_meta" web_image_id) || fail "previous Web image identity is invalid"
+for image_record in "$api_image|$api_image_id" "$web_image|$web_image_id"; do
+  image_ref=${image_record%%|*}
+  expected_id=${image_record#*|}
+  actual_id=$(docker image inspect --format '{{.Id}}' "$image_ref" 2>/dev/null) || fail "rollback image is missing: $image_ref"
+  [ "$actual_id" = "$expected_id" ] || fail "rollback image identity changed for $image_ref"
 done
 
-backup_file=$(PROJECT_DIR="$PROJECT_DIR" COMPOSE_FILE="$COMPOSE_FILE" ENV_FILE="$ENV_FILE" "$SCRIPT_DIR/backup.sh")
+backup_file=$(PROJECT_DIR="$PROJECT_DIR" COMPOSE_FILE="$current_compose" ENV_FILE="$current_env" BACKUP_REASON="pre-rollback:$current_release" "$SCRIPT_DIR/backup.sh")
 printf 'Pre-rollback database backup: %s\n' "$backup_file"
 
 export RELEASE_TAG=$previous_release
 compose up -d --no-deps api web
-
-for service in api web; do
-  count=0
-  while [ "$count" -lt 60 ]; do
-    container_id=$(compose ps -q "$service")
-    status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id")
-    [ "$status" = "healthy" ] && break
-    [ "$status" = "unhealthy" ] && fail "$service became unhealthy during rollback"
-    count=$((count + 1))
-    sleep 2
-  done
-  [ "$count" -lt 60 ] || fail "$service did not become healthy during rollback"
+for rollback_service in api web; do
+  wait_for_service "$rollback_service" 60 || {
+    compose logs --no-color "$rollback_service" >&2 || true
+    fail "$rollback_service failed health validation during rollback"
+  }
 done
 
 printf '%s\n' "$previous_release" > "${current_release_file}.tmp"
+chmod 600 "${current_release_file}.tmp"
 mv "${current_release_file}.tmp" "$current_release_file"
-if [ -n "$current_release" ]; then
-  printf '%s\n' "$current_release" > "${previous_release_file}.tmp"
-  mv "${previous_release_file}.tmp" "$previous_release_file"
-fi
+printf '%s\n' "$current_release" > "${previous_release_file}.tmp"
+chmod 600 "${previous_release_file}.tmp"
+mv "${previous_release_file}.tmp" "$previous_release_file"
 
-printf 'Rolled back application images to %s without changing the PostgreSQL volume.\n' "$previous_release"
+printf 'Rolled back configuration and verified application images to release %s without changing the PostgreSQL volume.\n' "$previous_release"
 printf 'Schema is not rolled back; schema rollback and backup restore are separate explicit operations.\n'

@@ -7,7 +7,9 @@ PROJECT_DIR=${PROJECT_DIR:-/opt/beikexiang-warehouse}
 COMPOSE_FILE=${COMPOSE_FILE:-$PROJECT_DIR/docker-compose.prod.yml}
 ENV_FILE=${ENV_FILE:-$PROJECT_DIR/deploy/.env.production}
 SCRIPT_DIR=$PROJECT_DIR/deploy/scripts
+COMMON_SCRIPT=$SCRIPT_DIR/common.sh
 STATE_DIR=$PROJECT_DIR/deploy/state
+RELEASES_DIR=$PROJECT_DIR/deploy/releases
 LOG_DIR=$PROJECT_DIR/deploy/logs
 
 fail() {
@@ -15,95 +17,142 @@ fail() {
   exit 1
 }
 
+[ -f "$COMMON_SCRIPT" ] || fail "common script not found: $COMMON_SCRIPT"
+. "$COMMON_SCRIPT"
 [ -f "$COMPOSE_FILE" ] || fail "compose file not found: $COMPOSE_FILE"
 [ -f "$ENV_FILE" ] || fail "environment file not found: $ENV_FILE"
+require_mode_600 "$ENV_FILE"
+read_deployment_identity "$ENV_FILE"
+validate_application_safety "$ENV_FILE"
 
-env_mode=$(stat -c '%a' "$ENV_FILE")
-[ "$env_mode" = "600" ] || fail "$ENV_FILE must have mode 600 (found $env_mode)"
+compose() {
+  docker compose --project-directory "$PROJECT_DIR" --project-name "$COMPOSE_PROJECT_NAME_LITERAL" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+}
 
-set -a
-# The production environment file is administrator-owned configuration.
-# shellcheck disable=SC1090
-. "$ENV_FILE"
-set +a
+compose config --quiet
+if [ "${VALIDATE_ONLY:-0}" = "1" ]; then
+  printf 'Deployment configuration is valid for project %s.\n' "$COMPOSE_PROJECT_NAME_LITERAL"
+  exit 0
+fi
 
-for required_name in SITE_ADDRESS NODE_ENV PERSISTENCE_DRIVER DATABASE_URL API_BASE_URL WEB_BASE_URL SESSION_SECRET POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD; do
-  eval "required_value=\${$required_name-}"
-  [ -n "$required_value" ] || fail "$required_name is required"
-done
-[ "$PERSISTENCE_DRIVER" = "prisma" ] || fail "PERSISTENCE_DRIVER must be prisma"
-[ "${LOCAL_AUTH_BYPASS:-false}" = "false" ] || fail "LOCAL_AUTH_BYPASS must be false"
-
-mkdir -p "$STATE_DIR" "$LOG_DIR"
-chmod 700 "$STATE_DIR" "$LOG_DIR"
-log_file="$LOG_DIR/deploy-$(date -u +%Y%m%dT%H%M%SZ).log"
+mkdir -p "$STATE_DIR" "$RELEASES_DIR" "$LOG_DIR"
+chmod 700 "$STATE_DIR" "$RELEASES_DIR" "$LOG_DIR"
+log_file="$LOG_DIR/deploy-$(date -u +%Y%m%dT%H%M%SZ)-$$.log"
 
 log() {
   printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | tee -a "$log_file"
 }
 
-compose() {
-  docker compose --project-directory "$PROJECT_DIR" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
-}
-
-wait_healthy() {
-  service=$1
-  attempts=${2:-60}
-  count=0
-  while [ "$count" -lt "$attempts" ]; do
-    container_id=$(compose ps -q "$service")
-    if [ -n "$container_id" ]; then
-      status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id")
-      if [ "$status" = "healthy" ]; then
-        log "$service is healthy"
-        return 0
-      fi
-      if [ "$status" = "unhealthy" ] || [ "$status" = "exited" ] || [ "$status" = "dead" ]; then
-        compose logs --no-color "$service" >> "$log_file" 2>&1 || true
-        fail "$service entered terminal state: $status"
-      fi
-    fi
-    count=$((count + 1))
-    sleep 2
-  done
-  compose logs --no-color "$service" >> "$log_file" 2>&1 || true
-  fail "$service did not become healthy"
-}
-
-current_release_file="$STATE_DIR/current-release"
-previous_release_file="$STATE_DIR/previous-release"
-current_release=""
+current_release_file=$STATE_DIR/current-release
+previous_release_file=$STATE_DIR/previous-release
+current_release=
 if [ -s "$current_release_file" ]; then
   current_release=$(sed -n '1p' "$current_release_file")
+  require_release_name "$current_release"
+  current_meta=$RELEASES_DIR/$current_release/release.meta
+  [ -f "$current_meta" ] || fail "current release metadata is missing: $current_meta"
+  current_project=$(read_literal_value "$current_meta" compose_project_name) || fail "current release project metadata is invalid"
+  [ "$current_project" = "$COMPOSE_PROJECT_NAME_LITERAL" ] || fail "COMPOSE_PROJECT_NAME cannot change within an existing release history"
 fi
+
+source_revision=${SOURCE_REVISION:-}
+if [ -z "$source_revision" ]; then
+  source_revision=$(git -C "$PROJECT_DIR" rev-parse --short=12 HEAD)
+fi
+case "$source_revision" in
+  ''|*[!A-Za-z0-9_.-]*) fail "invalid source revision" ;;
+esac
+
+release_tag="$(date -u +%Y%m%dT%H%M%SZ)-$source_revision-$$"
+require_release_name "$release_tag"
+release_stage=$RELEASES_DIR/.$release_tag.tmp
+release_dir=$RELEASES_DIR/$release_tag
+[ ! -e "$release_stage" ] || fail "release staging path already exists: $release_stage"
+[ ! -e "$release_dir" ] || fail "release already exists: $release_dir"
+mkdir "$release_stage"
+chmod 700 "$release_stage"
+cp "$ENV_FILE" "$release_stage/.env.production"
+cp "$COMPOSE_FILE" "$release_stage/docker-compose.prod.yml"
+chmod 600 "$release_stage/.env.production" "$release_stage/docker-compose.prod.yml"
+
+export RELEASE_TAG=$release_tag
+postgres_was_stopped=0
+deployment_complete=0
+recover_postgres() {
+  exit_status=$?
+  if [ "$exit_status" -ne 0 ] && [ "$postgres_was_stopped" = "1" ] && [ "$deployment_complete" = "0" ]; then
+    log "deployment failed; restarting PostgreSQL only and leaving application services stopped for operator review"
+    compose up -d postgres >> "$log_file" 2>&1 || true
+  fi
+  exit "$exit_status"
+}
+trap recover_postgres EXIT HUP INT TERM
 
 log "starting PostgreSQL before the pre-deployment backup"
 compose up -d postgres >> "$log_file" 2>&1
-wait_healthy postgres 60
-backup_file=$(PROJECT_DIR="$PROJECT_DIR" COMPOSE_FILE="$COMPOSE_FILE" ENV_FILE="$ENV_FILE" "$SCRIPT_DIR/backup.sh")
+wait_for_service postgres 60
+log "PostgreSQL is healthy"
+backup_file=$(PROJECT_DIR="$PROJECT_DIR" COMPOSE_FILE="$COMPOSE_FILE" ENV_FILE="$ENV_FILE" BACKUP_REASON="pre-deploy:$release_tag" "$SCRIPT_DIR/backup.sh")
+[ -s "$backup_file" ] || fail "pre-deployment backup is missing: $backup_file"
+[ -s "${backup_file}.manifest" ] || fail "pre-deployment backup manifest is missing"
+cp "${backup_file}.manifest" "$release_stage/backup.manifest"
+chmod 600 "$release_stage/backup.manifest"
 log "database backup created: $backup_file"
 
-release_tag="$(date -u +%Y%m%dT%H%M%SZ)-$(git -C "$PROJECT_DIR" rev-parse --short=12 HEAD)"
-export RELEASE_TAG=$release_tag
+log "stopping API and Web for the bounded-memory deployment"
+compose stop api web >> "$log_file" 2>&1 || true
+log "stopping PostgreSQL while images build to preserve host memory"
+compose stop postgres >> "$log_file" 2>&1
+postgres_was_stopped=1
 
-if [ -n "$current_release" ]; then
-  printf '%s\n' "$current_release" > "${previous_release_file}.tmp"
-  mv "${previous_release_file}.tmp" "$previous_release_file"
-  log "recorded previous release: $current_release"
-fi
+for build_service in migrate api web; do
+  log "building $build_service image for release $release_tag"
+  compose build "$build_service" >> "$log_file" 2>&1
+done
 
-log "building release $release_tag"
-compose build migrate api web >> "$log_file" 2>&1
+migrate_image=$IMAGE_PREFIX_LITERAL/migrate:$release_tag
+api_image=$IMAGE_PREFIX_LITERAL/api:$release_tag
+web_image=$IMAGE_PREFIX_LITERAL/web:$release_tag
+migrate_image_id=$(docker image inspect --format '{{.Id}}' "$migrate_image")
+api_image_id=$(docker image inspect --format '{{.Id}}' "$api_image")
+web_image_id=$(docker image inspect --format '{{.Id}}' "$web_image")
 
+{
+  printf 'release_tag=%s\n' "$release_tag"
+  printf 'created_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf 'source_revision=%s\n' "$source_revision"
+  printf 'compose_project_name=%s\n' "$COMPOSE_PROJECT_NAME_LITERAL"
+  printf 'pre_upgrade_backup=%s\n' "$backup_file"
+  printf 'migrate_image=%s\n' "$migrate_image"
+  printf 'migrate_image_id=%s\n' "$migrate_image_id"
+  printf 'api_image=%s\n' "$api_image"
+  printf 'api_image_id=%s\n' "$api_image_id"
+  printf 'web_image=%s\n' "$web_image"
+  printf 'web_image_id=%s\n' "$web_image_id"
+} > "$release_stage/release.meta"
+chmod 600 "$release_stage/release.meta"
+
+log "starting PostgreSQL after sequential image builds"
+compose up -d postgres >> "$log_file" 2>&1
+postgres_was_stopped=0
+wait_for_service postgres 60
 log "running one-shot migrations and seed"
 compose run --rm migrate >> "$log_file" 2>&1
-
-log "starting API and Web"
+log "starting API and Web; this deployment intentionally includes downtime"
 compose up -d --no-deps api web >> "$log_file" 2>&1
-wait_healthy api 60
-wait_healthy web 60
+wait_for_service api 60
+wait_for_service web 60
 
+mv "$release_stage" "$release_dir"
+if [ -n "$current_release" ]; then
+  printf '%s\n' "$current_release" > "${previous_release_file}.tmp"
+  chmod 600 "${previous_release_file}.tmp"
+  mv "${previous_release_file}.tmp" "$previous_release_file"
+fi
 printf '%s\n' "$release_tag" > "${current_release_file}.tmp"
+chmod 600 "${current_release_file}.tmp"
 mv "${current_release_file}.tmp" "$current_release_file"
-log "deployment complete: $release_tag"
+deployment_complete=1
+trap - EXIT HUP INT TERM
+log "deployment complete with planned downtime: $release_tag"
 log "evidence log: $log_file"
