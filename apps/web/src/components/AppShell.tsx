@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Bell, BarChart3, Building2, ChevronDown, LayoutDashboard, Menu, PackageSearch, Search, Settings, ShieldCheck, UserCircle, Warehouse, X } from "lucide-react";
+import { LogoMark } from "./LogoMark";
 
 export type WarehouseOption = { id: string; code: string; name: string; isActive: boolean };
 export type WorkspaceUser = { name: string; roleLabel: string; role: "ADMIN" | "FINANCE" };
@@ -229,8 +230,7 @@ export function AppShell({
     <div className="app-shell">
       <aside className="sidebar">
         <div className="sidebar__brand">
-          <span className="brand-mark">库</span>
-          <span><strong>集团仓库</strong><small>库存管理后台</small></span>
+          <LogoMark />
         </div>
         <nav className="sidebar__nav" aria-label="主导航">
           {navItems.map(({ label, href, icon: Icon, ...item }) => {
