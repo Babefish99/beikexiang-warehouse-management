@@ -34,6 +34,7 @@ interface StockEntryInput extends InboundInput {
   referenceType: "INBOUND_ORDER" | "OPENING_STOCK";
   referenceId: string;
   occurredAt: string;
+  operatorId?: string;
 }
 
 export interface InventoryEntryStore {

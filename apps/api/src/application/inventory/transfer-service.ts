@@ -23,9 +23,9 @@ export interface IssuedAllocation {
 export interface MovementStore {
   listBalances(): Promise<MovementBalance[]>;
   listIssuedAllocations(): Promise<IssuedAllocation[]>;
-  getAllocation(id: string): IssuedAllocation | undefined;
-  getReturnedQuantity(allocationId: string): string;
-  transfer(input: { itemId: string; batchId: string; sourceWarehouseId: string; destinationWarehouseId: string; quantity: string }): Promise<{ transferId: string; unitCost: string }>;
+  getAllocation(id: string): IssuedAllocation | undefined | Promise<IssuedAllocation | undefined>;
+  getReturnedQuantity(allocationId: string): string | Promise<string>;
+  transfer(input: { itemId: string; batchId: string; sourceWarehouseId: string; destinationWarehouseId: string; quantity: string; reason: string }): Promise<{ transferId: string; unitCost: string }>;
   returnStock(input: { allocation: IssuedAllocation; quantity: string; reason: string }): Promise<{ returnId: string; unitCost: string }>;
 }
 

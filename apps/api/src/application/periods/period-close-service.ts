@@ -2,9 +2,9 @@ import type { AccountingPeriod } from "../../domain/periods/accounting-period.js
 import { createAccountingPeriod, createAccountingPeriodService } from "../../domain/periods/accounting-period.js";
 
 export interface AccountingPeriodStore {
-  get(code: string): AccountingPeriod | undefined;
-  getOrCreate(code: string): AccountingPeriod;
-  save(period: AccountingPeriod): void;
+  get(code: string): AccountingPeriod | undefined | Promise<AccountingPeriod | undefined>;
+  getOrCreate(code: string): AccountingPeriod | Promise<AccountingPeriod>;
+  save(period: AccountingPeriod): void | Promise<void>;
 }
 
 export interface PeriodCloseChecks {
@@ -47,10 +47,10 @@ export class PeriodCloseService {
       : input.unpostedAdjustmentCount ?? 0;
     if (pendingOutboundCount > 0) throw new Error("pending outbound items must be resolved");
     if (unpostedAdjustmentCount > 0) throw new Error("unposted adjustments must be resolved");
-    const current = this.periodStore.getOrCreate(input.period.code);
+    const current = await this.periodStore.getOrCreate(input.period.code);
     this.periods.assertOpen(current);
     const closed = this.periods.close(current);
-    this.periodStore.save(closed);
+    await this.periodStore.save(closed);
     return closed;
   }
 }

@@ -29,6 +29,7 @@ export interface ApprovalSyncStore {
   save(record: ApprovalSyncRecord): Promise<void>;
   nextAttemptNo(weComSpNo: string): Promise<number>;
   recordSyncAttempt(attempt: ApprovalSyncAttempt): Promise<void>;
+  saveWithAttempt?(record: ApprovalSyncRecord, attempt: ApprovalSyncAttempt): Promise<void>;
 }
 
 export class InMemoryApprovalSyncStore implements ApprovalSyncStore {
@@ -88,6 +89,11 @@ export class InMemoryApprovalSyncStore implements ApprovalSyncStore {
     this.syncAttempts.push(structuredClone(attempt));
   }
 
+  async saveWithAttempt(record: ApprovalSyncRecord, attempt: ApprovalSyncAttempt): Promise<void> {
+    await this.save(record);
+    await this.recordSyncAttempt(attempt);
+  }
+
   records(): ApprovalSyncRecord[] {
     if (this.state) {
       return [...this.state.approvals.values()].map((record) => toApprovalSyncRecord(record));
@@ -139,9 +145,13 @@ export class ApprovalSyncService {
           ? existing && CLOSED_OUTBOUND_STATUSES.has(existing.outboundStatus) ? existing.outboundStatus : "PENDING_OUTBOUND"
           : existing?.outboundStatus ?? "NONE",
       };
-      await this.dependencies.store.save(record);
       const payload = options.callbackPayload === undefined ? detail : { callback: options.callbackPayload, detail };
-      await this.dependencies.store.recordSyncAttempt({ weComSpNo: spNo, status: "SUCCEEDED", attemptNo, payload });
+      const attempt: ApprovalSyncAttempt = { weComSpNo: spNo, status: "SUCCEEDED", attemptNo, payload };
+      if (this.dependencies.store.saveWithAttempt) await this.dependencies.store.saveWithAttempt(record, attempt);
+      else {
+        await this.dependencies.store.save(record);
+        await this.dependencies.store.recordSyncAttempt(attempt);
+      }
       return { approvalId: record.id, created: !existing, status: parsed.status === "APPROVED" ? record.outboundStatus : parsed.status };
     } catch (error) {
       const payload = options.callbackPayload === undefined ? detail : { callback: options.callbackPayload, detail };

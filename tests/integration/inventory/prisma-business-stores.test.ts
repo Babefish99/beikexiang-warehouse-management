@@ -33,7 +33,7 @@ function schemaUrl(connectionString: string): string {
 }
 
 function createClient(connectionString: string): PrismaClient {
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+  return new PrismaClient({ adapter: new PrismaPg({ connectionString }, { schema: schemaName }) });
 }
 
 describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
@@ -47,11 +47,13 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     adminPool = new Pool({ connectionString: databaseUrl });
     await adminPool.query(`CREATE SCHEMA "${schemaName}"`);
     const migrationPool = new Pool({ connectionString: isolatedDatabaseUrl });
+    const migrationClient = await migrationPool.connect();
     try {
-      await migrationPool.query(`SET search_path TO "${schemaName}"`);
-      await migrationPool.query(readFileSync(resolve(process.cwd(), "prisma/migrations/00000000000000_init/migration.sql"), "utf8"));
-      await migrationPool.query(readFileSync(resolve(process.cwd(), "prisma/migrations/20260811163000_production_persistence/migration.sql"), "utf8"));
+      await migrationClient.query(`SET search_path TO "${schemaName}"`);
+      await migrationClient.query(readFileSync(resolve(process.cwd(), "prisma/migrations/00000000000000_init/migration.sql"), "utf8"));
+      await migrationClient.query(readFileSync(resolve(process.cwd(), "prisma/migrations/20260811163000_production_persistence/migration.sql"), "utf8"));
     } finally {
+      migrationClient.release();
       await migrationPool.end();
     }
     prisma = createClient(isolatedDatabaseUrl);
@@ -158,9 +160,10 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
       lines: [{ itemId, batchId: inbound.batchId }],
     });
     await expect(prisma.inboundOrder.findUnique({ where: { id: opening.orderId } })).resolves.toMatchObject({ source: "OPENING_STOCK" });
-    await expect(prisma.stockBalance.findUnique({
+    const inboundBalance = await prisma.stockBalance.findUniqueOrThrow({
       where: { warehouseId_itemId_batchId: { warehouseId: "warehouse-1", itemId, batchId: inbound.batchId } },
-    })).resolves.toMatchObject({ remainingQuantity: "10", unitCost: "12.5" });
+    });
+    expect({ remainingQuantity: inboundBalance.remainingQuantity.toString(), unitCost: inboundBalance.unitCost.toString() }).toEqual({ remainingQuantity: "10", unitCost: "12.5" });
     await expect(prisma.inventoryLedgerEntry.findMany({ where: { referenceId: { in: [inbound.orderId, opening.orderId] } }, orderBy: { type: "asc" } })).resolves.toMatchObject([
       { referenceId: inbound.orderId, type: "INBOUND" },
       { referenceId: opening.orderId, type: "OPENING_BALANCE" },
@@ -184,14 +187,16 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     });
 
     expect(result).toMatchObject({ approvalId: approval.id, status: "COMPLETED", actualQuantity: "5", amount: "62.50" });
-    await expect(prisma.stockBalance.findFirstOrThrow({ where: { batchId: stock.batchId } })).resolves.toMatchObject({ remainingQuantity: "5" });
-    await expect(prisma.procurementBatch.findUniqueOrThrow({ where: { id: stock.batchId } })).resolves.toMatchObject({ remainingQuantity: "5" });
-    await expect(prisma.outboundOrder.findUnique({ where: { id: result.id }, include: { allocations: true } })).resolves.toMatchObject({
-      orderNo: expect.stringMatching(/^OUT-/),
-      allocations: [{ approvalLineId: approval.lines[0]!.id, quantity: "5", originalQuantity: "5" }],
-    });
+    expect((await prisma.stockBalance.findFirstOrThrow({ where: { batchId: stock.batchId } })).remainingQuantity.toString()).toBe("5");
+    expect((await prisma.procurementBatch.findUniqueOrThrow({ where: { id: stock.batchId } })).remainingQuantity.toString()).toBe("5");
+    const storedOutbound = await prisma.outboundOrder.findUniqueOrThrow({ where: { id: result.id }, include: { allocations: true } });
+    expect(storedOutbound.orderNo).toMatch(/^OUT-/);
+    expect(storedOutbound.allocations.map((allocation) => ({ approvalLineId: allocation.approvalLineId, quantity: allocation.quantity.toString(), originalQuantity: allocation.originalQuantity.toString() }))).toEqual([
+      { approvalLineId: approval.lines[0]!.id, quantity: "5", originalQuantity: "5" },
+    ]);
     await expect(prisma.approvalRequest.findUniqueOrThrow({ where: { id: approval.id } })).resolves.toMatchObject({ outboundStatus: "COMPLETED" });
-    await expect(prisma.inventoryLedgerEntry.findFirst({ where: { referenceId: result.id } })).resolves.toMatchObject({ type: "OUTBOUND", quantity: "-5" });
+    const outboundLedger = await prisma.inventoryLedgerEntry.findFirstOrThrow({ where: { referenceId: result.id } });
+    expect({ type: outboundLedger.type, quantity: outboundLedger.quantity.toString() }).toEqual({ type: "OUTBOUND", quantity: "-5" });
   });
 
   it("rejects a stale outbound balance without partially closing the approval", async () => {
@@ -214,6 +219,28 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     await expect(prisma.approvalRequest.findUniqueOrThrow({ where: { id: approvalRecord.id } })).resolves.toMatchObject({ outboundStatus: "PENDING_OUTBOUND" });
   });
 
+  it("conditionally decrements a shared batch once for split allocations and supports zero issue", async () => {
+    const stock = await recordStock({ batchNo: "TASK3-SPLIT" });
+    const approval = await createApproval("5");
+    const service = new OutboundService(new PrismaOutboundStore(prisma));
+
+    await expect(service.confirm({
+      approvalId: approval.id,
+      allocations: [
+        { approvalLineId: approval.lines[0]!.id, warehouseId: "warehouse-1", batchId: stock.batchId, quantity: "2" },
+        { approvalLineId: approval.lines[0]!.id, warehouseId: "warehouse-1", batchId: stock.batchId, quantity: "3" },
+      ],
+    })).resolves.toMatchObject({ status: "COMPLETED", actualQuantity: "5" });
+    expect((await prisma.stockBalance.findFirstOrThrow({ where: { batchId: stock.batchId } })).remainingQuantity.toString()).toBe("5");
+
+    const zeroApproval = await createApproval("1");
+    await expect(service.confirm({ approvalId: zeroApproval.id, allocations: [], reason: "no stock available" })).resolves.toMatchObject({
+      status: "UNAVAILABLE",
+      actualQuantity: "0",
+      amount: "0.00",
+    });
+  });
+
   it("persists transfers and cumulative returns while preserving the batch cost", async () => {
     const stock = await recordStock({ batchNo: "TASK3-MOVEMENT" });
     const movementStore = new PrismaMovementStore(prisma);
@@ -227,18 +254,16 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     });
 
     expect(transfer).toMatchObject({ status: "COMPLETED", unitCost: "12.5" });
-    await expect(prisma.transferOrder.findUnique({ where: { id: transfer.transferId }, include: { lines: true } })).resolves.toMatchObject({
-      transferNo: expect.stringMatching(/^TRF-/),
-      lines: [{ quantity: "4", unitCost: "12.5" }],
-    });
-    await expect(prisma.stockBalance.findMany({ where: { batchId: stock.batchId }, orderBy: { warehouseId: "asc" } })).resolves.toMatchObject([
+    const storedTransfer = await prisma.transferOrder.findUniqueOrThrow({ where: { id: transfer.transferId }, include: { lines: true } });
+    expect(storedTransfer.transferNo).toMatch(/^TRF-/);
+    expect(storedTransfer.lines.map((line) => ({ quantity: line.quantity.toString(), unitCost: line.unitCost.toString() }))).toEqual([{ quantity: "4", unitCost: "12.5" }]);
+    const transferBalances = await prisma.stockBalance.findMany({ where: { batchId: stock.batchId }, orderBy: { warehouseId: "asc" } });
+    expect(transferBalances.map((balance) => ({ warehouseId: balance.warehouseId, remainingQuantity: balance.remainingQuantity.toString(), unitCost: balance.unitCost.toString() }))).toEqual([
       { warehouseId: "warehouse-1", remainingQuantity: "6", unitCost: "12.5" },
       { warehouseId: "warehouse-2", remainingQuantity: "4", unitCost: "12.5" },
     ]);
-    await expect(prisma.inventoryLedgerEntry.findMany({ where: { referenceId: transfer.transferId }, orderBy: { type: "asc" } })).resolves.toMatchObject([
-      { type: "TRANSFER_IN", quantity: "4" },
-      { type: "TRANSFER_OUT", quantity: "-4" },
-    ]);
+    const transferLedger = await prisma.inventoryLedgerEntry.findMany({ where: { referenceId: transfer.transferId }, orderBy: { type: "asc" } });
+    expect(transferLedger.map((entry) => ({ type: entry.type, quantity: entry.quantity.toString() }))).toEqual([{ type: "TRANSFER_IN", quantity: "4" }, { type: "TRANSFER_OUT", quantity: "-4" }]);
 
     const approval = await createApproval("3");
     const outbound = await new OutboundService(new PrismaOutboundStore(prisma)).confirm({
@@ -249,11 +274,9 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     const returned = await new ReturnService(movementStore).create({ outboundAllocationId: allocation.id, quantity: "2", reason: "unused" });
 
     expect(returned).toMatchObject({ status: "COMPLETED", unitCost: "12.5" });
-    await expect(prisma.returnOrder.findUnique({ where: { id: returned.returnId }, include: { lines: true } })).resolves.toMatchObject({
-      returnNo: expect.stringMatching(/^RET-/),
-      originalOutboundId: outbound.id,
-      lines: [{ outboundAllocationId: allocation.id, quantity: "2", unitCost: "12.5" }],
-    });
+    const storedReturn = await prisma.returnOrder.findUniqueOrThrow({ where: { id: returned.returnId }, include: { lines: true } });
+    expect(storedReturn).toMatchObject({ returnNo: expect.stringMatching(/^RET-/), originalOutboundId: outbound.id });
+    expect(storedReturn.lines.map((line) => ({ outboundAllocationId: line.outboundAllocationId, quantity: line.quantity.toString(), unitCost: line.unitCost.toString() }))).toEqual([{ outboundAllocationId: allocation.id, quantity: "2", unitCost: "12.5" }]);
     await expect(new ReturnService(movementStore).create({ outboundAllocationId: allocation.id, quantity: "2", reason: "too much" })).rejects.toThrow("return quantity exceeds original issued quantity");
   });
 
@@ -274,14 +297,12 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
       reason: "damaged",
     });
 
-    await expect(prisma.stocktake.findUnique({ where: { id: result.stocktakeId }, include: { adjustments: true } })).resolves.toMatchObject({
-      stocktakeNo: expect.stringMatching(/^STK-/),
-      periodCode: "2026-08",
-      operatorId: "task3-operator",
-      adjustments: [{ quantity: "-2", reason: "damaged", operatorId: "task3-operator" }],
-    });
-    await expect(prisma.stockBalance.findFirstOrThrow({ where: { batchId: stock.batchId } })).resolves.toMatchObject({ remainingQuantity: "8" });
-    await expect(prisma.inventoryLedgerEntry.findFirst({ where: { referenceId: result.stocktakeId } })).resolves.toMatchObject({ type: "STOCKTAKE_ADJUSTMENT", quantity: "-2" });
+    const storedStocktake = await prisma.stocktake.findUniqueOrThrow({ where: { id: result.stocktakeId }, include: { adjustments: true } });
+    expect(storedStocktake).toMatchObject({ stocktakeNo: expect.stringMatching(/^STK-/), periodCode: "2026-08", operatorId: "task3-operator" });
+    expect(storedStocktake.adjustments.map((adjustment) => ({ quantity: adjustment.quantity.toString(), reason: adjustment.reason, operatorId: adjustment.operatorId }))).toEqual([{ quantity: "-2", reason: "damaged", operatorId: "task3-operator" }]);
+    expect((await prisma.stockBalance.findFirstOrThrow({ where: { batchId: stock.batchId } })).remainingQuantity.toString()).toBe("8");
+    const stocktakeLedger = await prisma.inventoryLedgerEntry.findFirstOrThrow({ where: { referenceId: result.stocktakeId } });
+    expect({ type: stocktakeLedger.type, quantity: stocktakeLedger.quantity.toString() }).toEqual({ type: "STOCKTAKE_ADJUSTMENT", quantity: "-2" });
 
     const closed = await new PeriodCloseService(periodStore).close({
       period: createAccountingPeriod({ code: "2026-08" }),
@@ -311,10 +332,9 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     await prisma.approvalRequest.update({ where: { id: record.id }, data: { outboundStatus: "COMPLETED" } });
     await store.saveWithAttempt({ ...record, outboundStatus: "PENDING_OUTBOUND" }, { weComSpNo: record.weComSpNo, status: "SUCCEEDED", attemptNo: 2, payload: { callback: 2 } });
 
-    await expect(prisma.approvalRequest.findUnique({ where: { id: record.id }, include: { lines: true } })).resolves.toMatchObject({
-      outboundStatus: "COMPLETED",
-      lines: [{ itemId, requestedQuantity: "2" }],
-    });
+    const storedApproval = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: record.id }, include: { lines: true } });
+    expect(storedApproval.outboundStatus).toBe("COMPLETED");
+    expect(storedApproval.lines.map((line) => ({ itemId: line.itemId, requestedQuantity: line.requestedQuantity.toString() }))).toEqual([{ itemId, requestedQuantity: "2" }]);
     await expect(prisma.approvalRequest.count({ where: { weComSpNo: record.weComSpNo } })).resolves.toBe(1);
     await expect(prisma.approvalLine.count({ where: { approvalRequestId: record.id } })).resolves.toBe(1);
     await expect(prisma.syncAttempt.findMany({ where: { weComSpNo: record.weComSpNo }, orderBy: { attemptNo: "asc" } })).resolves.toMatchObject([

@@ -26,7 +26,7 @@ export class OpeningStockService {
       const unitCost = assertNonNegative(row.unitCost, "unit cost");
       if (unitCost.isZero() && !row.remark?.trim()) throw new Error("remark is required when unit cost is zero");
       await this.assertPeriodOpen?.();
-      const result = await this.store.recordStockEntry({ warehouseId: row.warehouseId, itemId: row.itemId, batchNo: row.batchNo, quantity: quantity.toString(), unitCost: decimal(unitCost).toString(), purchasedAt: new Date().toISOString(), remark: row.remark, ledgerType: "OPENING_BALANCE", referenceType: "OPENING_STOCK", referenceId: `opening-${input.verifiedBy}-${Date.now()}`, occurredAt: new Date().toISOString() });
+      const result = await this.store.recordStockEntry({ warehouseId: row.warehouseId, itemId: row.itemId, batchNo: row.batchNo, quantity: quantity.toString(), unitCost: decimal(unitCost).toString(), purchasedAt: new Date().toISOString(), remark: row.remark, ledgerType: "OPENING_BALANCE", referenceType: "OPENING_STOCK", referenceId: `opening-${input.verifiedBy}-${Date.now()}`, occurredAt: new Date().toISOString(), operatorId: input.verifiedBy });
       batchIds.push(result.batchId);
     }
     return { batchIds };

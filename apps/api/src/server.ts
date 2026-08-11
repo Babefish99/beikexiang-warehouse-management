@@ -116,9 +116,9 @@ export function buildServer(options: BuildServerOptions = {}) {
   const inventoryState = createInventoryMemoryState();
   const periodStore = options.periodStore ?? new InMemoryAccountingPeriodStore();
   const currentPeriodCode = () => new Date().toISOString().slice(0, 7);
-  const assertCurrentPeriodOpen = () => {
+  const assertCurrentPeriodOpen = async () => {
     const periodCode = currentPeriodCode();
-    const period = periodStore.getOrCreate(periodCode);
+    const period = await periodStore.getOrCreate(periodCode);
     if (period.status !== "OPEN") throw new Error(`closed period: ${period.code}`);
   };
   const outboundStore = new InMemoryOutboundStore(inventoryState);
@@ -156,7 +156,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     listLowStock: () => alertService.listLowStock(),
     getPeriodStatus: async () => {
       const code = currentPeriodCode();
-      return periodStore.get(code) ?? { code, status: "OPEN" as const };
+      return (await periodStore.get(code)) ?? { code, status: "OPEN" as const };
     },
     getStocktakeNotice: async () => ({ count: inventoryState.stocktakeAdjustments.length, href: "/admin/stocktake" }),
     getAnomalyCount: async () => inventoryState.stocktakeAdjustments.filter((adjustment) => adjustment.quantityDelta !== "0").length,
