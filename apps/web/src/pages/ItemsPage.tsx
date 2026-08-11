@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw, Search } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 
@@ -43,6 +43,12 @@ async function readError(response: Response): Promise<string> {
   return payload?.message ?? payload?.error ?? "请求失败";
 }
 
+function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  return Array.from(container.querySelectorAll<HTMLElement>(
+    "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex=\"-1\"])",
+  )).filter((element) => element.tabIndex >= 0);
+}
+
 function toFormState(item: ItemRow): ItemFormState {
   return {
     code: item.code,
@@ -80,6 +86,9 @@ export function ItemsPage() {
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<ItemFormState>(emptyForm);
   const [submitting, setSubmitting] = useState(false);
+  const activeDialogRef = useRef<HTMLElement | null>(null);
+  const modalOpenerRef = useRef<HTMLElement | null>(null);
+  const modalOpen = createModalOpen || Boolean(editingItemId);
 
   const loadItems = async () => {
     setLoading(true);
@@ -100,16 +109,46 @@ export function ItemsPage() {
   }, []);
 
   useEffect(() => {
-    if (!createModalOpen && !editingItemId) return;
+    if (!modalOpen) {
+      modalOpenerRef.current?.focus();
+      modalOpenerRef.current = null;
+      return;
+    }
+    const dialog = activeDialogRef.current;
+    if (!dialog) return;
+    const focusable = getFocusableElements(dialog);
+    const initialFocus = dialog.querySelector<HTMLElement>(
+      ".modal-dialog__form input:not([disabled]), .modal-dialog__form select:not([disabled]), .modal-dialog__form textarea:not([disabled])",
+    );
+    (initialFocus ?? focusable[0])?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setCreateModalOpen(false);
-      setEditingItemId(null);
-      setError(null);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setCreateModalOpen(false);
+        setEditingItemId(null);
+        setError(null);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const currentFocusable = getFocusableElements(dialog);
+      if (!currentFocusable.length) {
+        event.preventDefault();
+        return;
+      }
+      const first = currentFocusable[0];
+      const last = currentFocusable[currentFocusable.length - 1];
+      const activeElement = document.activeElement;
+      if (event.shiftKey && (activeElement === first || !dialog.contains(activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (activeElement === last || !dialog.contains(activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [createModalOpen, editingItemId]);
+  }, [modalOpen]);
 
   const filteredItems = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -220,7 +259,8 @@ export function ItemsPage() {
             <button
               className="button button--primary"
               type="button"
-              onClick={() => {
+              onClick={(event) => {
+                modalOpenerRef.current = event.currentTarget;
                 setCreateForm(emptyForm());
                 setCreateModalOpen(true);
                 setError(null);
@@ -235,7 +275,7 @@ export function ItemsPage() {
 
       {createModalOpen ? (
         <div className="modal-backdrop">
-          <section className="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="create-item-dialog-title">
+          <section ref={activeDialogRef} className="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="create-item-dialog-title">
             <header className="modal-dialog__header">
               <div>
                 <strong id="create-item-dialog-title">新增物品</strong>
@@ -252,7 +292,7 @@ export function ItemsPage() {
               <label><span>分类</span><input required value={createForm.categoryId} onChange={(event) => setCreateForm({ ...createForm, categoryId: event.target.value })} /></label>
               <label><span>企业微信选项 key</span><input value={createForm.weComOptionKey} onChange={(event) => setCreateForm({ ...createForm, weComOptionKey: event.target.value })} /></label>
               <label><span>最低库存</span><input value={createForm.minimumStock} onChange={(event) => setCreateForm({ ...createForm, minimumStock: event.target.value })} /></label>
-              {error ? <div className="form-grid__wide form-error modal-dialog__error">{error}</div> : null}
+              {error ? <div className="form-grid__wide form-error modal-dialog__error" role="alert" aria-live="assertive">{error}</div> : null}
               <div className="form-grid__wide form-actions form-actions--split">
                 <button className="button button--secondary" type="button" onClick={closeCreateModal}>取消</button>
                 <button className="button button--primary" type="submit" disabled={submitting}>新增物品</button>
@@ -264,7 +304,7 @@ export function ItemsPage() {
 
       {editingItemId ? (
         <div className="modal-backdrop">
-          <section className="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-item-dialog-title">
+          <section ref={activeDialogRef} className="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-item-dialog-title">
             <header className="modal-dialog__header">
               <div>
                 <strong id="edit-item-dialog-title">编辑物品</strong>
@@ -279,7 +319,7 @@ export function ItemsPage() {
               <label><span>单位</span><input required value={editForm.unit} onChange={(event) => setEditForm({ ...editForm, unit: event.target.value })} /></label>
               <label><span>企业微信选项 key</span><input value={editForm.weComOptionKey} onChange={(event) => setEditForm({ ...editForm, weComOptionKey: event.target.value })} /></label>
               <label><span>最低库存</span><input value={editForm.minimumStock} onChange={(event) => setEditForm({ ...editForm, minimumStock: event.target.value })} /></label>
-              {error ? <div className="form-grid__wide form-error modal-dialog__error">{error}</div> : null}
+              {error ? <div className="form-grid__wide form-error modal-dialog__error" role="alert" aria-live="assertive">{error}</div> : null}
               <div className="form-grid__wide form-actions form-actions--split">
                 <button className="button button--secondary" type="button" onClick={() => setEditingItemId(null)}>取消</button>
                 <button className="button button--primary" type="submit" disabled={submitting}>保存修改</button>
@@ -330,7 +370,8 @@ export function ItemsPage() {
                         <button
                           className="button button--secondary button--small"
                           type="button"
-                          onClick={() => {
+                          onClick={(event) => {
+                            modalOpenerRef.current = event.currentTarget;
                             setEditingItemId(item.id);
                             setEditForm(toFormState(item));
                             setError(null);

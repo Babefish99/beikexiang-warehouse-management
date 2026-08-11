@@ -110,6 +110,55 @@ test.describe("master data administration", () => {
     await expect(editForm.getByLabel("名称")).toHaveValue("Tea leaves premium");
   });
 
+  test("item create modal manages focus and preserves input when the API rejects the request", async ({ page }) => {
+    await page.route("http://127.0.0.1:3001/admin/items?includeInactive=true", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{ id: "item-1", code: "TEA-0001", name: "Tea leaves", specification: "Iron Goddess", unit: "box", categoryId: "cat-tea", isActive: true }]),
+      });
+    });
+    await page.route("http://127.0.0.1:3001/admin/items", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+      await route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "item already exists" }),
+      });
+    });
+
+    await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Fitems");
+    const trigger = page.getByRole("button", { name: "新增物品", exact: true });
+    await trigger.click();
+    const dialog = page.getByRole("dialog", { name: "新增物品" });
+    const form = dialog.locator("form");
+
+    await expect(form.getByLabel("编码")).toBeFocused();
+    await form.getByLabel("编码").fill("TEA-0002");
+    await form.getByLabel("名称").fill("Green tea");
+    await form.getByLabel("单位").fill("bag");
+    await form.getByLabel("分类", { exact: true }).fill("cat-green");
+    await dialog.getByRole("button", { name: "新增物品", exact: true }).click();
+
+    await expect(dialog.getByRole("alert")).toHaveText("item already exists");
+    await expect(form.getByLabel("编码")).toHaveValue("TEA-0002");
+    await expect(form.getByLabel("名称")).toHaveValue("Green tea");
+
+    await form.getByLabel("编码").focus();
+    await page.keyboard.press("Shift+Tab");
+    await expect(dialog.getByRole("button", { name: "关闭新增物品", exact: true })).toBeFocused();
+    await dialog.getByRole("button", { name: "新增物品", exact: true }).focus();
+    await page.keyboard.press("Tab");
+    await expect(dialog.getByRole("button", { name: "关闭新增物品", exact: true })).toBeFocused();
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+  });
+
   test("warehouse page updates supported maintenance fields for the fixed warehouse set", async ({ page }) => {
     let warehouses = [
       { id: "warehouse-1", code: "WH-01", name: "Placeholder one", isActive: true, isPlaceholder: true },
