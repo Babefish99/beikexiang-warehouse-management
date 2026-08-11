@@ -353,6 +353,32 @@ test("saved warehouse selection restores from localStorage", async ({ page }) =>
   await expect(page.getByRole("button", { name: /SH-002/ })).toBeVisible();
 });
 
+test("desktop topbar keeps search beside the warehouse selector at approved type sizes", async ({ page }) => {
+  await routeWorkspaceWarehouses(page);
+  await routeItems(page);
+
+  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2F");
+  await expect(page.getByRole("button", { name: /全部仓库/ })).toBeVisible();
+
+  const layout = await page.locator(".topbar").evaluate((topbar) => {
+    const selector = topbar.querySelector<HTMLElement>(".topbar-selector");
+    const search = topbar.querySelector<HTMLElement>(".workspace-search");
+    const section = topbar.querySelector<HTMLElement>(".topbar__crumb strong");
+    if (!selector || !search || !section) throw new Error("topbar controls are missing");
+
+    return {
+      gap: search.getBoundingClientRect().left - selector.getBoundingClientRect().right,
+      sectionFontSize: Number.parseFloat(getComputedStyle(section).fontSize),
+      selectorFontSize: Number.parseFloat(getComputedStyle(selector).fontSize),
+    };
+  });
+
+  expect(layout.gap).toBeGreaterThanOrEqual(12);
+  expect(layout.gap).toBeLessThanOrEqual(28);
+  expect(layout.sectionFontSize).toBe(16);
+  expect(layout.selectorFontSize).toBe(14);
+});
+
 test("invalid saved warehouse selection resets to all", async ({ page }) => {
   await routeWorkspaceWarehouses(page);
   await routeItems(page);

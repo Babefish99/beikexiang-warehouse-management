@@ -37,15 +37,17 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .app-shell { display: flex; min-height: 100vh; }
 .sidebar__footer { min-height: 82px; display: grid; align-content: center; gap: 4px; }
 .workspace { min-width: 0; flex: 1; background: #f5f7fa; }
-.topbar { min-height: 74px; padding: 0 24px; gap: 18px; display: grid; grid-template-columns: auto minmax(280px, 420px) auto; align-items: center; background: rgba(255,255,255,.98); box-shadow: 0 8px 24px rgba(32, 40, 64, .04); }
+.topbar { min-height: 74px; padding: 0 24px; gap: 18px; display: flex; align-items: center; background: rgba(255,255,255,.98); box-shadow: 0 8px 24px rgba(32, 40, 64, .04); }
 .topbar__leading, .topbar__actions { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.topbar__center { display: flex; justify-content: center; min-width: 0; }
+.topbar__leading { flex: 0 0 auto; }
+.topbar__center { min-width: 280px; flex: 0 1 420px; display: flex; justify-content: flex-start; }
+.topbar__actions { margin-left: auto; }
 .topbar__crumb { display: grid; gap: 3px; line-height: 1.2; }
 .topbar__crumb span { color: var(--muted); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
-.topbar__crumb strong { color: var(--navy); font-size: 15px; }
+.topbar__crumb strong { color: var(--navy); font-size: 16px; }
 .topbar-panel { position: relative; }
 .topbar-selector, .topbar-icon-button, .workspace-user-button { min-height: 40px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
-.topbar-selector { padding: 0 12px; display: inline-flex; align-items: center; gap: 8px; color: var(--navy); }
+.topbar-selector { padding: 0 12px; display: inline-flex; align-items: center; gap: 8px; color: var(--navy); font-size: 14px; }
 .topbar-icon-button { width: 40px; display: inline-grid; place-items: center; position: relative; color: var(--navy); }
 .topbar-icon-button:hover, .topbar-selector:hover, .workspace-user-button:hover, .workspace-menu-item:hover, .workspace-search-result:hover, .workspace-notification:hover { border-color: #d5dbe6; background: #f8fafc; }
 .mobile-nav-toggle { display: none; }
@@ -88,10 +90,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .mobile-drawer__nav .nav-item.is-active { color: #fff; }
 
 @media (max-width: 1080px) {
-  .topbar { grid-template-columns: minmax(0, 1fr); padding: 14px 18px; }
-  .topbar__center { order: 3; justify-content: stretch; }
-  .topbar__leading, .topbar__actions { justify-content: space-between; }
-  .topbar__leading { flex-wrap: wrap; }
+  .topbar { height: auto; min-height: auto; padding: 14px 18px; flex-wrap: wrap; }
+  .topbar__center { order: 3; flex: 1 1 100%; justify-content: stretch; }
+  .topbar__leading { flex: 1 1 auto; flex-wrap: wrap; }
+  .topbar__actions { justify-content: flex-end; }
   .workspace-search { max-width: none; }
 }
 
