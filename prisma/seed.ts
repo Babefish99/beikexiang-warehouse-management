@@ -31,22 +31,19 @@ export function getStructuralSeedData(): StructuralSeedData {
 }
 
 export async function seedStructuralData(client: {
-  role: { upsert(args: { where: { id: string }; update: { code: string; name: string }; create: { id: string; code: string; name: string } }): Promise<unknown> };
-  warehouse: { upsert(args: { where: { id: string }; update: { code: string; name: string; isPlaceholder: boolean; isActive: boolean }; create: { id: string; code: string; name: string; isPlaceholder: boolean; isActive: boolean } }): Promise<unknown> };
-  itemCategory: { upsert(args: { where: { id: string }; update: { code: string; name: string; prefix: string }; create: { id: string; code: string; name: string; prefix: string } }): Promise<unknown> };
+  role: { upsert(args: { where: { code: string }; update: { id: string; code: string; name: string }; create: { id: string; code: string; name: string } }): Promise<unknown> };
+  warehouse: { upsert(args: { where: { code: string }; update: { id: string; code: string; name: string; isPlaceholder: boolean; isActive: boolean }; create: { id: string; code: string; name: string; isPlaceholder: boolean; isActive: boolean } }): Promise<unknown> };
+  itemCategory: { upsert(args: { where: { code: string }; update: { id: string; code: string; name: string; prefix: string }; create: { id: string; code: string; name: string; prefix: string } }): Promise<unknown> };
 }): Promise<void> {
   const seedData = getStructuralSeedData();
   for (const role of seedData.roles) {
-    const { id, ...mutableRole } = role;
-    await client.role.upsert({ where: { id }, update: mutableRole, create: role });
+    await client.role.upsert({ where: { code: role.code }, update: role, create: role });
   }
   for (const warehouse of seedData.warehouses) {
-    const { id, ...mutableWarehouse } = warehouse;
-    await client.warehouse.upsert({ where: { id }, update: mutableWarehouse, create: warehouse });
+    await client.warehouse.upsert({ where: { code: warehouse.code }, update: warehouse, create: warehouse });
   }
   for (const category of seedData.categories) {
-    const { id, ...mutableCategory } = category;
-    await client.itemCategory.upsert({ where: { id }, update: mutableCategory, create: category });
+    await client.itemCategory.upsert({ where: { code: category.code }, update: category, create: category });
   }
 }
 

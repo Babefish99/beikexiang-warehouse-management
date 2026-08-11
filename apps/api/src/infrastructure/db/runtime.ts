@@ -317,6 +317,7 @@ interface IdentityInput {
   weComUserId?: string;
   name?: string;
   role: UserRole;
+  updateExistingProfile?: boolean;
 }
 
 async function ensurePrismaIdentity(prisma: PrismaIdentityClient, identity: IdentityInput): Promise<void> {
@@ -329,8 +330,8 @@ async function ensurePrismaIdentity(prisma: PrismaIdentityClient, identity: Iden
   await prisma.user.upsert({
     where: { id: identity.id },
     update: {
-      ...(identity.weComUserId ? { weComUserId: identity.weComUserId } : {}),
-      ...(identity.name ? { name: identity.name } : {}),
+      ...(identity.updateExistingProfile !== false && identity.weComUserId ? { weComUserId: identity.weComUserId } : {}),
+      ...(identity.updateExistingProfile !== false && identity.name ? { name: identity.name } : {}),
       roleId: role.id,
       isActive: true,
     },
@@ -361,6 +362,7 @@ class PrismaAuditService implements AuditService {
         id: event.actorUserId,
         name: event.actorName,
         role: event.actorRole,
+        updateExistingProfile: false,
       });
       await transaction.auditLog.create({
         data: {
