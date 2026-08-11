@@ -1,0 +1,42 @@
+{
+	admin 127.0.0.1:2019
+}
+
+{$SITE_ADDRESS} {
+	root * /srv
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	@admin_document {
+		method GET
+		path /admin/*
+		header Accept *text/html*
+	}
+	handle @admin_document {
+		try_files {path} /index.html
+		file_server
+	}
+
+	@api_routes {
+		path /auth/* /wecom/* /health
+	}
+	handle @api_routes {
+		reverse_proxy api:3001
+	}
+
+	handle /admin/* {
+		reverse_proxy api:3001
+	}
+
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}

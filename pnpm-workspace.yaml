@@ -1,5 +1,6 @@
 packages:
   - apps/*
+injectWorkspacePackages: true
 allowBuilds:
   '@prisma/engines': true
   esbuild: true
