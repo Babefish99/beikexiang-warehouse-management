@@ -230,7 +230,7 @@ export default function App() {
           const MetricIcon = metricIcons[card.tone];
           return (
             <div className={`metric metric--${card.tone}`} key={card.label}>
-              <span className="metric__icon"><MetricIcon size={18} /></span>
+              <span className="metric__icon"><MetricIcon size={26} /></span>
               <div className="metric__content">
                 <span className="metric__label">{card.label}</span>
                 <div className="metric__value">
@@ -251,9 +251,9 @@ export default function App() {
             </div>
           </header>
           <div className="quick-actions">
-            <a href="/admin/inbound"><InboundMark size={22} /><span>登记入库</span></a>
-            <a href="/admin/outbound"><OutboundMark size={22} /><span>办理出库</span></a>
-            <a href="/admin/opening-stock"><InventoryMark size={22} /><span>录入期初库存</span></a>
+            <a href="/admin/inbound"><InboundMark size={28} /><span>登记入库</span></a>
+            <a href="/admin/outbound"><OutboundMark size={28} /><span>办理出库</span></a>
+            <a href="/admin/opening-stock"><InventoryMark size={28} /><span>录入期初库存</span></a>
           </div>
         </article>
         <article className="panel">

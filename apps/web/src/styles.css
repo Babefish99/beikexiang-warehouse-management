@@ -127,3 +127,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .modal-dialog__close { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); font-size: 22px; line-height: 1; }.modal-dialog__close:hover { border-color: var(--border); background: #f8fafc; color: var(--navy); }
 .modal-dialog__form { padding: 20px 22px 22px; }.modal-dialog__error { margin-top: 0; padding: 10px 12px; border-radius: 7px; background: #fff4f1; }
 @media (max-width: 640px) { .modal-backdrop { padding: 12px; }.modal-dialog { max-height: calc(100vh - 24px); }.modal-dialog__header { padding-inline: 18px; }.modal-dialog__form { grid-template-columns: 1fr; padding: 18px; } }
+/* Keep metric icons centered after the shared metric text rules. */
+.metric span.metric__icon { display: grid; place-items: center; margin-top: 0; font-size: initial; }
+.metric span.metric__icon svg { display: block; }

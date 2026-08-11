@@ -100,6 +100,20 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
   await expect(page.locator(".metric--outbound")).toHaveCount(1);
   await expect(page.locator(".metric__icon svg")).toHaveCount(4);
   await expect(page.locator(".quick-actions a svg")).toHaveCount(3);
+  const metricIconLayout = await page.locator(".metric__icon").evaluateAll((icons) => icons.map((icon) => {
+    const iconRect = icon.getBoundingClientRect();
+    const svg = icon.querySelector("svg");
+    const svgRect = svg?.getBoundingClientRect();
+    return {
+      display: getComputedStyle(icon).display,
+      horizontalGap: svgRect ? svgRect.left - iconRect.left : 0,
+      verticalGap: svgRect ? svgRect.top - iconRect.top : 0,
+      svgSize: svgRect?.width ?? 0,
+    };
+  }));
+  expect(metricIconLayout.every(({ display, horizontalGap, verticalGap, svgSize }) => display === "grid" && horizontalGap > 0 && verticalGap > 0 && svgSize >= 24)).toBe(true);
+  const quickActionIconSizes = await page.locator(".quick-actions a svg").evaluateAll((icons) => icons.map((icon) => icon.getBoundingClientRect().width));
+  expect(quickActionIconSizes.every((size) => size >= 26)).toBe(true);
   const metricOrder = await page.locator(".metric").evaluateAll((metrics) => metrics.map((metric) =>
     Array.from(metric.querySelectorAll(".metric__label, .metric__value")).map((node) => node.className),
   ));
