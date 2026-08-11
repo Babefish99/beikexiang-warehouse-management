@@ -1,6 +1,7 @@
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
+import { gunzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
@@ -198,6 +199,26 @@ VALIDATE_ONLY=1 \
   );
 }
 
+function runPackageProcess(
+  revision: string,
+  archivePath: string,
+): Promise<{ status: number | null; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      ["deploy/scripts/package-release.mjs", revision, archivePath],
+      { cwd: repositoryRoot, stdio: ["ignore", "ignore", "pipe"] },
+    );
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", reject);
+    child.on("close", (status) => resolve({ status, stderr }));
+  });
+}
+
 describe("production deployment scripts", () => {
   it("packages a release that validates with Linux /bin/sh", () => {
     const archiveDirectory = mkdtempSync(
@@ -219,6 +240,44 @@ describe("production deployment scripts", () => {
 
       expect(result.error).toBeUndefined();
       expect(result.status, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`).toBe(0);
+    } finally {
+      rmSync(archiveDirectory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("rejects option-like revisions without publishing an archive", () => {
+    const archiveDirectory = mkdtempSync(
+      path.join(repositoryRoot, ".superpowers", "release-options-test-"),
+    );
+    const archivePath = path.join(archiveDirectory, "invalid.tar.gz");
+    try {
+      const result = spawnSync(
+        process.execPath,
+        ["deploy/scripts/package-release.mjs", "--list", archivePath],
+        { cwd: repositoryRoot, encoding: "utf8", timeout: 30_000 },
+      );
+
+      expect(result.status).not.toBe(0);
+      expect(existsSync(archivePath)).toBe(false);
+    } finally {
+      rmSync(archiveDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("publishes exactly one archive when packagers race for the same path", async () => {
+    const archiveDirectory = mkdtempSync(
+      path.join(repositoryRoot, ".superpowers", "release-race-test-"),
+    );
+    const archivePath = path.join(archiveDirectory, "race.tar.gz");
+    try {
+      const results = await Promise.all(
+        Array.from({ length: 8 }, () => runPackageProcess("HEAD", archivePath)),
+      );
+      const successes = results.filter((result) => result.status === 0);
+
+      expect(successes, results.map((result) => result.stderr).join("\n")).toHaveLength(1);
+      expect(existsSync(archivePath)).toBe(true);
+      expect(gunzipSync(readFileSync(archivePath)).byteLength).toBeGreaterThan(0);
     } finally {
       rmSync(archiveDirectory, { recursive: true, force: true });
     }
