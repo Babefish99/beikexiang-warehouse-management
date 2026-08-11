@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -150,7 +150,80 @@ printf 'first=%s\nsecond=%s\n' "$first_release" "$second_release"
   return result.stdout;
 }
 
+function runPackagedValidationWithLinuxSh(
+  archiveDirectory: string,
+): ReturnType<typeof spawnSync> {
+  const fixture = String.raw`
+set -eu
+mkdir -p /workspace /tmp/bin
+tar -xzf /bundle/warehouse-release.tar.gz -C /workspace
+cat > /workspace/deploy/.env.production <<'ENV'
+COMPOSE_PROJECT_NAME=warehouse-linux
+IMAGE_PREFIX=warehouse-test
+PERSISTENCE_DRIVER=prisma
+LOCAL_AUTH_BYPASS=false
+ENV
+chmod 600 /workspace/deploy/.env.production
+cat > /tmp/bin/docker <<'DOCKER'
+#!/bin/sh
+exit 0
+DOCKER
+chmod +x /tmp/bin/docker
+PATH="/tmp/bin:$PATH" \
+PROJECT_DIR=/workspace \
+COMPOSE_FILE=/workspace/docker-compose.prod.yml \
+ENV_FILE=/workspace/deploy/.env.production \
+VALIDATE_ONLY=1 \
+  /bin/sh /workspace/deploy/scripts/deploy.sh
+`;
+
+  return spawnSync(
+    "docker",
+    [
+      "run",
+      "--rm",
+      "-i",
+      "-v",
+      `${archiveDirectory}:/bundle:ro`,
+      "node:24-alpine",
+      "/bin/sh",
+      "-s",
+    ],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+      input: fixture,
+      timeout: 30_000,
+    },
+  );
+}
+
 describe("production deployment scripts", () => {
+  it("packages a release that validates with Linux /bin/sh", () => {
+    const archiveDirectory = mkdtempSync(
+      path.join(repositoryRoot, ".superpowers", "release-test-"),
+    );
+    const archivePath = path.join(archiveDirectory, "warehouse-release.tar.gz");
+    try {
+      const packageResult = spawnSync(
+        process.execPath,
+        ["deploy/scripts/package-release.mjs", "HEAD", archivePath],
+        { cwd: repositoryRoot, encoding: "utf8", timeout: 30_000 },
+      );
+      expect(
+        packageResult.status,
+        `stdout:\n${packageResult.stdout}\nstderr:\n${packageResult.stderr}`,
+      ).toBe(0);
+
+      const result = runPackagedValidationWithLinuxSh(archiveDirectory);
+
+      expect(result.error).toBeUndefined();
+      expect(result.status, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`).toBe(0);
+    } finally {
+      rmSync(archiveDirectory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("preserves inert env values, snapshots releases, rolls back configuration, and restores explicitly", () => {
     expect(runLifecycleFixture()).toMatch(/first=.*\nsecond=.*/);
   }, 60_000);
