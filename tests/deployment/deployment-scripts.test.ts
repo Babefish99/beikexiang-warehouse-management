@@ -50,7 +50,14 @@ case " $all_args " in
   *" compose "*" ps -q "*) printf 'fake-%s\n' "$last_arg" ;;
   *" compose "*" exec -T postgres "*" pg_dump "*) printf '%s\n' 'CREATE TABLE restored (id integer);' ;;
   *" compose "*" exec -T postgres "*" psql "*) cat >/dev/null ;;
-  *" image inspect --format "*) printf '%s\n' 'sha256:fixture-image-id' ;;
+  *" image inspect --format "*)
+    case "$last_arg" in
+      *migrate*) printf '%s\n' 'sha256:fixture-migrate-id' ;;
+      *api*) printf '%s\n' 'sha256:fixture-api-id' ;;
+      *web*) printf '%s\n' 'sha256:fixture-web-id' ;;
+      *) exit 1 ;;
+    esac
+    ;;
   *" inspect --format "*) printf '%s\n' 'healthy' ;;
 esac
 FAKE_DOCKER
@@ -92,7 +99,7 @@ if PREBUILT_API_IMAGE=prebuilt/api:fixture PREBUILT_WEB_IMAGE=prebuilt/web:fixtu
 if PREBUILT_MIGRATE_IMAGE=prebuilt/migrate:fixture PREBUILT_API_IMAGE=prebuilt/missing:fixture PREBUILT_WEB_IMAGE=prebuilt/web:fixture SOURCE_REVISION=missing-api "$PROJECT_DIR/deploy/scripts/deploy.sh" >/dev/null 2>&1; then echo missing-api-accepted >&2; exit 1; fi
 preflight_first=$((preflight_start + 1))
 tail -n +"$preflight_first" "$fixture_root/docker.log" > "$fixture_root/preflight-failures.log"
-! grep -Eq ' stop postgres$| build (migrate|api|web)$|^image tag ' "$fixture_root/preflight-failures.log"
+! grep -Eq ' up -d postgres$| stop api web$| stop postgres$| build (migrate|api|web)$|^image tag ' "$fixture_root/preflight-failures.log"
 
 "$PROJECT_DIR/deploy/scripts/deploy.sh"
 first_release=$(sed -n '1p' "$PROJECT_DIR/deploy/state/current-release")
@@ -116,9 +123,9 @@ grep -Fxq 'image_source=prebuilt' "$second_meta"
 grep -Fxq 'prebuilt_migrate_source=prebuilt/migrate:fixture' "$second_meta"
 grep -Fxq 'prebuilt_api_source=prebuilt/api:fixture' "$second_meta"
 grep -Fxq 'prebuilt_web_source=prebuilt/web:fixture' "$second_meta"
-grep -Fxq 'prebuilt_migrate_source_id=sha256:fixture-image-id' "$second_meta"
-grep -Fxq 'prebuilt_api_source_id=sha256:fixture-image-id' "$second_meta"
-grep -Fxq 'prebuilt_web_source_id=sha256:fixture-image-id' "$second_meta"
+grep -Fxq 'prebuilt_migrate_source_id=sha256:fixture-migrate-id' "$second_meta"
+grep -Fxq 'prebuilt_api_source_id=sha256:fixture-api-id' "$second_meta"
+grep -Fxq 'prebuilt_web_source_id=sha256:fixture-web-id' "$second_meta"
 
 sed -i 's/COMPOSE_PROJECT_NAME=warehouse-safe/COMPOSE_PROJECT_NAME=warehouse-mutated/' "$ENV_FILE"
 "$PROJECT_DIR/deploy/scripts/rollback.sh"
@@ -158,14 +165,16 @@ test "$start_postgres" -lt "$run_migrate"
 test "$(grep -c ' build migrate$' "$fixture_root/docker.log")" = 1
 test "$(grep -c ' build api$' "$fixture_root/docker.log")" = 1
 test "$(grep -c ' build web$' "$fixture_root/docker.log")" = 1
-prebuilt_stop=$(grep -n -m1 ' stop postgres$' "$fixture_root/prebuilt-release.log" | cut -d: -f1)
+prebuilt_first_service_action=$(grep -En -m1 ' up -d postgres$| stop api web$| stop postgres$' "$fixture_root/prebuilt-release.log" | cut -d: -f1)
 for source_image in prebuilt/migrate:fixture prebuilt/api:fixture prebuilt/web:fixture; do
   inspect_line=$(grep -n -m1 "^image inspect --format {{.Id}} $source_image$" "$fixture_root/prebuilt-release.log" | cut -d: -f1)
-  test "$inspect_line" -lt "$prebuilt_stop"
+  test "$inspect_line" -lt "$prebuilt_first_service_action"
 done
-for target_service in migrate api web; do
-  tag_line=$(grep -n -m1 "^image tag sha256:fixture-image-id warehouse-test/$target_service:" "$fixture_root/prebuilt-release.log" | cut -d: -f1)
-  test "$tag_line" -lt "$prebuilt_stop"
+for target_mapping in migrate:sha256:fixture-migrate-id api:sha256:fixture-api-id web:sha256:fixture-web-id; do
+  target_service=$(printf '%s\n' "$target_mapping" | cut -d: -f1)
+  source_id=$(printf '%s\n' "$target_mapping" | cut -d: -f2-)
+  tag_line=$(grep -n -m1 "^image tag $source_id warehouse-test/$target_service:" "$fixture_root/prebuilt-release.log" | cut -d: -f1)
+  test "$tag_line" -lt "$prebuilt_first_service_action"
 done
 
 printf 'first=%s\nsecond=%s\n' "$first_release" "$second_release"
