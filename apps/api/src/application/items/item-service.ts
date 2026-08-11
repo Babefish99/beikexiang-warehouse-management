@@ -53,6 +53,13 @@ export class ItemService {
 
   constructor(private readonly repository: ItemRepository) {}
 
+  async loadPersistedOptionIndex(): Promise<void> {
+    this.optionIndex.clear();
+    for (const item of await this.repository.list(true)) {
+      if (item.weComOptionKey) this.optionIndex.set(item.weComOptionKey, item.id);
+    }
+  }
+
   async create(input: ItemInput): Promise<ItemDefinition> {
     const existing = await this.repository.list(true);
     const code = normalizeItemCode(input.code ?? generateItemCode(input.categoryPrefix ?? "IT", existing.map((item) => item.code)));

@@ -4,15 +4,27 @@ import { PrismaClient, type Prisma } from "@prisma/client";
 import { isLocalAuthEnabled } from "../../application/auth/local-auth.js";
 import type { AuthenticatedUser, UserRole } from "../../application/auth/role-service.js";
 import { InMemoryItemRepository, type ItemRepository } from "../../application/items/item-service.js";
+import { InMemoryInventoryEntryStore, type InventoryEntryStore, type StoredBatch } from "../../application/inventory/inbound-service.js";
+import { createInventoryMemoryState } from "../../application/inventory/inventory-memory-state.js";
+import { InMemoryOutboundStore, type OutboundStore } from "../../application/inventory/outbound-service.js";
+import { InMemoryMovementStore, type MovementStore } from "../../application/inventory/transfer-service.js";
+import { InMemoryStocktakeStore, type StocktakeStore } from "../../application/inventory/stocktake-service.js";
+import { InMemoryAccountingPeriodStore, type AccountingPeriodStore } from "../../application/periods/period-close-service.js";
+import type { ReportEntry } from "../../application/reports/report-query-service.js";
 import { InMemoryWarehouseRepository, type WarehouseRepository } from "../../application/warehouses/warehouse-service.js";
+import { InMemoryApprovalSyncStore, type ApprovalSyncStore } from "../../application/wecom/approval-sync-service.js";
 import type { ItemDefinition } from "../../domain/items/item.js";
 import type { WarehouseDefinition } from "../../domain/warehouses/warehouse.js";
 import { InMemoryAuditService, type AuditEvent, type AuditService } from "../audit/audit-service.js";
+import { PrismaAccountingPeriodStore } from "./prisma-accounting-period-store.js";
+import { PrismaApprovalSyncStore } from "./prisma-approval-sync-store.js";
+import { PrismaInventoryEntryStore } from "./prisma-inventory-entry-store.js";
+import { PrismaMovementStore } from "./prisma-movement-store.js";
+import { PrismaOutboundStore } from "./prisma-outbound-store.js";
+import { PrismaReportSource } from "./prisma-report-source.js";
+import { PrismaStocktakeStore } from "./prisma-stocktake-store.js";
 
 export type PersistenceDriver = "memory" | "prisma";
-
-export const PRISMA_RUNTIME_BLOCKED_ERROR =
-  "PERSISTENCE_DRIVER=prisma is disabled until all core inventory flows use durable persistence";
 
 export interface ServerConfig {
   persistenceDriver: PersistenceDriver;
@@ -56,11 +68,33 @@ export interface IdentityService {
   ensureUser(user: AuthenticatedUser): Promise<void>;
 }
 
+export interface InventoryReadSource {
+  listBatches(): Promise<StoredBatch[]>;
+  listBalances(): Promise<Array<{ warehouseId: string; itemId: string; batchId: string; remainingQuantity: string; unitCost: string }>>;
+  listEntries(): Promise<ReportEntry[]>;
+  getPendingOutboundCount(): Promise<number>;
+  getStocktakeCount(): Promise<number>;
+  getAnomalyCount(): Promise<number>;
+  getUnpostedAdjustmentCount(): Promise<number>;
+}
+
+export interface InventoryPersistence {
+  entryStore: InventoryEntryStore;
+  outboundStore: OutboundStore;
+  movementStore: MovementStore;
+  stocktakeStore: StocktakeStore;
+  periodStore: AccountingPeriodStore;
+  approvalSyncStore: ApprovalSyncStore;
+  readSource: InventoryReadSource;
+}
+
 export interface PersistenceAdapters {
   driver: PersistenceDriver;
   repositories: CoreRepositorySeam;
   identityService: IdentityService;
   auditService: AuditService;
+  inventory: InventoryPersistence;
+  probeDatabase(): Promise<void>;
   disconnect(): Promise<void>;
 }
 
@@ -83,8 +117,25 @@ function parsePersistenceDriver(value?: string): PersistenceDriver {
   throw new Error(`unsupported PERSISTENCE_DRIVER: ${value}`);
 }
 
-function hasProductionWeComCallbackConfig(env: Record<string, string | undefined>): boolean {
-  return Boolean(env.WE_COM_CORP_ID?.trim() && env.WE_COM_AGENT_ID?.trim() && env.WE_COM_SECRET?.trim());
+const PRODUCTION_WECOM_FIELDS = [
+  "WE_COM_CORP_ID",
+  "WE_COM_AGENT_ID",
+  "WE_COM_SECRET",
+  "WE_COM_CALLBACK_TOKEN",
+  "WE_COM_ENCODING_AES_KEY",
+] as const;
+
+const KNOWN_SESSION_SECRET_DEFAULTS = new Set([
+  "local-development-session-secret",
+  "replace-with-a-long-random-value",
+]);
+
+function usesHttps(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function asJson(value: unknown): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined {
@@ -122,12 +173,25 @@ export function readServerConfig(env: Record<string, string | undefined>): Serve
     throw new Error("in-memory persistence is not allowed when NODE_ENV=production");
   }
 
-  if (nodeEnv === "production" && hasProductionWeComCallbackConfig(env) && !apiBaseUrl.startsWith("https://")) {
-    throw new Error("API_BASE_URL must use HTTPS when Enterprise WeChat callbacks are enabled in production");
-  }
-
-  if (persistenceDriver === "prisma") {
-    throw new Error(PRISMA_RUNTIME_BLOCKED_ERROR);
+  if (nodeEnv === "production") {
+    if (env.LOCAL_AUTH_BYPASS === "true") {
+      throw new Error("LOCAL_AUTH_BYPASS must be false in production");
+    }
+    if (sessionSecret.length < 32 || KNOWN_SESSION_SECRET_DEFAULTS.has(sessionSecret)) {
+      throw new Error("SESSION_SECRET must be at least 32 characters and must not use a known default in production");
+    }
+    for (const field of PRODUCTION_WECOM_FIELDS) {
+      const value = env[field]?.trim();
+      if (!value || value.toLowerCase().startsWith("replace-with-")) {
+        throw new Error(`production Enterprise WeChat configuration is incomplete: ${field}`);
+      }
+    }
+    if (!usesHttps(apiBaseUrl)) {
+      throw new Error("API_BASE_URL must use HTTPS when Enterprise WeChat callbacks are enabled in production");
+    }
+    if (!usesHttps(webBaseUrl)) {
+      throw new Error("WEB_BASE_URL must use HTTPS in production");
+    }
   }
 
   return {
@@ -380,7 +444,8 @@ class PrismaAuditService implements AuditService {
 }
 
 function createPrismaClient(connectionString: string): PrismaClient {
-  const adapter = new PrismaPg({ connectionString });
+  const schema = new URL(connectionString).searchParams.get("schema") ?? undefined;
+  const adapter = new PrismaPg({ connectionString }, schema ? { schema } : undefined);
   return new PrismaClient({ adapter });
 }
 
@@ -388,6 +453,12 @@ export function createPersistenceAdapters(options: { driver: "memory" } | { driv
   if (options.driver === "memory") {
     const roles = new InMemoryCoreEntityRepository();
     const users = new InMemoryCoreEntityRepository();
+    const items = new InMemoryItemRepository();
+    const state = createInventoryMemoryState();
+    const entryStore = new InMemoryInventoryEntryStore(state, {
+      onRecordStockEntry: ({ itemId }) => items.markLedgerActivity(itemId),
+    });
+    const periodStore = new InMemoryAccountingPeriodStore();
     return {
       driver: "memory",
       repositories: {
@@ -395,7 +466,7 @@ export function createPersistenceAdapters(options: { driver: "memory" } | { driv
         users,
         warehouses: new InMemoryWarehouseRepository(DEFAULT_WAREHOUSES),
         categories: new InMemoryCoreEntityRepository(),
-        items: new InMemoryItemRepository(),
+        items,
         approvals: new InMemoryCoreEntityRepository(),
         batches: new InMemoryCoreEntityRepository(),
         ledgerEntries: new InMemoryCoreEntityRepository(),
@@ -414,11 +485,30 @@ export function createPersistenceAdapters(options: { driver: "memory" } | { driv
         },
       },
       auditService: new InMemoryAuditService(),
+      inventory: {
+        entryStore,
+        outboundStore: new InMemoryOutboundStore(state),
+        movementStore: new InMemoryMovementStore(state),
+        stocktakeStore: new InMemoryStocktakeStore(state),
+        periodStore,
+        approvalSyncStore: new InMemoryApprovalSyncStore(state),
+        readSource: {
+          async listBatches() { return entryStore.batches(); },
+          async listBalances() { return entryStore.balances(); },
+          async listEntries() { return entryStore.ledger().map(({ batchId: _batchId, referenceId: _referenceId, ...entry }) => entry); },
+          async getPendingOutboundCount() { return [...state.approvals.values()].filter((approval) => approval.outboundStatus === "PENDING_OUTBOUND").length; },
+          async getStocktakeCount() { return state.stocktakeAdjustments.length; },
+          async getAnomalyCount() { return state.stocktakeAdjustments.filter((adjustment) => adjustment.quantityDelta !== "0").length; },
+          async getUnpostedAdjustmentCount() { return 0; },
+        },
+      },
+      async probeDatabase() {},
       async disconnect() {},
     };
   }
 
   const prisma = options.prisma ?? createPrismaClient(options.connectionString ?? "");
+  const reportSource = new PrismaReportSource(prisma);
 
   return {
     driver: "prisma",
@@ -440,6 +530,18 @@ export function createPersistenceAdapters(options: { driver: "memory" } | { driv
     },
     identityService: new PrismaIdentityService(prisma),
     auditService: new PrismaAuditService(prisma),
+    inventory: {
+      entryStore: new PrismaInventoryEntryStore(prisma),
+      outboundStore: new PrismaOutboundStore(prisma),
+      movementStore: new PrismaMovementStore(prisma),
+      stocktakeStore: new PrismaStocktakeStore(prisma),
+      periodStore: new PrismaAccountingPeriodStore(prisma),
+      approvalSyncStore: new PrismaApprovalSyncStore(prisma),
+      readSource: reportSource,
+    },
+    async probeDatabase() {
+      await prisma.$queryRaw`SELECT 1`;
+    },
     async disconnect() {
       await prisma.$disconnect();
     },

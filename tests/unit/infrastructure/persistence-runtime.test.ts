@@ -9,6 +9,21 @@ afterEach(() => {
 });
 
 describe("server runtime configuration", () => {
+  const productionEnvironment = {
+    NODE_ENV: "production",
+    PERSISTENCE_DRIVER: "prisma",
+    DATABASE_URL: "postgresql://warehouse:warehouse@db:5432/warehouse",
+    API_BASE_URL: "https://warehouse.example.com",
+    WEB_BASE_URL: "https://warehouse.example.com",
+    SESSION_SECRET: "production-session-secret-at-least-32-characters",
+    LOCAL_AUTH_BYPASS: "false",
+    WE_COM_CORP_ID: "corp-id",
+    WE_COM_AGENT_ID: "1000001",
+    WE_COM_SECRET: "secret",
+    WE_COM_CALLBACK_TOKEN: "callback-token",
+    WE_COM_ENCODING_AES_KEY: "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
+  };
+
   it("defaults to in-memory persistence outside production", () => {
     const config = readServerConfig({
       NODE_ENV: "development",
@@ -46,30 +61,97 @@ describe("server runtime configuration", () => {
 
   it("requires an https API base URL for production Enterprise WeChat callbacks", () => {
     expect(() => readServerConfig({
-      NODE_ENV: "production",
-      PERSISTENCE_DRIVER: "prisma",
-      DATABASE_URL: "postgresql://warehouse:warehouse@db:5432/warehouse",
+      ...productionEnvironment,
       API_BASE_URL: "http://warehouse.example.com",
-      WEB_BASE_URL: "https://warehouse-web.example.com",
-      SESSION_SECRET: "test-session-secret",
-      LOCAL_AUTH_BYPASS: "false",
-      WE_COM_CORP_ID: "corp-id",
-      WE_COM_AGENT_ID: "1000001",
-      WE_COM_SECRET: "secret",
     })).toThrowError("API_BASE_URL must use HTTPS when Enterprise WeChat callbacks are enabled in production");
   });
 
-  it("does not start a fake prisma service while core inventory persistence is incomplete", () => {
-    vi.stubEnv("NODE_ENV", "development");
-    vi.stubEnv("PERSISTENCE_DRIVER", "prisma");
-    vi.stubEnv("DATABASE_URL", "postgresql://warehouse:warehouse@db:5432/warehouse");
-    vi.stubEnv("API_BASE_URL", "http://localhost:3001");
-    vi.stubEnv("WEB_BASE_URL", "http://localhost:5174");
-    vi.stubEnv("SESSION_SECRET", "test-session-secret");
+  it("requires the complete production Enterprise WeChat configuration", () => {
+    for (const field of ["WE_COM_CORP_ID", "WE_COM_AGENT_ID", "WE_COM_SECRET", "WE_COM_CALLBACK_TOKEN", "WE_COM_ENCODING_AES_KEY"] as const) {
+      expect(() => readServerConfig({ ...productionEnvironment, [field]: "" })).toThrowError(
+        `production Enterprise WeChat configuration is incomplete: ${field}`,
+      );
+    }
+  });
 
-    expect(() => buildServer()).toThrowError(
-      "PERSISTENCE_DRIVER=prisma is disabled until all core inventory flows use durable persistence",
-    );
+  it("rejects Enterprise WeChat placeholder values in production", () => {
+    for (const field of ["WE_COM_CORP_ID", "WE_COM_AGENT_ID", "WE_COM_SECRET", "WE_COM_CALLBACK_TOKEN", "WE_COM_ENCODING_AES_KEY"] as const) {
+      expect(() => readServerConfig({ ...productionEnvironment, [field]: `replace-with-${field.toLowerCase()}` })).toThrowError(
+        `production Enterprise WeChat configuration is incomplete: ${field}`,
+      );
+    }
+  });
+
+  it("requires both production public base URLs to use HTTPS", () => {
+    expect(() => readServerConfig({ ...productionEnvironment, WEB_BASE_URL: "http://warehouse.example.com" }))
+      .toThrowError("WEB_BASE_URL must use HTTPS in production");
+  });
+
+  it.each([
+    undefined,
+    "short-secret",
+    "local-development-session-secret",
+    "replace-with-a-long-random-value",
+  ])("rejects a missing, weak, or known-default production session secret: %s", (sessionSecret) => {
+    expect(() => readServerConfig({ ...productionEnvironment, SESSION_SECRET: sessionSecret }))
+      .toThrowError("SESSION_SECRET must be at least 32 characters and must not use a known default in production");
+  });
+
+  it("rejects an attempted local-auth bypass in production", () => {
+    expect(() => readServerConfig({ ...productionEnvironment, LOCAL_AUTH_BYPASS: "true" }))
+      .toThrowError("LOCAL_AUTH_BYPASS must be false in production");
+  });
+
+  it("accepts a complete production Prisma configuration with local auth disabled", () => {
+    expect(readServerConfig(productionEnvironment)).toMatchObject({
+      persistenceDriver: "prisma",
+      localAuthEnabled: false,
+      apiBaseUrl: "https://warehouse.example.com",
+      webBaseUrl: "https://warehouse.example.com",
+    });
+  });
+
+  it("reports that PostgreSQL is not required in memory mode", async () => {
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("PERSISTENCE_DRIVER", "memory");
+    vi.stubEnv("SESSION_SECRET", "local-development-session-secret");
+    const app = buildServer();
+
+    try {
+      const response = await app.inject({ method: "GET", url: "/health" });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({
+        status: "ok",
+        service: "warehouse-api",
+        persistenceDriver: "memory",
+        database: { status: "not_required" },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("runs a live Prisma database probe and returns 503 when PostgreSQL is unavailable", async () => {
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("PERSISTENCE_DRIVER", "prisma");
+    vi.stubEnv("DATABASE_URL", "postgresql://warehouse:warehouse@127.0.0.1:1/warehouse");
+    vi.stubEnv("SESSION_SECRET", "local-development-session-secret");
+    const app = buildServer();
+
+    try {
+      const response = await app.inject({ method: "GET", url: "/health" });
+
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toEqual({
+        status: "error",
+        service: "warehouse-api",
+        persistenceDriver: "prisma",
+        database: { status: "unavailable" },
+      });
+    } finally {
+      await app.close();
+    }
   });
 });
 

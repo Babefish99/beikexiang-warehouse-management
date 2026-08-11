@@ -1,5 +1,5 @@
 import type { ApprovalGateway } from "../../infrastructure/wecom/approval-gateway.js";
-import { ApprovalParser, type ParsedApproval, type WeComApprovalPayload } from "../../infrastructure/wecom/approval-parser.js";
+import type { ParsedApproval, WeComApprovalPayload } from "../../infrastructure/wecom/approval-parser.js";
 import { createInventoryMemoryState, type InventoryApprovalOutboundStatus, type InventoryApprovalState, type InventoryMemoryState } from "../inventory/inventory-memory-state.js";
 
 export type ApprovalOutboundStatus = InventoryApprovalOutboundStatus;
@@ -30,6 +30,10 @@ export interface ApprovalSyncStore {
   nextAttemptNo(weComSpNo: string): Promise<number>;
   recordSyncAttempt(attempt: ApprovalSyncAttempt): Promise<void>;
   saveWithAttempt?(record: ApprovalSyncRecord, attempt: ApprovalSyncAttempt): Promise<void>;
+}
+
+export interface ApprovalDetailParser {
+  parse(detail: WeComApprovalPayload): ParsedApproval | Promise<ParsedApproval>;
 }
 
 export class InMemoryApprovalSyncStore implements ApprovalSyncStore {
@@ -128,7 +132,7 @@ function toApprovalSyncRecord(record: InventoryApprovalState): ApprovalSyncRecor
 }
 
 export class ApprovalSyncService {
-  constructor(private readonly dependencies: { gateway: ApprovalGateway; parser: ApprovalParser; store: ApprovalSyncStore }) {}
+  constructor(private readonly dependencies: { gateway: ApprovalGateway; parser: ApprovalDetailParser; store: ApprovalSyncStore }) {}
 
   async sync(spNo: string, options: { callbackPayload?: unknown } = {}): Promise<{ approvalId: string; created: boolean; status: string }> {
     if (!/^\d{8,32}$/.test(spNo)) throw new Error("enterprise WeChat approval number is invalid");
@@ -136,7 +140,7 @@ export class ApprovalSyncService {
     let detail: WeComApprovalPayload | undefined;
     try {
       detail = await this.dependencies.gateway.fetchDetail(spNo);
-      const parsed = this.dependencies.parser.parse(detail);
+      const parsed = await this.dependencies.parser.parse(detail);
       const existing = await this.dependencies.store.findBySpNo(spNo);
       const record: ApprovalSyncRecord = {
         id: existing?.id ?? `approval-${spNo}`,

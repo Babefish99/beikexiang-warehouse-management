@@ -3,26 +3,23 @@ import cors from "@fastify/cors";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
-import { Decimal } from "decimal.js";
 import { RolePolicy, type AuthenticatedUser } from "./application/auth/role-service.js";
 import { SessionService } from "./application/auth/session-service.js";
 import { classifyAdminBusinessError } from "./application/errors/business-rule-error.js";
-import type { ItemRepository } from "./application/items/item-service.js";
 import { ItemService } from "./application/items/item-service.js";
-import { InMemoryInventoryEntryStore, InboundService } from "./application/inventory/inbound-service.js";
+import { InboundService } from "./application/inventory/inbound-service.js";
 import { AlertService } from "./application/inventory/alert-service.js";
-import { createInventoryMemoryState } from "./application/inventory/inventory-memory-state.js";
 import { InventoryQueryService } from "./application/inventory/inventory-query-service.js";
 import { NotificationService } from "./application/inventory/notification-service.js";
 import { OpeningStockService } from "./application/inventory/opening-stock-service.js";
-import { InMemoryOutboundStore, OutboundService } from "./application/inventory/outbound-service.js";
+import { OutboundService } from "./application/inventory/outbound-service.js";
 import { ReturnService } from "./application/inventory/return-service.js";
-import { InMemoryStocktakeStore, StocktakeService } from "./application/inventory/stocktake-service.js";
-import { InMemoryMovementStore, TransferService } from "./application/inventory/transfer-service.js";
-import { InMemoryAccountingPeriodStore, PeriodCloseService, type AccountingPeriodStore } from "./application/periods/period-close-service.js";
-import { InventoryReportService, TransactionReportService, type ReportEntry } from "./application/reports/report-query-service.js";
+import { StocktakeService } from "./application/inventory/stocktake-service.js";
+import { TransferService } from "./application/inventory/transfer-service.js";
+import { PeriodCloseService, type AccountingPeriodStore } from "./application/periods/period-close-service.js";
+import { InventoryReportService, TransactionReportService } from "./application/reports/report-query-service.js";
 import { WarehouseService } from "./application/warehouses/warehouse-service.js";
-import { ApprovalSyncService, InMemoryApprovalSyncStore } from "./application/wecom/approval-sync-service.js";
+import { ApprovalSyncService } from "./application/wecom/approval-sync-service.js";
 import { createPersistenceAdapters, readServerConfig } from "./infrastructure/db/runtime.js";
 import { HttpApprovalGateway } from "./infrastructure/wecom/approval-gateway.js";
 import { ApprovalParser } from "./infrastructure/wecom/approval-parser.js";
@@ -75,20 +72,6 @@ function serializeCookie(name: string, value: string, options: { httpOnly: boole
   return attributes.join("; ");
 }
 
-function toReportEntry(entry: { id: string; occurredAt: string; warehouseId: string; itemId: string; type: string; quantity: string; unitCost: string; amount: string; referenceType: string }): ReportEntry {
-  return {
-    id: entry.id,
-    occurredAt: entry.occurredAt,
-    warehouseId: entry.warehouseId,
-    itemId: entry.itemId,
-    type: entry.type,
-    quantity: entry.quantity,
-    unitCost: entry.unitCost,
-    amount: entry.amount,
-    referenceType: entry.referenceType,
-  };
-}
-
 interface BuildServerOptions {
   periodStore?: AccountingPeriodStore;
 }
@@ -113,55 +96,48 @@ export function buildServer(options: BuildServerOptions = {}) {
   app.decorate("auditService", auditService);
   const itemRepository = persistence.repositories.items;
   const itemService = new ItemService(itemRepository);
-  const inventoryState = createInventoryMemoryState();
-  const periodStore = options.periodStore ?? new InMemoryAccountingPeriodStore();
+  const inventoryPersistence = persistence.inventory;
+  const readSource = inventoryPersistence.readSource;
+  const periodStore = options.periodStore ?? inventoryPersistence.periodStore;
   const currentPeriodCode = () => new Date().toISOString().slice(0, 7);
   const assertCurrentPeriodOpen = async () => {
     const periodCode = currentPeriodCode();
     const period = await periodStore.getOrCreate(periodCode);
     if (period.status !== "OPEN") throw new Error(`closed period: ${period.code}`);
   };
-  const outboundStore = new InMemoryOutboundStore(inventoryState);
-  const outboundService = new OutboundService(outboundStore, assertCurrentPeriodOpen);
-  const movementStore = new InMemoryMovementStore(inventoryState);
-  const transferService = new TransferService(movementStore, assertCurrentPeriodOpen);
-  const returnService = new ReturnService(movementStore, assertCurrentPeriodOpen);
-  const stocktakeStore = new InMemoryStocktakeStore(inventoryState);
-  const stocktakeService = new StocktakeService(stocktakeStore, periodStore);
+  const outboundService = new OutboundService(inventoryPersistence.outboundStore, assertCurrentPeriodOpen);
+  const transferService = new TransferService(inventoryPersistence.movementStore, assertCurrentPeriodOpen);
+  const returnService = new ReturnService(inventoryPersistence.movementStore, assertCurrentPeriodOpen);
+  const stocktakeService = new StocktakeService(inventoryPersistence.stocktakeStore, periodStore);
   const periodCloseService = new PeriodCloseService(periodStore, {
-    getPendingOutboundCount: () => [...inventoryState.approvals.values()].filter((approval) => approval.outboundStatus === "PENDING_OUTBOUND").length,
-    getUnpostedAdjustmentCount: () => 0,
+    getPendingOutboundCount: () => readSource.getPendingOutboundCount(),
+    getUnpostedAdjustmentCount: () => readSource.getUnpostedAdjustmentCount(),
   });
   const warehouseService = new WarehouseService(persistence.repositories.warehouses);
-  const inventoryEntryStore = new InMemoryInventoryEntryStore(inventoryState, {
-    onRecordStockEntry: ({ itemId }) => {
-      const mutableRepository = itemRepository as ItemRepository & { markLedgerActivity?: (id: string) => void };
-      mutableRepository.markLedgerActivity?.(itemId);
-    },
-  });
+  const inventoryEntryStore = inventoryPersistence.entryStore;
   const inboundService = new InboundService(inventoryEntryStore, { warehouseService, itemService }, assertCurrentPeriodOpen);
   const openingStockService = new OpeningStockService(inventoryEntryStore, { warehouseService, itemService }, assertCurrentPeriodOpen);
   const inventoryQueryService = new InventoryQueryService({
     listItems: () => itemService.list(true),
     listWarehouses: () => warehouseService.listActive(),
-    listBatches: () => inventoryEntryStore.batches(),
-    listBalances: () => inventoryEntryStore.balances(),
+    listBatches: () => readSource.listBatches(),
+    listBalances: () => readSource.listBalances(),
   });
   const alertService = new AlertService({
-    listBalances: async () => inventoryEntryStore.balances(),
+    listBalances: () => readSource.listBalances(),
     listItems: () => itemService.list(true),
   });
   const notificationService = new NotificationService({
-    getPendingOutboundCount: async () => [...inventoryState.approvals.values()].filter((approval) => approval.outboundStatus === "PENDING_OUTBOUND").length,
+    getPendingOutboundCount: () => readSource.getPendingOutboundCount(),
     listLowStock: () => alertService.listLowStock(),
     getPeriodStatus: async () => {
       const code = currentPeriodCode();
       return (await periodStore.get(code)) ?? { code, status: "OPEN" as const };
     },
-    getStocktakeNotice: async () => ({ count: inventoryState.stocktakeAdjustments.length, href: "/admin/stocktake" }),
-    getAnomalyCount: async () => inventoryState.stocktakeAdjustments.filter((adjustment) => adjustment.quantityDelta !== "0").length,
+    getStocktakeNotice: async () => ({ count: await readSource.getStocktakeCount(), href: "/admin/stocktake" }),
+    getAnomalyCount: () => readSource.getAnomalyCount(),
   });
-  const listReportEntries = async (): Promise<ReportEntry[]> => inventoryState.ledger.map(toReportEntry);
+  const listReportEntries = () => readSource.listEntries();
   const inventoryReportService = new InventoryReportService(listReportEntries);
   const transactionReportService = new TransactionReportService(listReportEntries);
   const oauthClient = new WeComOAuthClient({
@@ -170,10 +146,16 @@ export function buildServer(options: BuildServerOptions = {}) {
     secret: process.env.WE_COM_SECRET ?? "",
     redirectUri: `${config.apiBaseUrl}/auth/wecom/callback`,
   });
+  const approvalParser = new ApprovalParser((optionKey) => itemService.resolveByWeComOptionKey(optionKey));
   const approvalSyncService = new ApprovalSyncService({
     gateway: new HttpApprovalGateway({ corpId: process.env.WE_COM_CORP_ID ?? "", secret: process.env.WE_COM_SECRET ?? "" }),
-    parser: new ApprovalParser((optionKey) => itemService.resolveByWeComOptionKey(optionKey)),
-    store: new InMemoryApprovalSyncStore(inventoryState),
+    parser: {
+      async parse(detail) {
+        await itemService.loadPersistedOptionIndex();
+        return approvalParser.parse(detail);
+      },
+    },
+    store: inventoryPersistence.approvalSyncStore,
   });
   const signatureVerifier = new WeComSignatureVerifier({
     token: process.env.WE_COM_CALLBACK_TOKEN ?? "",
@@ -208,7 +190,17 @@ export function buildServer(options: BuildServerOptions = {}) {
     return reply.code(statusCode).send({ error: message });
   });
 
-  app.get("/health", async () => ({ status: "ok", service: "warehouse-api", persistenceDriver: persistence.driver }));
+  app.get("/health", async (_request, reply) => {
+    if (persistence.driver === "memory") {
+      return { status: "ok", service: "warehouse-api", persistenceDriver: persistence.driver, database: { status: "not_required" } };
+    }
+    try {
+      await persistence.probeDatabase();
+      return { status: "ok", service: "warehouse-api", persistenceDriver: persistence.driver, database: { status: "ok" } };
+    } catch {
+      return reply.code(503).send({ status: "error", service: "warehouse-api", persistenceDriver: persistence.driver, database: { status: "unavailable" } });
+    }
+  });
   app.get<{ Querystring: { returnTo?: string } }>("/auth/wecom/authorize", async (request, reply) => {
     try {
       const authorizeUrl = oauthClient.getAuthorizeUrl(request.query.returnTo ?? "/");
