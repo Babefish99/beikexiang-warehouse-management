@@ -46,7 +46,7 @@ export interface OpeningStockEntryInput {
 
 export interface InventoryEntryStore {
   recordStockEntry(input: StockEntryInput): Promise<{ orderId: string; batchId: string }>;
-  recordOpeningStock(input: OpeningStockEntryInput): Promise<{ orderId: string; batchIds: string[] }>;
+  recordOpeningStock(input: OpeningStockEntryInput): Promise<{ orderIds: string[]; batchIds: string[] }>;
 }
 
 export interface ActiveMasterDataLookup {
@@ -97,7 +97,7 @@ export class InMemoryInventoryEntryStore implements InventoryEntryStore {
     return { orderId, batchId };
   }
 
-  async recordOpeningStock(input: OpeningStockEntryInput): Promise<{ orderId: string; batchIds: string[] }> {
+  async recordOpeningStock(input: OpeningStockEntryInput): Promise<{ orderIds: string[]; batchIds: string[] }> {
     const existingBatchKeys = new Set(
       [...this.state.batches.values()].map((batch) => `${batch.warehouseId}\u0000${batch.itemId}\u0000${batch.batchNo}`),
     );
@@ -108,22 +108,28 @@ export class InMemoryInventoryEntryStore implements InventoryEntryStore {
       requestBatchKeys.add(key);
     }
 
-    const orderId = input.referenceId;
+    const orderIdsByWarehouse = new Map<string, string>();
+    for (const row of input.rows) {
+      if (!orderIdsByWarehouse.has(row.warehouseId)) {
+        const suffix = orderIdsByWarehouse.size === 0 ? "" : `-${orderIdsByWarehouse.size + 1}`;
+        orderIdsByWarehouse.set(row.warehouseId, `${input.referenceId}${suffix}`);
+      }
+    }
     const drafts = input.rows.map((row, index) => {
       const batchId = `batch-${String(this.state.stockEntrySequence + index).padStart(4, "0")}`;
       const quantity = decimal(row.quantity);
       const unitCost = decimal(row.unitCost);
-      return { row, batchId, quantity, unitCost };
+      return { row, batchId, orderId: orderIdsByWarehouse.get(row.warehouseId)!, quantity, unitCost };
     });
 
-    for (const { row, batchId, quantity, unitCost } of drafts) {
+    for (const { row, batchId, orderId, quantity, unitCost } of drafts) {
       this.state.batches.set(batchId, { id: batchId, warehouseId: row.warehouseId, itemId: row.itemId, batchNo: row.batchNo, quantity: row.quantity, remainingQuantity: row.quantity, unitCost: row.unitCost, purchasedAt: row.purchasedAt, productionDate: row.productionDate, expiryDate: row.expiryDate, purchaser: row.purchaser });
       this.state.balances.set(inventoryBalanceKey(row.warehouseId, batchId), { warehouseId: row.warehouseId, itemId: row.itemId, batchId, remainingQuantity: row.quantity, unitCost: row.unitCost });
       this.state.ledger.push({ id: crypto.randomUUID(), warehouseId: row.warehouseId, itemId: row.itemId, batchId, type: "OPENING_BALANCE", quantity: quantity.toString(), unitCost: unitCost.toString(), amount: quantity.mul(unitCost).toFixed(2), referenceType: "OPENING_STOCK", referenceId: orderId, occurredAt: input.occurredAt });
       this.options.onRecordStockEntry?.({ itemId: row.itemId });
     }
     this.state.stockEntrySequence += drafts.length;
-    return { orderId, batchIds: drafts.map(({ batchId }) => batchId) };
+    return { orderIds: [...orderIdsByWarehouse.values()], batchIds: drafts.map(({ batchId }) => batchId) };
   }
 
   batches(): StoredBatch[] { return [...this.state.batches.values()].map((batch) => ({ ...batch })); }

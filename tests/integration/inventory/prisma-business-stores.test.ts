@@ -101,10 +101,10 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     }
   });
 
-  async function recordStock(options: { batchNo?: string; quantity?: string; source?: "INBOUND" | "OPENING_STOCK" } = {}) {
+  async function recordStock(options: { warehouseId?: string; batchNo?: string; quantity?: string; source?: "INBOUND" | "OPENING_STOCK" } = {}) {
     const source = options.source ?? "INBOUND";
     return new PrismaInventoryEntryStore(prisma).recordStockEntry({
-      warehouseId: "warehouse-1",
+      warehouseId: options.warehouseId ?? "warehouse-1",
       itemId,
       batchNo: options.batchNo ?? `batch-${crypto.randomUUID()}`,
       quantity: options.quantity ?? "10",
@@ -187,7 +187,7 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
   });
 
   it("rolls back the complete opening-stock request when row two conflicts", async () => {
-    await recordStock({ batchNo: "TASK3-OPENING-DUPLICATE" });
+    await recordStock({ warehouseId: "warehouse-2", batchNo: "TASK3-OPENING-DUPLICATE" });
     const before = {
       orders: await prisma.inboundOrder.count(),
       batches: await prisma.procurementBatch.count(),
@@ -199,7 +199,7 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
       verifiedBy: "task3-operator",
       rows: [
         { warehouseId: "warehouse-1", itemId, batchNo: "TASK3-OPENING-ROW-1", quantity: "4", unitCost: "2" },
-        { warehouseId: "warehouse-1", itemId, batchNo: "TASK3-OPENING-DUPLICATE", quantity: "6", unitCost: "3" },
+        { warehouseId: "warehouse-2", itemId, batchNo: "TASK3-OPENING-DUPLICATE", quantity: "6", unitCost: "3" },
       ],
     })).rejects.toThrow();
 
@@ -225,6 +225,36 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     expect(orders[0]!.lines).toHaveLength(2);
     const ledger = await prisma.inventoryLedgerEntry.findMany({ where: { type: "OPENING_BALANCE" } });
     expect(new Set(ledger.map((entry) => entry.referenceId))).toEqual(new Set([orders[0]!.id]));
+  });
+
+  it("creates one correctly attributed opening-stock order per warehouse", async () => {
+    const result = await openingStockService().create({
+      verifiedBy: "task3-operator",
+      rows: [
+        { warehouseId: "warehouse-1", itemId, batchNo: "TASK3-OPENING-WH-1", quantity: "4", unitCost: "2" },
+        { warehouseId: "warehouse-2", itemId, batchNo: "TASK3-OPENING-WH-2", quantity: "6", unitCost: "3" },
+      ],
+    });
+
+    const orders = await prisma.inboundOrder.findMany({
+      where: { source: "OPENING_STOCK" },
+      include: { lines: { include: { batch: true } } },
+      orderBy: { warehouseId: "asc" },
+    });
+    expect(result.batchIds).toHaveLength(2);
+    expect(orders.map((order) => ({
+      warehouseId: order.warehouseId,
+      lineWarehouses: order.lines.map((line) => line.batch.warehouseId),
+    }))).toEqual([
+      { warehouseId: "warehouse-1", lineWarehouses: ["warehouse-1"] },
+      { warehouseId: "warehouse-2", lineWarehouses: ["warehouse-2"] },
+    ]);
+    const orderIdsByWarehouse = new Map(orders.map((order) => [order.warehouseId, order.id]));
+    const ledger = await prisma.inventoryLedgerEntry.findMany({ where: { type: "OPENING_BALANCE" }, orderBy: { warehouseId: "asc" } });
+    expect(ledger.map((entry) => ({ warehouseId: entry.warehouseId, referenceId: entry.referenceId }))).toEqual([
+      { warehouseId: "warehouse-1", referenceId: orderIdsByWarehouse.get("warehouse-1") },
+      { warehouseId: "warehouse-2", referenceId: orderIdsByWarehouse.get("warehouse-2") },
+    ]);
   });
 
   it("commits outbound stock, allocation, ledger, and approval closure in one transaction", async () => {

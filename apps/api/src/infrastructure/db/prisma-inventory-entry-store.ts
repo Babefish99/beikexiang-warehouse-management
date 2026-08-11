@@ -86,13 +86,19 @@ export class PrismaInventoryEntryStore implements InventoryEntryStore {
     return { orderId, batchId };
   }
 
-  async recordOpeningStock(input: Parameters<InventoryEntryStore["recordOpeningStock"]>[0]): Promise<{ orderId: string; batchIds: string[] }> {
-    const firstRow = input.rows[0];
-    if (!firstRow) throw new Error("opening stock rows are required");
-    const orderId = input.referenceId;
+  async recordOpeningStock(input: Parameters<InventoryEntryStore["recordOpeningStock"]>[0]): Promise<{ orderIds: string[]; batchIds: string[] }> {
+    if (!input.rows.length) throw new Error("opening stock rows are required");
     const receivedAt = new Date(input.occurredAt);
+    const orderIdsByWarehouse = new Map<string, string>();
+    for (const row of input.rows) {
+      if (!orderIdsByWarehouse.has(row.warehouseId)) {
+        const suffix = orderIdsByWarehouse.size === 0 ? "" : `-${orderIdsByWarehouse.size + 1}`;
+        orderIdsByWarehouse.set(row.warehouseId, `${input.referenceId}${suffix}`);
+      }
+    }
     const rows = input.rows.map((row) => ({
       row,
+      orderId: orderIdsByWarehouse.get(row.warehouseId)!,
       batchId: crypto.randomUUID(),
       lineId: crypto.randomUUID(),
       ledgerId: crypto.randomUUID(),
@@ -102,17 +108,12 @@ export class PrismaInventoryEntryStore implements InventoryEntryStore {
 
     await runInventoryTransaction(this.prisma, async (transaction) => {
       await assertPrismaPeriodOpen(transaction, receivedAt);
-      await transaction.inboundOrder.create({
-        data: {
-          id: orderId,
-          warehouseId: firstRow.warehouseId,
-          orderNo: `OPEN-${orderId}`,
-          source: "OPENING_STOCK",
-          receivedAt,
-          operatorId: input.operatorId,
-        },
-      });
-      for (const { row, batchId, lineId, ledgerId, quantity, unitCost } of rows) {
+      for (const [warehouseId, orderId] of orderIdsByWarehouse) {
+        await transaction.inboundOrder.create({
+          data: { id: orderId, warehouseId, orderNo: `OPEN-${orderId}`, source: "OPENING_STOCK", receivedAt, operatorId: input.operatorId },
+        });
+      }
+      for (const { row, orderId, batchId, lineId, ledgerId, quantity, unitCost } of rows) {
         await transaction.procurementBatch.create({
           data: {
             id: batchId,
@@ -140,6 +141,6 @@ export class PrismaInventoryEntryStore implements InventoryEntryStore {
       }
     });
 
-    return { orderId, batchIds: rows.map(({ batchId }) => batchId) };
+    return { orderIds: [...orderIdsByWarehouse.values()], batchIds: rows.map(({ batchId }) => batchId) };
   }
 }
