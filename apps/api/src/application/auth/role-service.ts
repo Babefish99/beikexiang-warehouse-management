@@ -7,6 +7,13 @@ export interface AuthenticatedUser {
   role: UserRole;
 }
 
+export function parseConfiguredWeComUserIds(value?: string): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((userId) => userId.trim())
+    .filter((userId) => Boolean(userId) && !userId.toLowerCase().startsWith("replace-with-"));
+}
+
 export type Permission =
   | "VIEW_ADMIN"
   | "VIEW_REPORTS"

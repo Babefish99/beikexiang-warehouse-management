@@ -2,7 +2,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, type Prisma } from "@prisma/client";
 
 import { isLocalAuthEnabled } from "../../application/auth/local-auth.js";
-import type { AuthenticatedUser, UserRole } from "../../application/auth/role-service.js";
+import { parseConfiguredWeComUserIds, type AuthenticatedUser, type UserRole } from "../../application/auth/role-service.js";
 import { InMemoryItemRepository, type ItemRepository } from "../../application/items/item-service.js";
 import { InMemoryInventoryEntryStore, type InventoryEntryStore, type StoredBatch } from "../../application/inventory/inbound-service.js";
 import { createInventoryMemoryState } from "../../application/inventory/inventory-memory-state.js";
@@ -16,6 +16,7 @@ import { InMemoryApprovalSyncStore, type ApprovalSyncStore } from "../../applica
 import type { ItemDefinition } from "../../domain/items/item.js";
 import type { WarehouseDefinition } from "../../domain/warehouses/warehouse.js";
 import { InMemoryAuditService, type AuditEvent, type AuditService } from "../audit/audit-service.js";
+import { decodeWeComEncodingAesKey } from "../wecom/signature-verifier.js";
 import { PrismaAccountingPeriodStore } from "./prisma-accounting-period-store.js";
 import { PrismaApprovalSyncStore } from "./prisma-approval-sync-store.js";
 import { PrismaInventoryEntryStore } from "./prisma-inventory-entry-store.js";
@@ -185,6 +186,14 @@ export function readServerConfig(env: Record<string, string | undefined>): Serve
       if (!value || value.toLowerCase().startsWith("replace-with-")) {
         throw new Error(`production Enterprise WeChat configuration is incomplete: ${field}`);
       }
+    }
+    try {
+      decodeWeComEncodingAesKey(env.WE_COM_ENCODING_AES_KEY!.trim());
+    } catch {
+      throw new Error("WE_COM_ENCODING_AES_KEY must be an unpadded base64 value that decodes to exactly 32 bytes in production");
+    }
+    if (parseConfiguredWeComUserIds(env.WE_COM_ADMIN_IDS).length === 0) {
+      throw new Error("WE_COM_ADMIN_IDS must contain at least one non-placeholder Enterprise WeChat UserID in production");
     }
     if (!usesHttps(apiBaseUrl)) {
       throw new Error("API_BASE_URL must use HTTPS when Enterprise WeChat callbacks are enabled in production");

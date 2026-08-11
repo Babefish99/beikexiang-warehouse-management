@@ -59,7 +59,8 @@ Prisma 7 在使用 `--from-migrations` 或 `migrate dev` 时还需要单独的 `
 - 正式环境 `SESSION_SECRET` 至少 32 个字符，且不能使用 `.env.example` 中的占位值
 - `LOCAL_AUTH_BYPASS=true` 只在非生产环境生效；正式环境配置为 `true` 会拒绝启动
 - 本地 bypass 只接受 loopback 来源与 loopback/配置主机名
-- 正式环境必须完整提供 `WE_COM_CORP_ID`、`WE_COM_AGENT_ID`、`WE_COM_SECRET`、`WE_COM_CALLBACK_TOKEN` 和 `WE_COM_ENCODING_AES_KEY`
+- 正式环境必须完整提供 `WE_COM_CORP_ID`、`WE_COM_AGENT_ID`、`WE_COM_SECRET`、`WE_COM_CALLBACK_TOKEN` 和 `WE_COM_ENCODING_AES_KEY`；EncodingAESKey 必须是企业微信提供的 43 字符无填充 Base64 值，解码后正好 32 字节
+- 正式环境的 `WE_COM_ADMIN_IDS` 至少要包含一个非占位的企业微信 UserID，作为首位生产管理员；多个 UserID 使用英文逗号分隔，`WE_COM_FINANCE_IDS` 可选
 - 正式环境的 `API_BASE_URL` 与 `WEB_BASE_URL` 都必须是 HTTPS
 
 `GET /health` 会返回 API 状态、当前持久化驱动和数据库状态。`memory` 模式明确返回 `database.status=not_required`；Prisma 模式执行实时数据库查询，数据库不可用时返回 HTTP 503 和 `database.status=unavailable`。
@@ -71,7 +72,7 @@ Prisma 7 在使用 `--from-migrations` 或 `migrate dev` 时还需要单独的 `
 1. 部署可公网访问的 HTTPS API 域名
 2. 将 `API_BASE_URL` 设置为对应 HTTPS 地址
 3. 在企业微信后台配置回调 URL、Token、EncodingAESKey
-4. 提供真实 `WE_COM_CORP_ID`、`WE_COM_AGENT_ID`、`WE_COM_SECRET`
+4. 提供真实 `WE_COM_CORP_ID`、`WE_COM_AGENT_ID`、`WE_COM_SECRET`，并在 `WE_COM_ADMIN_IDS` 配置首位生产管理员的企业微信 UserID
 5. 跑迁移与 seed，确认数据库连通
 6. 通过 `/health` 验证实时数据库探针
 7. 用真实企业微信账号完成一次登录与审批回调验收

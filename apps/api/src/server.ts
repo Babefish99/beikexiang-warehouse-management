@@ -3,7 +3,7 @@ import cors from "@fastify/cors";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
-import { RolePolicy, type AuthenticatedUser } from "./application/auth/role-service.js";
+import { parseConfiguredWeComUserIds, RolePolicy, type AuthenticatedUser } from "./application/auth/role-service.js";
 import { SessionService } from "./application/auth/session-service.js";
 import { classifyAdminBusinessError } from "./application/errors/business-rule-error.js";
 import { ItemService } from "./application/items/item-service.js";
@@ -48,8 +48,8 @@ const WECOM_OAUTH_STATE_TTL_SECONDS = 10 * 60;
 dotenv.config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../.env") });
 
 function roleForUser(weComUserId: string): AuthenticatedUser["role"] {
-  const adminIds = new Set((process.env.WE_COM_ADMIN_IDS ?? "").split(",").map((value) => value.trim()).filter(Boolean));
-  const financeIds = new Set((process.env.WE_COM_FINANCE_IDS ?? "").split(",").map((value) => value.trim()).filter(Boolean));
+  const adminIds = new Set(parseConfiguredWeComUserIds(process.env.WE_COM_ADMIN_IDS));
+  const financeIds = new Set(parseConfiguredWeComUserIds(process.env.WE_COM_FINANCE_IDS));
   if (adminIds.has(weComUserId)) return "ADMIN";
   if (financeIds.has(weComUserId)) return "FINANCE";
   return "APPLICANT";

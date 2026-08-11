@@ -229,3 +229,155 @@ TASK4_SCOPE_CHECK=PASS
 
 - The unbounded all-database parallel run can exceed the legacy `prisma-master-data` test's five-second timeout under local PostgreSQL contention. The test passes alone and the full suite is stable with `--maxWorkers=4`; this is recorded rather than silently omitted.
 - Real public HTTPS, production secrets, production migrations, and live Enterprise WeChat connectivity remain deployment/operator work for later tasks. Task 4 does not claim those external systems are configured.
+
+## Fix round 1: production WeCom key and administrator validation
+
+Status: DONE. Fix base: `5c76e5e`. Production startup now rejects malformed or incorrectly sized EncodingAESKey values and requires at least one usable Enterprise WeChat administrator UserID. The exact same key decoder is used by startup configuration and callback decryption, and the exact same UserID parser is used by startup validation and OAuth role assignment.
+
+### Changed files
+
+- `.env.example`
+- `README.md`
+- `apps/api/src/application/auth/role-service.ts`
+- `apps/api/src/infrastructure/db/runtime.ts`
+- `apps/api/src/infrastructure/wecom/signature-verifier.ts`
+- `apps/api/src/server.ts`
+- `tests/unit/infrastructure/persistence-runtime.test.ts`
+- `.superpowers/sdd/2026-08-11-aliyun-production-deployment/task-4-report.md`
+
+### EncodingAESKey RED evidence
+
+Command:
+
+```powershell
+corepack pnpm vitest run tests/unit/infrastructure/persistence-runtime.test.ts -t EncodingAESKey --reporter=verbose
+```
+
+Output (exit 1):
+
+```text
+Test Files  1 failed (1)
+Tests       4 failed | 1 passed | 17 skipped (22)
+```
+
+The canonical unpadded 43-character value passed. All four invalid cases were incorrectly accepted: nonempty one-character `A`, a canonical Base64 value decoding to 31 bytes, a 43-character value containing `*`, and a padded 44-character value.
+
+### EncodingAESKey GREEN evidence
+
+Commands:
+
+```powershell
+corepack pnpm vitest run tests/unit/infrastructure/persistence-runtime.test.ts -t EncodingAESKey --reporter=verbose
+corepack pnpm vitest run tests/unit/wecom/signature-verifier.test.ts --reporter=verbose
+```
+
+Output (exit 0):
+
+```text
+runtime EncodingAESKey cases: 5 passed | 17 skipped
+signature verifier: 2 passed
+```
+
+`decodeWeComEncodingAesKey` requires exactly 43 standard Base64 characters, decodes with the WeCom-required padding, checks for exactly 32 bytes, and round-trips to the identical canonical unpadded value. `WeComSignatureVerifier.decrypt` now uses this same decoder.
+
+### Production administrator RED evidence
+
+Command:
+
+```powershell
+corepack pnpm vitest run tests/unit/infrastructure/persistence-runtime.test.ts -t administrator --reporter=verbose
+```
+
+Output (exit 1):
+
+```text
+Test Files  1 failed (1)
+Tests       5 failed | 1 passed | 22 skipped (28)
+```
+
+Missing, empty, comma/whitespace-only, lowercase placeholder-only, and uppercase placeholder-only values were all incorrectly accepted. A trimmed comma-separated list containing a real UserID passed.
+
+### Production administrator GREEN evidence
+
+Commands:
+
+```powershell
+corepack pnpm vitest run tests/unit/infrastructure/persistence-runtime.test.ts -t administrator --reporter=verbose
+corepack pnpm vitest run tests/unit/infrastructure/persistence-runtime.test.ts --reporter=dot
+```
+
+Output (exit 0):
+
+```text
+administrator cases: 6 passed | 22 skipped
+runtime configuration file: 28 passed
+```
+
+The shared parser trims comma-separated values, drops blanks and case-insensitive `replace-with-*` placeholders, and requires at least one remaining production administrator. `server.ts` uses the same parser for administrator and optional finance role assignment.
+
+### PostgreSQL reconstruction acceptance
+
+Command:
+
+```powershell
+$env:TEST_DATABASE_URL='postgresql://warehouse:warehouse@127.0.0.1:5432/warehouse'
+corepack pnpm vitest run tests/integration/db/prisma-restart-persistence.test.ts --reporter=verbose
+```
+
+Output (exit 0):
+
+```text
+Test Files  1 passed (1)
+Tests       1 passed (1)
+Duration    3.45s
+```
+
+The real two-instance Fastify/Prisma reconstruction and durable inventory/read-model acceptance remains green.
+
+### Full fix-round verification
+
+PostgreSQL-enabled bounded suite:
+
+```powershell
+$env:TEST_DATABASE_URL='postgresql://warehouse:warehouse@127.0.0.1:5432/warehouse'
+corepack pnpm vitest run --maxWorkers=4 --reporter=dot
+```
+
+```text
+Test Files  43 passed (43)
+Tests       205 passed (205)
+Duration    11.66s
+```
+
+Typecheck, build, diff, and scope command/output (exit 0):
+
+```powershell
+corepack pnpm typecheck
+corepack pnpm build
+git diff --check
+```
+
+```text
+apps/api typecheck: Done
+apps/web typecheck: Done
+apps/api build: Done
+apps/web build: 1595 modules transformed
+apps/web build: built in 3.18s
+apps/web build: Done
+git diff --check: no whitespace errors (Windows LF/CRLF conversion notices only)
+TASK4_FIX_SCOPE_CHECK=PASS
+```
+
+### Fix-round self-review
+
+- Startup and callback cryptography cannot disagree about EncodingAESKey structure because both call one strict decoder.
+- The decoder rejects Node's otherwise-lenient Base64 inputs, verifies exact decoded size, and preserves the standard WeCom unpadded representation.
+- Production administrator validation is performed after required WeCom credential validation and before URL checks; a missing administrator fails startup even though finance IDs remain optional.
+- Placeholder filtering is case-insensitive. A mixed list is accepted only when at least one trimmed non-placeholder UserID remains.
+- OAuth role assignment consumes the same filtered parser, so ignored placeholders cannot accidentally receive administrator or finance permissions.
+- `.env.example` contains no secret and now identifies its administrator value as a deliberate placeholder. Chinese guidance explains the first-production-administrator and EncodingAESKey requirements.
+- Memory mode, non-production behavior, the full Prisma reconstruction acceptance, and all existing tests remain green.
+- No Docker, Compose, deployment, reverse-proxy, migration, schema, or other Task 5+ file changed.
+- Independent reviewer dispatch is unavailable in this runtime; the complete fix diff was reviewed requirement-by-requirement locally and no additional Critical or Important issue was found.
+
+Fix-round concern: none beyond the previously documented local unbounded-test contention and external production-operator work.

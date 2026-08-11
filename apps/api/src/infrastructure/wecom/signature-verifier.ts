@@ -6,6 +6,18 @@ export interface WeComSignatureVerifierOptions {
   corpId: string;
 }
 
+export function decodeWeComEncodingAesKey(encodingAesKey: string): Buffer {
+  if (!/^[A-Za-z0-9+/]{43}$/.test(encodingAesKey)) {
+    throw new Error("enterprise WeChat encoding AES key is invalid");
+  }
+  const key = Buffer.from(`${encodingAesKey}=`, "base64");
+  const canonicalValue = key.toString("base64").replace(/=+$/, "");
+  if (key.length !== 32 || canonicalValue !== encodingAesKey) {
+    throw new Error("enterprise WeChat encoding AES key is invalid");
+  }
+  return key;
+}
+
 export class WeComSignatureVerifier {
   constructor(private readonly options: WeComSignatureVerifierOptions) {}
 
@@ -19,8 +31,7 @@ export class WeComSignatureVerifier {
 
   decrypt(encryptedBody: string): string {
     if (!this.options.encodingAesKey) throw new Error("enterprise WeChat encoding AES key is required");
-    const key = Buffer.from(`${this.options.encodingAesKey}=`, "base64");
-    if (key.length !== 32) throw new Error("enterprise WeChat encoding AES key is invalid");
+    const key = decodeWeComEncodingAesKey(this.options.encodingAesKey);
     const decipher = createDecipheriv("aes-256-cbc", key, key.subarray(0, 16));
     const decrypted = Buffer.concat([decipher.update(Buffer.from(encryptedBody, "base64")), decipher.final()]);
     const messageLength = decrypted.readUInt32BE(16);

@@ -9,6 +9,7 @@ afterEach(() => {
 });
 
 describe("server runtime configuration", () => {
+  const validEncodingAesKey = Buffer.alloc(32, 1).toString("base64").replace(/=+$/, "");
   const productionEnvironment = {
     NODE_ENV: "production",
     PERSISTENCE_DRIVER: "prisma",
@@ -20,8 +21,9 @@ describe("server runtime configuration", () => {
     WE_COM_CORP_ID: "corp-id",
     WE_COM_AGENT_ID: "1000001",
     WE_COM_SECRET: "secret",
+    WE_COM_ADMIN_IDS: "warehouse-admin",
     WE_COM_CALLBACK_TOKEN: "callback-token",
-    WE_COM_ENCODING_AES_KEY: "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
+    WE_COM_ENCODING_AES_KEY: validEncodingAesKey,
   };
 
   it("defaults to in-memory persistence outside production", () => {
@@ -80,6 +82,39 @@ describe("server runtime configuration", () => {
         `production Enterprise WeChat configuration is incomplete: ${field}`,
       );
     }
+  });
+
+  it("accepts the canonical unpadded 43-character Enterprise WeChat EncodingAESKey", () => {
+    expect(validEncodingAesKey).toHaveLength(43);
+    expect(() => readServerConfig(productionEnvironment)).not.toThrow();
+  });
+
+  it.each([
+    "A",
+    Buffer.alloc(31, 1).toString("base64").replace(/=+$/, ""),
+    `${validEncodingAesKey.slice(0, -1)}*`,
+    `${validEncodingAesKey}=`,
+  ])("rejects a malformed or incorrectly sized production EncodingAESKey: %s", (encodingAesKey) => {
+    expect(() => readServerConfig({ ...productionEnvironment, WE_COM_ENCODING_AES_KEY: encodingAesKey }))
+      .toThrowError("WE_COM_ENCODING_AES_KEY must be an unpadded base64 value that decodes to exactly 32 bytes in production");
+  });
+
+  it.each([
+    undefined,
+    "",
+    " ,   ,\t",
+    "replace-with-first-production-admin-userid",
+    " , REPLACE-WITH-ADMIN-USERID, ",
+  ])("rejects production configuration without a usable Enterprise WeChat administrator: %s", (adminIds) => {
+    expect(() => readServerConfig({ ...productionEnvironment, WE_COM_ADMIN_IDS: adminIds }))
+      .toThrowError("WE_COM_ADMIN_IDS must contain at least one non-placeholder Enterprise WeChat UserID in production");
+  });
+
+  it("accepts a trimmed administrator list containing at least one usable UserID", () => {
+    expect(() => readServerConfig({
+      ...productionEnvironment,
+      WE_COM_ADMIN_IDS: " , replace-with-admin-userid, primary-admin , secondary-admin ",
+    })).not.toThrow();
   });
 
   it("requires both production public base URLs to use HTTPS", () => {
