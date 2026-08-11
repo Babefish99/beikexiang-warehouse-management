@@ -304,6 +304,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     inventoryReportService,
     transactionReportService,
     inventoryQueryService,
+    listReportItems: () => itemService.list(true),
     listReportWarehouses: () => warehouseService.listActive(),
   });
 

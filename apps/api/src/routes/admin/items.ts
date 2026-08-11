@@ -37,6 +37,15 @@ export function registerItemRoutes(app: FastifyInstance, dependencies: { itemSer
   );
 
   app.post<{ Params: { id: string } }>(
+    "/admin/items/:id/activate",
+    withAdminMutationAudit(app, {
+      action: "ITEM_ACTIVATED",
+      entityType: "ITEM",
+      getEntityId: ({ request }) => request.params.id,
+    }, async (request) => dependencies.itemService.activate(request.params.id)),
+  );
+
+  app.post<{ Params: { id: string } }>(
     "/admin/items/:id/deactivate",
     withAdminMutationAudit(app, {
       action: "ITEM_DEACTIVATED",

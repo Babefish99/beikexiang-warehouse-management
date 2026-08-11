@@ -98,6 +98,15 @@ export class ItemService {
     await this.repository.save({ ...item, isActive: false });
   }
 
+  async activate(itemId: string): Promise<ItemDefinition> {
+    const item = await this.repository.get(itemId);
+    if (!item) throw new Error(`item not found: ${itemId}`);
+    const activated = { ...item, isActive: true };
+    await this.repository.save(activated);
+    if (activated.weComOptionKey) this.optionIndex.set(activated.weComOptionKey, activated.id);
+    return activated;
+  }
+
   list(includeInactive = false): Promise<ItemDefinition[]> {
     return this.repository.list(includeInactive);
   }

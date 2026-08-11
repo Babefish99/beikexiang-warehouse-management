@@ -70,13 +70,53 @@ test("reports page filters transaction details and keeps filters after a server 
   expect(Math.abs(periodBox.y - typeBox.y)).toBeLessThan(4);
 
   await expect(page.getByText("230.00")).toBeVisible();
-  await expect(page.getByText("TRANSFER_OUT")).toBeVisible();
+  await expect(page.getByText("调拨出库")).toBeVisible();
 
   await form.locator("select").selectOption("transfers");
 
   await expect(page.getByText("report query unavailable")).toBeVisible();
   await expect(form.locator('input[type="month"]')).toHaveValue("2026-08");
   await expect(form.locator("select")).toHaveValue("transfers");
+});
+
+test("reports page resolves internal ids to readable item, warehouse, and transaction labels", async ({ page }) => {
+  await page.route("http://127.0.0.1:3001/admin/reports/items", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([{ id: "item-1", code: "TEA-0001", name: "Tea leaves", specification: "Iron Goddess", unit: "box", categoryId: "cat-tea", isActive: true }]),
+    });
+  });
+  await page.route("http://127.0.0.1:3001/admin/reports/warehouses", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([{ id: "wh-1", code: "WH-01", name: "Warehouse 1", isActive: true }]),
+    });
+  });
+  await page.route(/http:\/\/127\.0\.0\.1:3001\/admin\/reports\/summary.*/, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([{ itemId: "item-1", quantity: "11", amount: "230.00" }]),
+    });
+  });
+  await page.route(/http:\/\/127\.0\.0\.1:3001\/admin\/reports\/transactions.*/, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([{ id: "tx-1", occurredAt: "2026-08-04T00:00:00.000Z", warehouseId: "wh-1", itemId: "item-1", type: "TRANSFER_OUT", quantity: "-2", unitCost: "20", amount: "40.00", referenceType: "TRANSFER_ORDER" }]),
+    });
+  });
+
+  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Freports");
+
+  await expect(page.getByText("Tea leaves", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Warehouse 1", { exact: true })).toBeVisible();
+  await expect(page.getByText("调拨出库", { exact: true })).toBeVisible();
+  await expect(page.getByText("调拨单", { exact: true })).toBeVisible();
+  await expect(page.getByText("item-1", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("wh-1", { exact: true })).toHaveCount(0);
 });
 
 test("reports page enables export when queries are available", async ({ page }) => {
