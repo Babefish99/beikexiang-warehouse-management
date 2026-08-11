@@ -270,7 +270,6 @@ export function ItemsPage() {
                   <th>物品名称</th>
                   <th>规格</th>
                   <th>单位</th>
-                  <th>企业微信选项 key</th>
                   <th>状态</th>
                   <th>操作</th>
                 </tr>
@@ -282,7 +281,6 @@ export function ItemsPage() {
                     <td><strong>{item.name}</strong></td>
                     <td>{item.specification || "—"}</td>
                     <td>{item.unit}</td>
-                    <td>{item.weComOptionKey || "—"}</td>
                     <td><span className={`status-pill ${item.isActive ? "status-pill--active" : ""}`}>{item.isActive ? "启用" : "停用"}</span></td>
                     <td>
                       <div className="table-actions">

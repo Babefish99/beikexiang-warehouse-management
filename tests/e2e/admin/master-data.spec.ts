@@ -69,6 +69,14 @@ test.describe("master data administration", () => {
 
     await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Fitems");
 
+    const initialRow = page.locator("tbody tr").first();
+    await expect(initialRow.getByText("Tea leaves", { exact: true })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "企业微信选项 key", exact: true })).toHaveCount(0);
+    await expect(initialRow.getByText("opt-tea", { exact: true })).toHaveCount(0);
+    await page.getByLabel("物品搜索").fill("opt-tea");
+    await expect(page.locator("tbody tr")).toHaveCount(1);
+    await page.getByLabel("物品搜索").fill("");
+
     const form = page.locator("form").first();
     await form.getByLabel("编码").fill("TEA-0002");
     await form.getByLabel("分类前缀").fill("TEA");
