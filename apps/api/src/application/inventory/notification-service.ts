@@ -37,8 +37,8 @@ export class NotificationService {
       notifications.push({
         id: "pending-outbound",
         kind: "PENDING_OUTBOUND",
-        title: "Pending outbound approvals",
-        description: `${pendingOutboundCount} pending outbound approval${pendingOutboundCount === 1 ? "" : "s"} require confirmation.`,
+        title: "待出库审批",
+        description: `${pendingOutboundCount} 条已通过的领用审批待管理员确认出库。`,
         href: "/admin/outbound/pending",
         priority: 1,
       });
@@ -48,8 +48,8 @@ export class NotificationService {
       notifications.push({
         id: `low-stock-${item.itemId}`,
         kind: "LOW_STOCK",
-        title: `Low stock: ${item.itemName}`,
-        description: `${item.itemName} is below minimum stock: ${item.totalQuantity} / ${item.minimumStock} remaining.`,
+        title: `库存预警：${item.itemName}`,
+        description: `${item.itemName} 当前库存 ${item.totalQuantity}，低于最低库存 ${item.minimumStock}。`,
         href: "/admin/items",
         priority: 1,
       });
@@ -59,8 +59,8 @@ export class NotificationService {
       notifications.push({
         id: "anomaly",
         kind: "ANOMALY",
-        title: "Stocktake anomalies detected",
-        description: `${anomalyCount} stocktake anomal${anomalyCount === 1 ? "y requires" : "ies require"} review.`,
+        title: "盘点差异待处理",
+        description: `${anomalyCount} 条盘点差异需要处理。`,
         href: stocktakeNotice.href,
         priority: 1,
       });
@@ -70,8 +70,8 @@ export class NotificationService {
       notifications.push({
         id: "stocktake",
         kind: "STOCKTAKE",
-        title: "Stocktake adjustments pending review",
-        description: `${stocktakeNotice.count} stocktake adjustment${stocktakeNotice.count === 1 ? " is" : "s are"} waiting for review.`,
+        title: "盘点调整待复核",
+        description: `${stocktakeNotice.count} 条盘点调整记录等待复核。`,
         href: stocktakeNotice.href,
         priority: 2,
       });
@@ -81,8 +81,8 @@ export class NotificationService {
       notifications.push({
         id: `period-close-${period.code}`,
         kind: "PERIOD_CLOSE",
-        title: "Current period ready to close",
-        description: `Accounting period ${period.code} is open and should be reviewed for close.`,
+        title: "当前期间待结账",
+        description: `记账期间 ${period.code} 尚未结账，请核对报表后处理。`,
         href: "/admin/period-close",
         priority: 3,
       });

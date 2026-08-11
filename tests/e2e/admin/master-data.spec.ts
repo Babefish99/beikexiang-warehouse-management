@@ -77,7 +77,11 @@ test.describe("master data administration", () => {
     await expect(page.locator("tbody tr")).toHaveCount(1);
     await page.getByLabel("物品搜索").fill("");
 
-    const form = page.locator("form").first();
+    await expect(page.locator(".master-data-form-panel")).toHaveCount(0);
+    await page.getByRole("button", { name: "新增物品", exact: true }).click();
+    const createDialog = page.getByRole("dialog", { name: "新增物品" });
+    await expect(createDialog).toBeVisible();
+    const form = createDialog.locator("form");
     await form.getByLabel("编码").fill("TEA-0002");
     await form.getByLabel("分类前缀").fill("TEA");
     await form.getByLabel("名称").fill("Green tea");
@@ -95,7 +99,7 @@ test.describe("master data administration", () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByLabel("分类前缀", { exact: true })).toHaveCount(0);
     await expect(dialog.getByLabel("分类", { exact: true })).toHaveCount(0);
-    await expect(page.locator(".master-data-form-panel")).toHaveCount(1);
+    await expect(page.locator(".master-data-form-panel")).toHaveCount(0);
     const editForm = dialog.locator("form");
     await editForm.getByLabel("编码").fill("TEA-0099");
     await editForm.getByLabel("名称").fill("Tea leaves premium");

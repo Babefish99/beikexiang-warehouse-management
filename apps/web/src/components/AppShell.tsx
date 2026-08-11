@@ -230,7 +230,7 @@ export function AppShell({
       <aside className="sidebar">
         <div className="sidebar__brand">
           <span className="brand-mark">库</span>
-          <span><strong>集团仓库</strong><small>Inventory Center</small></span>
+          <span><strong>集团仓库</strong><small>库存管理后台</small></span>
         </div>
         <nav className="sidebar__nav" aria-label="主导航">
           {navItems.map(({ label, href, icon: Icon, ...item }) => {
@@ -256,7 +256,7 @@ export function AppShell({
             <div className="mobile-drawer__header">
               <div>
                 <strong>集团仓库</strong>
-                <small>Inventory Center</small>
+                <small>库存管理后台</small>
               </div>
               <button className="topbar-icon-button" type="button" aria-label="关闭菜单" onClick={closeDrawer}>
                 <X size={18} />

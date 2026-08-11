@@ -299,6 +299,9 @@ test("notification center shows unread items and clears the local unread indicat
 
   await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2F");
   await expect(page.getByRole("heading", { name: "库存总览" })).toBeVisible();
+  await expect(page.locator(".sidebar__footer strong")).toHaveCSS("font-size", "14px");
+  await expect(page.locator(".sidebar__footer small")).toHaveCSS("font-size", "12px");
+  await expect(page.getByText("Inventory Center", { exact: true })).toHaveCount(0);
 
   const notificationButton = page.getByRole("button", { name: "通知中心" });
   await expect(notificationButton.locator(".workspace-icon-button__badge")).toHaveCount(1);

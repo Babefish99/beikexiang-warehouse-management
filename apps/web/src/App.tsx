@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowDownToLine, ArrowUpFromLine, Boxes, CalendarDays, CheckCircle2, ClipboardCheck, FileSpreadsheet, RefreshCw, ShieldAlert } from "lucide-react";
+import { CalendarDays, CheckCircle2, ClipboardCheck, FileSpreadsheet, RefreshCw, ShieldAlert } from "lucide-react";
 import { AdminLayout, type WarehouseOption, type WorkspaceUser } from "./layouts/AdminLayout";
 import { PageHeader } from "./components/PageHeader";
+import { ApprovalMark, InboundMark, InventoryMark, OutboundMark } from "./components/DashboardIcons";
 import { LoginPage } from "./pages/LoginPage";
 import { ItemsPage } from "./pages/ItemsPage";
 import { WarehousesPage } from "./pages/WarehousesPage";
@@ -31,7 +32,7 @@ const loadingCards = (): DashboardCard[] => [
   { label: "本月出库", value: "加载中", hint: "数量 / 金额", tone: "outbound" },
 ];
 
-const metricIcons = { inventory: Boxes, approval: ClipboardCheck, inbound: ArrowDownToLine, outbound: ArrowUpFromLine };
+const metricIcons = { inventory: InventoryMark, approval: ApprovalMark, inbound: InboundMark, outbound: OutboundMark };
 
 function summariseTransactions(rows: TransactionRow[]): { quantity: string; amount: string } {
   const totals = rows.reduce((current, row) => ({
@@ -250,9 +251,9 @@ export default function App() {
             </div>
           </header>
           <div className="quick-actions">
-            <a href="/admin/inbound"><ArrowDownToLine size={19} /><span>登记入库</span></a>
-            <a href="/admin/outbound"><ArrowUpFromLine size={19} /><span>办理出库</span></a>
-            <a href="/admin/opening-stock"><ArrowDownToLine size={19} /><span>录入期初库存</span></a>
+            <a href="/admin/inbound"><InboundMark size={22} /><span>登记入库</span></a>
+            <a href="/admin/outbound"><OutboundMark size={22} /><span>办理出库</span></a>
+            <a href="/admin/opening-stock"><InventoryMark size={22} /><span>录入期初库存</span></a>
           </div>
         </article>
         <article className="panel">

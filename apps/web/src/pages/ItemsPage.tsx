@@ -76,6 +76,7 @@ export function ItemsPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [createForm, setCreateForm] = useState<ItemFormState>(emptyForm);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<ItemFormState>(emptyForm);
   const [submitting, setSubmitting] = useState(false);
@@ -98,6 +99,18 @@ export function ItemsPage() {
     void loadItems();
   }, []);
 
+  useEffect(() => {
+    if (!createModalOpen && !editingItemId) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setCreateModalOpen(false);
+      setEditingItemId(null);
+      setError(null);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [createModalOpen, editingItemId]);
+
   const filteredItems = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     return keyword ? items.filter((item) => [item.code, item.name, item.specification, item.weComOptionKey].some((value) => value?.toLowerCase().includes(keyword))) : items;
@@ -118,6 +131,7 @@ export function ItemsPage() {
       if (!response.ok) throw new Error(await readError(response));
       setMessage("物品已新增");
       setCreateForm(emptyForm());
+      setCreateModalOpen(false);
       await loadItems();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "物品保存失败");
@@ -190,34 +204,63 @@ export function ItemsPage() {
     }
   };
 
+  const closeCreateModal = () => {
+    setCreateModalOpen(false);
+    setError(null);
+  };
+
   return (
     <div className="page">
       <PageHeader
         title="标准物品库"
         description="管理员维护标准物品、企业微信选项映射和启停状态。"
-        actions={<button className="button button--secondary" type="button" onClick={() => void loadItems()}><RefreshCw size={15} />刷新</button>}
+        actions={(
+          <>
+            <button className="button button--secondary" type="button" onClick={() => void loadItems()}><RefreshCw size={15} />刷新</button>
+            <button
+              className="button button--primary"
+              type="button"
+              onClick={() => {
+                setCreateForm(emptyForm());
+                setCreateModalOpen(true);
+                setError(null);
+                setMessage(null);
+              }}
+            >
+              新增物品
+            </button>
+          </>
+        )}
       />
-      <section className="panel form-panel master-data-form-panel">
-        <header className="panel__header">
-          <div>
-            <strong>新增物品</strong>
-            <small>优先复用已有物品编码；失败时保留输入。</small>
-          </div>
-        </header>
-        <form className="form-grid" onSubmit={submitCreate}>
-          <label><span>编码</span><input required value={createForm.code} onChange={(event) => setCreateForm({ ...createForm, code: event.target.value })} /></label>
-          <label><span>分类前缀</span><input value={createForm.categoryPrefix} onChange={(event) => setCreateForm({ ...createForm, categoryPrefix: event.target.value })} /></label>
-          <label><span>名称</span><input required value={createForm.name} onChange={(event) => setCreateForm({ ...createForm, name: event.target.value })} /></label>
-          <label><span>规格</span><input value={createForm.specification} onChange={(event) => setCreateForm({ ...createForm, specification: event.target.value })} /></label>
-          <label><span>单位</span><input required value={createForm.unit} onChange={(event) => setCreateForm({ ...createForm, unit: event.target.value })} /></label>
-          <label><span>分类</span><input required value={createForm.categoryId} onChange={(event) => setCreateForm({ ...createForm, categoryId: event.target.value })} /></label>
-          <label><span>企业微信选项 key</span><input value={createForm.weComOptionKey} onChange={(event) => setCreateForm({ ...createForm, weComOptionKey: event.target.value })} /></label>
-          <label><span>最低库存</span><input value={createForm.minimumStock} onChange={(event) => setCreateForm({ ...createForm, minimumStock: event.target.value })} /></label>
-          <div className="form-grid__wide form-actions">
-            <button className="button button--primary" type="submit" disabled={submitting}>新增物品</button>
-          </div>
-        </form>
-      </section>
+
+      {createModalOpen ? (
+        <div className="modal-backdrop">
+          <section className="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="create-item-dialog-title">
+            <header className="modal-dialog__header">
+              <div>
+                <strong id="create-item-dialog-title">新增物品</strong>
+                <small>优先复用已有物品编码；失败时保留输入。</small>
+              </div>
+              <button className="modal-dialog__close" type="button" aria-label="关闭新增物品" onClick={closeCreateModal}>×</button>
+            </header>
+            <form className="form-grid modal-dialog__form" onSubmit={submitCreate}>
+              <label><span>编码</span><input required value={createForm.code} onChange={(event) => setCreateForm({ ...createForm, code: event.target.value })} /></label>
+              <label><span>分类前缀</span><input value={createForm.categoryPrefix} onChange={(event) => setCreateForm({ ...createForm, categoryPrefix: event.target.value })} /></label>
+              <label><span>名称</span><input required value={createForm.name} onChange={(event) => setCreateForm({ ...createForm, name: event.target.value })} /></label>
+              <label><span>规格</span><input value={createForm.specification} onChange={(event) => setCreateForm({ ...createForm, specification: event.target.value })} /></label>
+              <label><span>单位</span><input required value={createForm.unit} onChange={(event) => setCreateForm({ ...createForm, unit: event.target.value })} /></label>
+              <label><span>分类</span><input required value={createForm.categoryId} onChange={(event) => setCreateForm({ ...createForm, categoryId: event.target.value })} /></label>
+              <label><span>企业微信选项 key</span><input value={createForm.weComOptionKey} onChange={(event) => setCreateForm({ ...createForm, weComOptionKey: event.target.value })} /></label>
+              <label><span>最低库存</span><input value={createForm.minimumStock} onChange={(event) => setCreateForm({ ...createForm, minimumStock: event.target.value })} /></label>
+              {error ? <div className="form-grid__wide form-error modal-dialog__error">{error}</div> : null}
+              <div className="form-grid__wide form-actions form-actions--split">
+                <button className="button button--secondary" type="button" onClick={closeCreateModal}>取消</button>
+                <button className="button button--primary" type="submit" disabled={submitting}>新增物品</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
 
       {editingItemId ? (
         <div className="modal-backdrop">
@@ -260,7 +303,7 @@ export function ItemsPage() {
           <span className="toolbar-count">共 {filteredItems.length} 项</span>
         </div>
         {message ? <div className="success-notice">{message}</div> : null}
-        {error && !editingItemId ? <div className="form-error">{error}</div> : null}
+        {error && !editingItemId && !createModalOpen ? <div className="form-error">{error}</div> : null}
         {loading ? <div className="notice">正在加载物品……</div> : (
           <div className="table-wrap">
             <table>

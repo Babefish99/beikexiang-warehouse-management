@@ -98,6 +98,8 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
   await expect(page.locator(".metric--approval")).toHaveCount(1);
   await expect(page.locator(".metric--inbound")).toHaveCount(1);
   await expect(page.locator(".metric--outbound")).toHaveCount(1);
+  await expect(page.locator(".metric__icon svg")).toHaveCount(4);
+  await expect(page.locator(".quick-actions a svg")).toHaveCount(3);
   const metricOrder = await page.locator(".metric").evaluateAll((metrics) => metrics.map((metric) =>
     Array.from(metric.querySelectorAll(".metric__label, .metric__value")).map((node) => node.className),
   ));
@@ -144,11 +146,18 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
   await expect.poll(() => itemPageWarehouseIds.length).toBeGreaterThan(0);
   expect(itemPageWarehouseIds.every((warehouseId) => warehouseId === null)).toBe(true);
 
-  const createForm = page.locator(".master-data-form-panel .form-grid").first();
+  await expect(page.locator(".master-data-form-panel")).toHaveCount(0);
+  await page.getByRole("button", { name: "新增物品", exact: true }).click();
+  const createDialog = page.getByRole("dialog", { name: "新增物品" });
+  await expect(createDialog).toBeVisible();
+  const createForm = createDialog.locator(".form-grid");
   expect(await createForm.evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(" ").filter(Boolean).length)).toBe(2);
+  await createDialog.getByRole("button", { name: "取消" }).click();
 
   await page.locator(".table-actions button").first().click();
-  const editForm = page.locator(".master-data-form-panel .form-grid").nth(1);
+  const editDialog = page.getByRole("dialog", { name: "编辑物品" });
+  await expect(editDialog).toBeVisible();
+  const editForm = editDialog.locator(".form-grid");
   expect(await editForm.evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(" ").filter(Boolean).length)).toBe(2);
 
   captureItemPageRequests = false;
