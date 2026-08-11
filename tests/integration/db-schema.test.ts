@@ -16,6 +16,11 @@ const productionMigrationDirectory = readdirSync(resolve(process.cwd(), "prisma/
 const productionMigrationPath = productionMigrationDirectory
   ? resolve(process.cwd(), "prisma/migrations", productionMigrationDirectory, "migration.sql")
   : "";
+const stocktakeSnapshotMigrationDirectory = readdirSync(resolve(process.cwd(), "prisma/migrations"))
+  .find((entry) => entry.endsWith("_stocktake_quantity_snapshots"));
+const stocktakeSnapshotMigrationPath = stocktakeSnapshotMigrationDirectory
+  ? resolve(process.cwd(), "prisma/migrations", stocktakeSnapshotMigrationDirectory, "migration.sql")
+  : "";
 
 function modelBody(modelName: string): string {
   return schema.match(new RegExp(`model ${modelName} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? "";
@@ -105,6 +110,8 @@ describe("database schema contract", () => {
     const ledgerEntry = modelBody("InventoryLedgerEntry");
 
     expect(stockAdjustment).toMatch(/^\s*stocktakeId\s+String\s*$/m);
+    expect(stockAdjustment).toMatch(/^\s*bookQuantity\s+Decimal\s+@db\.Decimal\(18,\s*4\)\s*$/m);
+    expect(stockAdjustment).toMatch(/^\s*actualQuantity\s+Decimal\s+@db\.Decimal\(18,\s*4\)\s*$/m);
     expect(stockAdjustment).toMatch(/stocktake\s+Stocktake\s+@relation\(fields: \[stocktakeId\], references: \[id\], onDelete: Restrict\)/);
     expect(ledgerEntry).toMatch(/^\s*batchId\s+String\s*$/m);
     expect(ledgerEntry).toMatch(/batch\s+ProcurementBatch\s+@relation\(fields: \[batchId\], references: \[id\], onDelete: Restrict\)/);
@@ -146,6 +153,17 @@ describe("database schema contract", () => {
     const migration = existsSync(productionMigrationPath) ? readFileSync(productionMigrationPath, "utf8") : "";
     expect(migration).toContain('ADD COLUMN "outboundStatus" TEXT NOT NULL DEFAULT \'NONE\'');
     expect(migration).toContain('ADD COLUMN "cancelReason" TEXT');
+  });
+
+  it("adds immutable stocktake quantity snapshots in a later migration", () => {
+    expect(stocktakeSnapshotMigrationDirectory).toBeTruthy();
+    expect(existsSync(stocktakeSnapshotMigrationPath)).toBe(true);
+
+    const migration = existsSync(stocktakeSnapshotMigrationPath) ? readFileSync(stocktakeSnapshotMigrationPath, "utf8") : "";
+    expect(migration).toContain('ADD COLUMN "bookQuantity" DECIMAL(18,4)');
+    expect(migration).toContain('ADD COLUMN "actualQuantity" DECIMAL(18,4)');
+    expect(migration).toContain('ALTER COLUMN "bookQuantity" SET NOT NULL');
+    expect(migration).toContain('ALTER COLUMN "actualQuantity" SET NOT NULL');
   });
 
   it("seeds only structural placeholder data", () => {

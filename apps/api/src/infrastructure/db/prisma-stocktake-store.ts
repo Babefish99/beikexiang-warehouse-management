@@ -46,7 +46,7 @@ export class PrismaStocktakeStore implements StocktakeStore {
           status: "COMPLETED",
           operatorId: adjustment.operatorId,
           reason: adjustment.reason,
-          adjustments: { create: { id: crypto.randomUUID(), periodCode: adjustment.periodCode, warehouseId: adjustment.warehouseId, itemId: adjustment.itemId, batchId: adjustment.batchId, quantity: delta.toString(), unitCost: adjustment.unitCost, amount: delta.abs().mul(adjustment.unitCost).toFixed(2), reason: adjustment.reason?.trim() || "no difference", operatorId: adjustment.operatorId } },
+          adjustments: { create: { id: crypto.randomUUID(), periodCode: adjustment.periodCode, warehouseId: adjustment.warehouseId, itemId: adjustment.itemId, batchId: adjustment.batchId, bookQuantity: adjustment.bookQuantity, actualQuantity: adjustment.actualQuantity, quantity: delta.toString(), unitCost: adjustment.unitCost, amount: delta.abs().mul(adjustment.unitCost).toFixed(2), reason: adjustment.reason?.trim() || "no difference", operatorId: adjustment.operatorId } },
         },
       });
       await transaction.inventoryLedgerEntry.create({

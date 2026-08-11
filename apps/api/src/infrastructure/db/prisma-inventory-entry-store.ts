@@ -85,4 +85,61 @@ export class PrismaInventoryEntryStore implements InventoryEntryStore {
 
     return { orderId, batchId };
   }
+
+  async recordOpeningStock(input: Parameters<InventoryEntryStore["recordOpeningStock"]>[0]): Promise<{ orderId: string; batchIds: string[] }> {
+    const firstRow = input.rows[0];
+    if (!firstRow) throw new Error("opening stock rows are required");
+    const orderId = input.referenceId;
+    const receivedAt = new Date(input.occurredAt);
+    const rows = input.rows.map((row) => ({
+      row,
+      batchId: crypto.randomUUID(),
+      lineId: crypto.randomUUID(),
+      ledgerId: crypto.randomUUID(),
+      quantity: new Decimal(row.quantity),
+      unitCost: new Decimal(row.unitCost),
+    }));
+
+    await runInventoryTransaction(this.prisma, async (transaction) => {
+      await assertPrismaPeriodOpen(transaction, receivedAt);
+      await transaction.inboundOrder.create({
+        data: {
+          id: orderId,
+          warehouseId: firstRow.warehouseId,
+          orderNo: `OPEN-${orderId}`,
+          source: "OPENING_STOCK",
+          receivedAt,
+          operatorId: input.operatorId,
+        },
+      });
+      for (const { row, batchId, lineId, ledgerId, quantity, unitCost } of rows) {
+        await transaction.procurementBatch.create({
+          data: {
+            id: batchId,
+            warehouseId: row.warehouseId,
+            itemId: row.itemId,
+            batchNo: row.batchNo,
+            quantity: quantity.toString(),
+            remainingQuantity: quantity.toString(),
+            unitCost: unitCost.toString(),
+            purchasedAt: new Date(row.purchasedAt),
+            productionDate: row.productionDate ? new Date(row.productionDate) : undefined,
+            expiryDate: row.expiryDate ? new Date(row.expiryDate) : undefined,
+            purchaser: row.purchaser,
+          },
+        });
+        await transaction.stockBalance.create({
+          data: { warehouseId: row.warehouseId, itemId: row.itemId, batchId, remainingQuantity: quantity.toString(), unitCost: unitCost.toString() },
+        });
+        await transaction.inboundLine.create({
+          data: { id: lineId, inboundOrderId: orderId, itemId: row.itemId, batchId, quantity: quantity.toString(), unitCost: unitCost.toString(), amount: quantity.mul(unitCost).toFixed(2) },
+        });
+        await transaction.inventoryLedgerEntry.create({
+          data: { id: ledgerId, warehouseId: row.warehouseId, itemId: row.itemId, batchId, type: "OPENING_BALANCE", quantity: quantity.toString(), unitCost: unitCost.toString(), amount: quantity.mul(unitCost).toFixed(2), referenceType: "OPENING_STOCK", referenceId: orderId, occurredAt: receivedAt },
+        });
+      }
+    });
+
+    return { orderId, batchIds: rows.map(({ batchId }) => batchId) };
+  }
 }

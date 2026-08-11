@@ -7,6 +7,7 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { OutboundAllocator } from "../../../apps/api/src/application/inventory/outbound-allocator.js";
+import { OpeningStockService } from "../../../apps/api/src/application/inventory/opening-stock-service.js";
 import { OutboundService } from "../../../apps/api/src/application/inventory/outbound-service.js";
 import { ReturnService } from "../../../apps/api/src/application/inventory/return-service.js";
 import { StocktakeService } from "../../../apps/api/src/application/inventory/stocktake-service.js";
@@ -52,6 +53,7 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
       await migrationClient.query(`SET search_path TO "${schemaName}"`);
       await migrationClient.query(readFileSync(resolve(process.cwd(), "prisma/migrations/00000000000000_init/migration.sql"), "utf8"));
       await migrationClient.query(readFileSync(resolve(process.cwd(), "prisma/migrations/20260811163000_production_persistence/migration.sql"), "utf8"));
+      await migrationClient.query(readFileSync(resolve(process.cwd(), "prisma/migrations/20260811171500_stocktake_quantity_snapshots/migration.sql"), "utf8"));
     } finally {
       migrationClient.release();
       await migrationPool.end();
@@ -81,6 +83,7 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     await prisma.outboundAllocation.deleteMany();
     await prisma.outboundOrder.deleteMany();
     await prisma.inboundLine.deleteMany();
+    await prisma.inboundOrder.deleteMany();
     await prisma.stockBalance.deleteMany();
     await prisma.procurementBatch.deleteMany();
     await prisma.approvalLine.deleteMany();
@@ -150,6 +153,13 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     });
   }
 
+  function openingStockService() {
+    return new OpeningStockService(new PrismaInventoryEntryStore(prisma), {
+      warehouseService: { list: () => prisma.warehouse.findMany() },
+      itemService: { list: () => prisma.item.findMany() },
+    });
+  }
+
   it("creates inbound/opening orders, lines, batches, balances, and ledger entries atomically", async () => {
     const inbound = await recordStock({ batchNo: "TASK3-INBOUND" });
     const opening = await recordStock({ batchNo: "TASK3-OPENING", source: "OPENING_STOCK" });
@@ -174,6 +184,47 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     await expect(recordStock({ batchNo: "TASK3-INBOUND" })).rejects.toThrow();
     await expect(prisma.inboundOrder.count()).resolves.toBe(orderCount);
     await expect(prisma.inventoryLedgerEntry.count()).resolves.toBe(ledgerCount);
+  });
+
+  it("rolls back the complete opening-stock request when row two conflicts", async () => {
+    await recordStock({ batchNo: "TASK3-OPENING-DUPLICATE" });
+    const before = {
+      orders: await prisma.inboundOrder.count(),
+      batches: await prisma.procurementBatch.count(),
+      balances: await prisma.stockBalance.count(),
+      ledger: await prisma.inventoryLedgerEntry.count(),
+    };
+
+    await expect(openingStockService().create({
+      verifiedBy: "task3-operator",
+      rows: [
+        { warehouseId: "warehouse-1", itemId, batchNo: "TASK3-OPENING-ROW-1", quantity: "4", unitCost: "2" },
+        { warehouseId: "warehouse-1", itemId, batchNo: "TASK3-OPENING-DUPLICATE", quantity: "6", unitCost: "3" },
+      ],
+    })).rejects.toThrow();
+
+    await expect(prisma.inboundOrder.count()).resolves.toBe(before.orders);
+    await expect(prisma.procurementBatch.count()).resolves.toBe(before.batches);
+    await expect(prisma.stockBalance.count()).resolves.toBe(before.balances);
+    await expect(prisma.inventoryLedgerEntry.count()).resolves.toBe(before.ledger);
+    await expect(prisma.procurementBatch.findFirst({ where: { batchNo: "TASK3-OPENING-ROW-1" } })).resolves.toBeNull();
+  });
+
+  it("uses one order and reference for a complete opening-stock submission", async () => {
+    const result = await openingStockService().create({
+      verifiedBy: "task3-operator",
+      rows: [
+        { warehouseId: "warehouse-1", itemId, batchNo: "TASK3-OPENING-A", quantity: "4", unitCost: "2" },
+        { warehouseId: "warehouse-1", itemId, batchNo: "TASK3-OPENING-B", quantity: "6", unitCost: "3" },
+      ],
+    });
+
+    const orders = await prisma.inboundOrder.findMany({ where: { source: "OPENING_STOCK" }, include: { lines: true } });
+    expect(result.batchIds).toHaveLength(2);
+    expect(orders).toHaveLength(1);
+    expect(orders[0]!.lines).toHaveLength(2);
+    const ledger = await prisma.inventoryLedgerEntry.findMany({ where: { type: "OPENING_BALANCE" } });
+    expect(new Set(ledger.map((entry) => entry.referenceId))).toEqual(new Set([orders[0]!.id]));
   });
 
   it("commits outbound stock, allocation, ledger, and approval closure in one transaction", async () => {
@@ -304,6 +355,21 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     const stocktakeLedger = await prisma.inventoryLedgerEntry.findFirstOrThrow({ where: { referenceId: result.stocktakeId } });
     expect({ type: stocktakeLedger.type, quantity: stocktakeLedger.quantity.toString() }).toEqual({ type: "STOCKTAKE_ADJUSTMENT", quantity: "-2" });
 
+    await new TransferService(new PrismaMovementStore(prisma)).complete({
+      itemId,
+      batchId: stock.batchId,
+      sourceWarehouseId: "warehouse-1",
+      destinationWarehouseId: "warehouse-2",
+      quantity: "1",
+      reason: "movement after stocktake",
+    });
+    const immutableQuantities = await prisma.$queryRawUnsafe<Array<{ bookQuantity: string; actualQuantity: string }>>(
+      `SELECT "bookQuantity"::text, "actualQuantity"::text FROM "${schemaName}"."StockAdjustment" WHERE "stocktakeId" = $1`,
+      result.stocktakeId,
+    );
+    expect(immutableQuantities).toEqual([{ bookQuantity: "10.0000", actualQuantity: "8.0000" }]);
+    expect((await prisma.stockBalance.findFirstOrThrow({ where: { warehouseId: "warehouse-1", batchId: stock.batchId } })).remainingQuantity.toString()).toBe("7");
+
     const closed = await new PeriodCloseService(periodStore).close({
       period: createAccountingPeriod({ code: "2026-08" }),
       pendingOutboundCount: 0,
@@ -312,6 +378,52 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     expect(closed.status).toBe("CLOSED");
     await expect(new PrismaAccountingPeriodStore(prisma).get("2026-08")).resolves.toMatchObject({ status: "CLOSED" });
     await expect(recordStock({ batchNo: "TASK3-CLOSED" })).rejects.toThrow("closed period: 2026-08");
+  });
+
+  it("blocks every Prisma inventory mutation path after the current period is closed", async () => {
+    const stock = await recordStock({ batchNo: "TASK3-CLOSED-PATHS", quantity: "20" });
+    const movementStore = new PrismaMovementStore(prisma);
+    const outboundService = new OutboundService(new PrismaOutboundStore(prisma));
+    const issuedApproval = await createApproval("2");
+    const issued = await outboundService.confirm({
+      approvalId: issuedApproval.id,
+      allocations: [{ approvalLineId: issuedApproval.lines[0]!.id, warehouseId: "warehouse-1", batchId: stock.batchId, quantity: "2" }],
+    });
+    const allocation = await prisma.outboundAllocation.findFirstOrThrow({ where: { outboundOrderId: issued.id } });
+    const confirmApproval = await createApproval("1");
+    const cancelApproval = await createApproval("1");
+    const periodCode = new Date().toISOString().slice(0, 7);
+    await prisma.accountingPeriod.upsert({
+      where: { periodCode },
+      update: { status: "CLOSED", closedAt: new Date() },
+      create: { periodCode, status: "CLOSED", closedAt: new Date() },
+    });
+    const before = {
+      balance: (await prisma.stockBalance.findFirstOrThrow({ where: { warehouseId: "warehouse-1", batchId: stock.batchId } })).remainingQuantity.toString(),
+      outboundOrders: await prisma.outboundOrder.count(),
+      transfers: await prisma.transferOrder.count(),
+      returns: await prisma.returnOrder.count(),
+      stocktakes: await prisma.stocktake.count(),
+      ledger: await prisma.inventoryLedgerEntry.count(),
+    };
+
+    await expect(outboundService.confirm({
+      approvalId: confirmApproval.id,
+      allocations: [{ approvalLineId: confirmApproval.lines[0]!.id, warehouseId: "warehouse-1", batchId: stock.batchId, quantity: "1" }],
+    })).rejects.toThrow(`closed period: ${periodCode}`);
+    await expect(outboundService.cancelBeforeIssue({ approvalId: cancelApproval.id, reason: "cancelled" })).rejects.toThrow(`closed period: ${periodCode}`);
+    await expect(new TransferService(movementStore).complete({ itemId, batchId: stock.batchId, sourceWarehouseId: "warehouse-1", destinationWarehouseId: "warehouse-2", quantity: "1", reason: "closed transfer" })).rejects.toThrow(`closed period: ${periodCode}`);
+    await expect(new ReturnService(movementStore).create({ outboundAllocationId: allocation.id, quantity: "1", reason: "closed return" })).rejects.toThrow(`closed period: ${periodCode}`);
+    await expect(new StocktakeService(new PrismaStocktakeStore(prisma), new PrismaAccountingPeriodStore(prisma)).record({ periodCode, operatorId: "task3-operator", warehouseId: "warehouse-1", itemId, batchId: stock.batchId, bookQuantity: before.balance, actualQuantity: "17", reason: "closed stocktake" })).rejects.toThrow(`closed period: ${periodCode}`);
+
+    expect((await prisma.stockBalance.findFirstOrThrow({ where: { warehouseId: "warehouse-1", batchId: stock.batchId } })).remainingQuantity.toString()).toBe(before.balance);
+    await expect(prisma.outboundOrder.count()).resolves.toBe(before.outboundOrders);
+    await expect(prisma.transferOrder.count()).resolves.toBe(before.transfers);
+    await expect(prisma.returnOrder.count()).resolves.toBe(before.returns);
+    await expect(prisma.stocktake.count()).resolves.toBe(before.stocktakes);
+    await expect(prisma.inventoryLedgerEntry.count()).resolves.toBe(before.ledger);
+    await expect(prisma.approvalRequest.findUniqueOrThrow({ where: { id: confirmApproval.id } })).resolves.toMatchObject({ outboundStatus: "PENDING_OUTBOUND" });
+    await expect(prisma.approvalRequest.findUniqueOrThrow({ where: { id: cancelApproval.id } })).resolves.toMatchObject({ outboundStatus: "PENDING_OUTBOUND" });
   });
 
   it("upserts approval lines and sync attempts without reopening a closed approval", async () => {

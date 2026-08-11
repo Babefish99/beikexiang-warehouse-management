@@ -29,7 +29,7 @@ export interface StoredBatch {
   purchaser?: string;
 }
 
-interface StockEntryInput extends InboundInput {
+export interface StockEntryInput extends InboundInput {
   ledgerType: "INBOUND" | "OPENING_BALANCE";
   referenceType: "INBOUND_ORDER" | "OPENING_STOCK";
   referenceId: string;
@@ -37,8 +37,16 @@ interface StockEntryInput extends InboundInput {
   operatorId?: string;
 }
 
+export interface OpeningStockEntryInput {
+  operatorId: string;
+  referenceId: string;
+  occurredAt: string;
+  rows: InboundInput[];
+}
+
 export interface InventoryEntryStore {
   recordStockEntry(input: StockEntryInput): Promise<{ orderId: string; batchId: string }>;
+  recordOpeningStock(input: OpeningStockEntryInput): Promise<{ orderId: string; batchIds: string[] }>;
 }
 
 export interface ActiveMasterDataLookup {
@@ -87,6 +95,35 @@ export class InMemoryInventoryEntryStore implements InventoryEntryStore {
     this.state.ledger.push({ id: crypto.randomUUID(), warehouseId: input.warehouseId, itemId: input.itemId, batchId, type: input.ledgerType, quantity: quantity.toString(), unitCost: unitCost.toString(), amount: quantity.mul(unitCost).toFixed(2), referenceType: input.referenceType, referenceId: input.referenceId, occurredAt: input.occurredAt });
     this.options.onRecordStockEntry?.({ itemId: input.itemId });
     return { orderId, batchId };
+  }
+
+  async recordOpeningStock(input: OpeningStockEntryInput): Promise<{ orderId: string; batchIds: string[] }> {
+    const existingBatchKeys = new Set(
+      [...this.state.batches.values()].map((batch) => `${batch.warehouseId}\u0000${batch.itemId}\u0000${batch.batchNo}`),
+    );
+    const requestBatchKeys = new Set<string>();
+    for (const row of input.rows) {
+      const key = `${row.warehouseId}\u0000${row.itemId}\u0000${row.batchNo}`;
+      if (existingBatchKeys.has(key) || requestBatchKeys.has(key)) throw new Error("batch number already exists");
+      requestBatchKeys.add(key);
+    }
+
+    const orderId = input.referenceId;
+    const drafts = input.rows.map((row, index) => {
+      const batchId = `batch-${String(this.state.stockEntrySequence + index).padStart(4, "0")}`;
+      const quantity = decimal(row.quantity);
+      const unitCost = decimal(row.unitCost);
+      return { row, batchId, quantity, unitCost };
+    });
+
+    for (const { row, batchId, quantity, unitCost } of drafts) {
+      this.state.batches.set(batchId, { id: batchId, warehouseId: row.warehouseId, itemId: row.itemId, batchNo: row.batchNo, quantity: row.quantity, remainingQuantity: row.quantity, unitCost: row.unitCost, purchasedAt: row.purchasedAt, productionDate: row.productionDate, expiryDate: row.expiryDate, purchaser: row.purchaser });
+      this.state.balances.set(inventoryBalanceKey(row.warehouseId, batchId), { warehouseId: row.warehouseId, itemId: row.itemId, batchId, remainingQuantity: row.quantity, unitCost: row.unitCost });
+      this.state.ledger.push({ id: crypto.randomUUID(), warehouseId: row.warehouseId, itemId: row.itemId, batchId, type: "OPENING_BALANCE", quantity: quantity.toString(), unitCost: unitCost.toString(), amount: quantity.mul(unitCost).toFixed(2), referenceType: "OPENING_STOCK", referenceId: orderId, occurredAt: input.occurredAt });
+      this.options.onRecordStockEntry?.({ itemId: row.itemId });
+    }
+    this.state.stockEntrySequence += drafts.length;
+    return { orderId, batchIds: drafts.map(({ batchId }) => batchId) };
   }
 
   batches(): StoredBatch[] { return [...this.state.batches.values()].map((batch) => ({ ...batch })); }
