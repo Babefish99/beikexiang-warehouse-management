@@ -138,9 +138,11 @@ export class ApprovalSyncService {
     if (!/^\d{8,32}$/.test(spNo)) throw new Error("enterprise WeChat approval number is invalid");
     const attemptNo = await this.dependencies.store.nextAttemptNo(spNo);
     let detail: WeComApprovalPayload | undefined;
+    let retainFailurePayload = true;
     try {
       detail = await this.dependencies.gateway.fetchDetail(spNo);
       if (this.dependencies.approvalTemplateId !== undefined && detail.template_id !== this.dependencies.approvalTemplateId) {
+        retainFailurePayload = false;
         throw new Error("enterprise WeChat approval template is not allowed");
       }
       const parsed = await this.dependencies.parser.parse(detail);
@@ -161,7 +163,9 @@ export class ApprovalSyncService {
       }
       return { approvalId: record.id, created: !existing, status: parsed.status === "APPROVED" ? record.outboundStatus : parsed.status };
     } catch (error) {
-      const payload = options.callbackPayload === undefined ? detail : { callback: options.callbackPayload, detail };
+      const payload = retainFailurePayload
+        ? options.callbackPayload === undefined ? detail : { callback: options.callbackPayload, detail }
+        : undefined;
       await this.dependencies.store.recordSyncAttempt({ weComSpNo: spNo, status: "FAILED", attemptNo, payload, error: error instanceof Error ? error.message : "approval synchronization failed" });
       throw error;
     }

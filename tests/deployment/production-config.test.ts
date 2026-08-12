@@ -143,6 +143,7 @@ describe("production deployment configuration", () => {
   });
 
   it("documents placeholder-only staging and HTTPS production settings", async () => {
+    const compose = await readText("docker-compose.prod.yml");
     const example = await readText("deploy/.env.production.example");
 
     expect(example).toContain("SITE_ADDRESS=http://203.0.113.10");
@@ -154,6 +155,7 @@ describe("production deployment configuration", () => {
     expect(example).toContain("API_BASE_URL=https://warehouse.example.com");
     expect(example).toContain("WE_COM_ADMIN_IDS=replace-with-production-admin-userid");
     expect(example).toContain("WE_COM_APPROVAL_TEMPLATE_ID=replace-with-approved-template-id");
+    expect(compose).toContain("WE_COM_APPROVAL_TEMPLATE_ID: ${WE_COM_APPROVAL_TEMPLATE_ID:-}");
     expect(example).not.toMatch(/106\.14\.224\.213|i-uf6ig2xdl67rqerk67l1/);
   });
 

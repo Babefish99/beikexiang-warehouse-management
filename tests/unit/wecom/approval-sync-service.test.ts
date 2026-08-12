@@ -81,7 +81,8 @@ describe("approval synchronization service", () => {
 
     expect(parser.parse).not.toHaveBeenCalled();
     expect(store.records()).toEqual([]);
-    expect(store.attempts()).toMatchObject([{ status: "FAILED", payload: detail }]);
+    expect(store.attempts()).toMatchObject([{ status: "FAILED" }]);
+    expect(store.attempts()[0]?.payload).toBeUndefined();
   });
 
   it("applies the template guard when a callback is synchronized", async () => {
@@ -97,6 +98,7 @@ describe("approval synchronization service", () => {
 
     expect(parser.parse).not.toHaveBeenCalled();
     expect(store.records()).toEqual([]);
+    expect(store.attempts()[0]?.payload).toBeUndefined();
   });
 
   it("applies the template guard when an administrator re-synchronizes", async () => {
