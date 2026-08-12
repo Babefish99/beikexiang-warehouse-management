@@ -35,6 +35,7 @@ export interface ServerConfig {
   sessionSecret: string;
   localAuthEnabled: boolean;
   nodeEnv: string;
+  approvalTemplateId?: string;
 }
 
 export interface CoreEntityRecord {
@@ -124,6 +125,7 @@ const PRODUCTION_WECOM_FIELDS = [
   "WE_COM_SECRET",
   "WE_COM_CALLBACK_TOKEN",
   "WE_COM_ENCODING_AES_KEY",
+  "WE_COM_APPROVAL_TEMPLATE_ID",
 ] as const;
 
 const KNOWN_SESSION_SECRET_DEFAULTS = new Set([
@@ -161,6 +163,7 @@ export function readServerConfig(env: Record<string, string | undefined>): Serve
   const webBaseUrl = env.WEB_BASE_URL?.trim() || "http://localhost:5174";
   const sessionSecret = env.SESSION_SECRET?.trim() || "local-development-session-secret";
   const databaseUrl = env.DATABASE_URL?.trim() || undefined;
+  const approvalTemplateId = env.WE_COM_APPROVAL_TEMPLATE_ID?.trim() || undefined;
   const localAuthEnabled = isLocalAuthEnabled({
     bypassEnabled: env.LOCAL_AUTH_BYPASS === "true",
     nodeEnv,
@@ -211,6 +214,7 @@ export function readServerConfig(env: Record<string, string | undefined>): Serve
     sessionSecret,
     localAuthEnabled,
     nodeEnv,
+    approvalTemplateId,
   };
 }
 

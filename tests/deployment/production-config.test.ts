@@ -153,6 +153,7 @@ describe("production deployment configuration", () => {
     expect(example).toContain("NODE_ENV=production");
     expect(example).toContain("API_BASE_URL=https://warehouse.example.com");
     expect(example).toContain("WE_COM_ADMIN_IDS=replace-with-production-admin-userid");
+    expect(example).toContain("WE_COM_APPROVAL_TEMPLATE_ID=replace-with-approved-template-id");
     expect(example).not.toMatch(/106\.14\.224\.213|i-uf6ig2xdl67rqerk67l1/);
   });
 

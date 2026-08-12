@@ -132,7 +132,7 @@ function toApprovalSyncRecord(record: InventoryApprovalState): ApprovalSyncRecor
 }
 
 export class ApprovalSyncService {
-  constructor(private readonly dependencies: { gateway: ApprovalGateway; parser: ApprovalDetailParser; store: ApprovalSyncStore }) {}
+  constructor(private readonly dependencies: { gateway: ApprovalGateway; parser: ApprovalDetailParser; store: ApprovalSyncStore; approvalTemplateId?: string }) {}
 
   async sync(spNo: string, options: { callbackPayload?: unknown } = {}): Promise<{ approvalId: string; created: boolean; status: string }> {
     if (!/^\d{8,32}$/.test(spNo)) throw new Error("enterprise WeChat approval number is invalid");
@@ -140,6 +140,9 @@ export class ApprovalSyncService {
     let detail: WeComApprovalPayload | undefined;
     try {
       detail = await this.dependencies.gateway.fetchDetail(spNo);
+      if (this.dependencies.approvalTemplateId !== undefined && detail.template_id !== this.dependencies.approvalTemplateId) {
+        throw new Error("enterprise WeChat approval template is not allowed");
+      }
       const parsed = await this.dependencies.parser.parse(detail);
       const existing = await this.dependencies.store.findBySpNo(spNo);
       const record: ApprovalSyncRecord = {

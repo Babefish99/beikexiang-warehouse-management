@@ -156,6 +156,7 @@ export function buildServer(options: BuildServerOptions = {}) {
       },
     },
     store: inventoryPersistence.approvalSyncStore,
+    approvalTemplateId: config.approvalTemplateId,
   });
   const signatureVerifier = new WeComSignatureVerifier({
     token: process.env.WE_COM_CALLBACK_TOKEN ?? "",

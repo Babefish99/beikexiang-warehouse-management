@@ -4,7 +4,7 @@ import { HttpApprovalGateway } from "../../../apps/api/src/infrastructure/wecom/
 
 describe("enterprise WeChat approval gateway", () => {
   it("gets a server-side access token and fetches approval detail", async () => {
-    const detail = { sp_no: "202607230021", sp_status: 2, apply_time: 1784773140, applyer: { userid: "wx-1", name: "申请人" }, contents: [] };
+    const detail = { sp_no: "202607230021", template_id: "tpl-approved-requisition", sp_status: 2, apply_time: 1784773140, applyer: { userid: "wx-1", name: "申请人" }, contents: [] };
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "access-token" }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ info: detail }), { status: 200 }));

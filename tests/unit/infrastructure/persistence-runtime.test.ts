@@ -24,6 +24,7 @@ describe("server runtime configuration", () => {
     WE_COM_ADMIN_IDS: "warehouse-admin",
     WE_COM_CALLBACK_TOKEN: "callback-token",
     WE_COM_ENCODING_AES_KEY: validEncodingAesKey,
+    WE_COM_APPROVAL_TEMPLATE_ID: "tpl-approved-requisition",
   };
 
   it("defaults to in-memory persistence outside production", () => {
@@ -69,7 +70,7 @@ describe("server runtime configuration", () => {
   });
 
   it("requires the complete production Enterprise WeChat configuration", () => {
-    for (const field of ["WE_COM_CORP_ID", "WE_COM_AGENT_ID", "WE_COM_SECRET", "WE_COM_CALLBACK_TOKEN", "WE_COM_ENCODING_AES_KEY"] as const) {
+    for (const field of ["WE_COM_CORP_ID", "WE_COM_AGENT_ID", "WE_COM_SECRET", "WE_COM_CALLBACK_TOKEN", "WE_COM_ENCODING_AES_KEY", "WE_COM_APPROVAL_TEMPLATE_ID"] as const) {
       expect(() => readServerConfig({ ...productionEnvironment, [field]: "" })).toThrowError(
         `production Enterprise WeChat configuration is incomplete: ${field}`,
       );
@@ -77,7 +78,7 @@ describe("server runtime configuration", () => {
   });
 
   it("rejects Enterprise WeChat placeholder values in production", () => {
-    for (const field of ["WE_COM_CORP_ID", "WE_COM_AGENT_ID", "WE_COM_SECRET", "WE_COM_CALLBACK_TOKEN", "WE_COM_ENCODING_AES_KEY"] as const) {
+    for (const field of ["WE_COM_CORP_ID", "WE_COM_AGENT_ID", "WE_COM_SECRET", "WE_COM_CALLBACK_TOKEN", "WE_COM_ENCODING_AES_KEY", "WE_COM_APPROVAL_TEMPLATE_ID"] as const) {
       expect(() => readServerConfig({ ...productionEnvironment, [field]: `replace-with-${field.toLowerCase()}` })).toThrowError(
         `production Enterprise WeChat configuration is incomplete: ${field}`,
       );
