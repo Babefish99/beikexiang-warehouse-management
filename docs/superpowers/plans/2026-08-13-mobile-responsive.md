@@ -97,7 +97,7 @@
 - Produces: `isMobileNavigationActive(pathname: string, item: MobileNavigationItem): boolean`。
 - Produces: `useMobileViewport(): boolean`，首次读取 `matchMedia().matches` 并订阅 `change`。
 
-- [ ] **Step 1: 准备 Node 24 和 Prisma Client，并记录当前非 Docker 基线**
+- [x] **Step 1: 准备 Node 24 和 Prisma Client，并记录当前非 Docker 基线**
 
 Run in PowerShell:
 
@@ -114,7 +114,7 @@ corepack pnpm typecheck
 
 Expected: Node 输出 `v24` 或更高；Prisma 生成成功；类型检查退出码为 0。若类型检查失败，先记录真实基线并停止功能修改，使用 `superpowers:systematic-debugging` 处理。
 
-- [ ] **Step 2: 写角色导航失败测试**
+- [x] **Step 2: 写角色导航失败测试**
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -138,13 +138,13 @@ describe("mobile navigation", () => {
 });
 ```
 
-- [ ] **Step 3: 运行测试确认 RED**
+- [x] **Step 3: 运行测试确认 RED**
 
 Run: `corepack pnpm vitest run tests/unit/web/mobile-navigation.test.ts`
 
 Expected: FAIL，原因是 `mobile-navigation.ts` 尚不存在。
 
-- [ ] **Step 4: 实现最小导航配置与断点 hook**
+- [x] **Step 4: 实现最小导航配置与断点 hook**
 
 ```ts
 // apps/web/src/features/mobile/mobile-navigation.ts
@@ -199,7 +199,7 @@ export function useMobileViewport(): boolean {
 }
 ```
 
-- [ ] **Step 5: 运行 GREEN 与类型检查**
+- [x] **Step 5: 运行 GREEN 与类型检查**
 
 Run:
 
@@ -210,7 +210,7 @@ corepack pnpm --filter @warehouse/web typecheck
 
 Expected: 3 tests PASS；web 类型检查退出码 0。
 
-- [ ] **Step 6: 提交接缝**
+- [x] **Step 6: 提交接缝**
 
 ```powershell
 git add apps/web/src/features/mobile/mobile-navigation.ts apps/web/src/features/mobile/use-mobile-viewport.ts tests/unit/web/mobile-navigation.test.ts
@@ -237,7 +237,7 @@ git commit -m "test: define mobile navigation boundary"
 - Produces: `MobileMoreSheet({ open, user, loginChannel, onClose })`。
 - Produces: `ModalDialog({ open, title, children, confirmLabel?, dangerous?, busy?, onConfirm?, onClose })`；`MobileMoreSheet` 复用它的 dismiss-only 模式，后续业务弹窗复用确认模式。
 
-- [ ] **Step 1: 写移动壳层 E2E 失败测试**
+- [x] **Step 1: 写移动壳层 E2E 失败测试**
 
 ```ts
 import { expect, test } from "@playwright/test";
@@ -286,13 +286,13 @@ export async function loginAs(page: Page, returnTo: string, role: "ADMIN" | "FIN
 }
 ```
 
-- [ ] **Step 2: 运行测试确认 RED**
+- [x] **Step 2: 运行测试确认 RED**
 
 Run: `corepack pnpm playwright test tests/e2e/mobile/mobile-shell.spec.ts`
 
 Expected: FAIL，页面没有“手机任务导航”。
 
-- [ ] **Step 3: 实现移动导航与更多面板**
+- [x] **Step 3: 实现移动导航与更多面板**
 
 `MobileBottomNav` 使用 `Home`、`Search`、`PackagePlus`、`PackageCheck`、`BarChart3`、`Ellipsis`，统一传入 `size={18}`、`strokeWidth={1.8}`；链接最小高度 `56px`，外层附加 `padding-bottom: env(safe-area-inset-bottom)`。“更多”是 button，不伪造 URL。
 
@@ -300,7 +300,7 @@ Expected: FAIL，页面没有“手机任务导航”。
 
 `AppShell` 在 `useMobileViewport()` 为 true 时挂载 `MobileBottomNav`，隐藏桌面侧边栏与汉堡抽屉；为 false 时保留原侧边栏和桌面 topbar。不要同时渲染移动抽屉和底部导航。
 
-- [ ] **Step 4: 增加动态视口、安全区与触控 CSS**
+- [x] **Step 4: 增加动态视口、安全区与触控 CSS**
 
 ```css
 :root { --mobile-nav-height: 56px; }
@@ -326,7 +326,7 @@ Expected: FAIL，页面没有“手机任务导航”。
 }
 ```
 
-- [ ] **Step 5: 运行 320/390/430/820 和桌面回归**
+- [x] **Step 5: 运行 320/390/430/820 和桌面回归**
 
 Run:
 
@@ -338,7 +338,7 @@ corepack pnpm --filter @warehouse/web typecheck
 
 Expected: 移动测试与现有桌面壳层测试 PASS；类型检查退出码 0。
 
-- [ ] **Step 6: 提交移动壳层**
+- [x] **Step 6: 提交移动壳层**
 
 ```powershell
 git add apps/web/src/features/mobile apps/web/src/components/ModalDialog.tsx apps/web/src/components/AppShell.tsx apps/web/src/layouts/AdminLayout.tsx apps/web/src/styles.css tests/e2e/mobile/mobile-test-helpers.ts tests/e2e/mobile/mobile-shell.spec.ts
@@ -366,7 +366,7 @@ git commit -m "feat: add role-aware mobile application shell"
 - Produces: `InventoryQueryPage({ warehouseId, role })`，role 仅允许 `ADMIN | FINANCE`。
 - Produces: `DashboardPage({ cards, loading, role })`；同一数据输入下选择移动或桌面呈现。
 
-- [ ] **Step 1: 写查询页面失败测试**
+- [x] **Step 1: 写查询页面失败测试**
 
 ```ts
 import { loginAs } from "./mobile-test-helpers";
@@ -389,13 +389,13 @@ test("inventory search renders warehouse and batch cards with cost for admin", a
 });
 ```
 
-- [ ] **Step 2: 运行确认 RED**
+- [x] **Step 2: 运行确认 RED**
 
 Run: `corepack pnpm playwright test tests/e2e/mobile/inventory-query.spec.ts`
 
 Expected: FAIL，`/admin/inventory` 尚未分发 `InventoryQueryPage`。
 
-- [ ] **Step 3: 提取库存客户端并实现语义查询页**
+- [x] **Step 3: 提取库存客户端并实现语义查询页**
 
 ```ts
 export async function searchInventory(input: {
@@ -419,13 +419,13 @@ export async function searchInventory(input: {
 
 `App` 的财务分发顺序固定为：`/admin/inventory` 渲染 `InventoryQueryPage`，`/admin/reports` 渲染 `ReportsPage`，其他路径才渲染只读能力说明。管理员在 `/admin/inventory` 渲染相同查询页，避免现有财务 fallback 提前截断查询路由。
 
-- [ ] **Step 4: 从 App 提取首页并实现已确认移动层级**
+- [x] **Step 4: 从 App 提取首页并实现已确认移动层级**
 
 移动首页只呈现：仓库选择、问候、统一搜索、同一白色面板内的“手机入库/实际出库”、紧凑“今日概览”和轻提示。图标统一 `18px`，正文标签 `13px`，不复用当前 26/28px 大图标。`App` 的 dashboard 请求在现有四个请求之外增加一次 `/admin/notifications`：`PENDING_OUTBOUND` 映射待出库数、`LOW_STOCK` 条目数映射低库存、现有 active items 映射库存品类、通知数组长度映射通知数；Task 6 再把这次读取收敛到统一任务 hook。桌面首页保留原四指标、快捷入口和运行状态。
 
 财务首页只显示查询与报表快捷入口，不发起 `/admin/items`、`/admin/outbound/pending` 等管理员请求。
 
-- [ ] **Step 5: 运行查询、首页与桌面回归**
+- [x] **Step 5: 运行查询、首页与桌面回归**
 
 Run:
 
@@ -437,7 +437,7 @@ corepack pnpm --filter @warehouse/web typecheck
 
 Expected: 新移动查询/首页 PASS；原桌面 dashboard/workspace 工具 PASS；类型检查退出码 0。
 
-- [ ] **Step 6: 提交首页与查询**
+- [x] **Step 6: 提交首页与查询**
 
 ```powershell
 git add apps/web/src/features/inventory apps/web/src/pages/InventoryQueryPage.tsx apps/web/src/pages/DashboardPage.tsx apps/web/src/App.tsx apps/web/src/components/AppShell.tsx apps/web/src/styles.css tests/e2e/mobile/inventory-query.spec.ts tests/e2e/navigation/dashboard.spec.ts tests/e2e/navigation/workspace-tools.spec.ts
@@ -464,7 +464,7 @@ git commit -m "feat: add mobile inventory search and dashboard"
 - Produces: `InboundDraft`、`createInboundDraft(today)`、`calculateInboundAmount()`、`validateInboundDraft()`、`reconcileInboundDraft()`、`resetInboundAfterSuccess()`。
 - Consumes: `ModalDialog` 和 `useMobileViewport()`。
 
-- [ ] **Step 1: 写草稿和入库规则失败测试**
+- [x] **Step 1: 写草稿和入库规则失败测试**
 
 ```ts
 const validInbound = {
@@ -521,13 +521,13 @@ describe("session draft", () => {
 });
 ```
 
-- [ ] **Step 2: 运行确认 RED**
+- [x] **Step 2: 运行确认 RED**
 
 Run: `corepack pnpm vitest run tests/unit/web/session-draft.test.ts tests/unit/web/inbound-form.test.ts`
 
 Expected: FAIL，两个 feature 文件尚不存在。
 
-- [ ] **Step 3: 实现通用草稿和精确金额纯函数**
+- [x] **Step 3: 实现通用草稿和精确金额纯函数**
 
 ```ts
 export type DraftEnvelope<T> = { version: number; userId: string; value: T };
@@ -546,7 +546,7 @@ export function readSessionDraft<T>(storage: Storage, key: string, userId: strin
 
 `reconcileInboundDraft(draft, { warehouseIds, itemIds })` 在标准数据加载完成后检查恢复值：失效仓库只清空 `warehouseId`，失效物品只清空 `itemId`，其他字段原样保留，并返回 `staleFields` 供页面显示“标准数据已变化，请重新选择”。
 
-- [ ] **Step 4: 写入库交互 E2E 失败测试**
+- [x] **Step 4: 写入库交互 E2E 失败测试**
 
 测试必须覆盖：390×844 单页分组无横向滚动；预计金额；提交前摘要弹窗；失败保留字段；刷新恢复；主动放弃清草稿；成功后只保留仓库、采购日期、采购人；按钮提交中禁用。
 
@@ -554,7 +554,7 @@ Run: `corepack pnpm playwright test tests/e2e/mobile/inbound.spec.ts`
 
 Expected: FAIL，现有页面没有分组、确认弹窗和草稿恢复。
 
-- [ ] **Step 5: 重构 InboundPage 为共享控制器与单一呈现树**
+- [x] **Step 5: 重构 InboundPage 为共享控制器与单一呈现树**
 
 `InboundPage` 新增必需 prop `userId`。初始化时从 `warehouse.inbound.v1.<userId>` 恢复，字段变化后写入 sessionStorage；成功、主动放弃时清除。移动端分为“仓库与物品”“批次与采购信息”“数量与预计金额”三组；桌面端保留当前网格但使用同一 `form/errors/submitting` 状态。
 
@@ -569,7 +569,7 @@ setForm(reconciled.draft);
 setStaleFields(reconciled.staleFields);
 ```
 
-- [ ] **Step 6: 运行 RED→GREEN 验证**
+- [x] **Step 6: 运行 RED→GREEN 验证**
 
 Run:
 
@@ -582,7 +582,7 @@ corepack pnpm --filter @warehouse/web typecheck
 
 Expected: 纯规则、移动入库和既有 `tests/e2e/admin/inbound.spec.ts` 回归 PASS；类型检查退出码 0。
 
-- [ ] **Step 7: 提交手机入库**
+- [x] **Step 7: 提交手机入库**
 
 ```powershell
 git add apps/web/src/features/drafts apps/web/src/features/inbound apps/web/src/pages/InboundPage.tsx apps/web/src/App.tsx apps/web/src/styles.css tests/unit/web/session-draft.test.ts tests/unit/web/inbound-form.test.ts tests/e2e/mobile/inbound.spec.ts
@@ -611,7 +611,7 @@ git commit -m "feat: add recoverable mobile inbound form"
 - Produces: `MobileOutboundFlow` callbacks：`onReloadOptions`、`onConfirm`、`onCancel`、`onCompleted`。
 - Consumes: `session-draft.ts`、`ModalDialog`、`useMobileViewport()`。
 
-- [ ] **Step 1: 写四步状态与分配规则失败测试**
+- [x] **Step 1: 写四步状态与分配规则失败测试**
 
 ```ts
 describe("outbound workflow", () => {
@@ -657,13 +657,13 @@ describe("outbound workflow", () => {
 });
 ```
 
-- [ ] **Step 2: 运行确认 RED**
+- [x] **Step 2: 运行确认 RED**
 
 Run: `corepack pnpm vitest run tests/unit/web/outbound-workflow.test.ts`
 
 Expected: FAIL，`outbound-workflow.ts` 尚不存在。
 
-- [ ] **Step 3: 实现纯工作流和审批单草稿键**
+- [x] **Step 3: 实现纯工作流和审批单草稿键**
 
 ```ts
 export function outboundDraftKey(userId: string, approvalId: string): string {
@@ -683,7 +683,7 @@ export function reconcileBatchOptions(draft: OutboundDraft, options: readonly Ba
 
 分配校验逐审批行比较合计，不允许超过审批数量；允许合计为 0，但复核步骤要求原因。金额只用 Decimal 预览，最终值仍取服务端响应。
 
-- [ ] **Step 4: 写移动出库与取消 E2E 失败测试**
+- [x] **Step 4: 写移动出库与取消 E2E 失败测试**
 
 覆盖：选择一张待办；每个物品至少一条分配；新增跨仓/跨批次；步骤返回不丢失；少出原因；刷新恢复；提交前重新 GET options；库存变化停留复核并标记失效行；二次确认；重复点击只发一个 POST；成功清草稿并从待办消失；取消必须填原因且二次确认。
 
@@ -691,7 +691,7 @@ Run: `corepack pnpm playwright test tests/e2e/mobile/outbound.spec.ts`
 
 Expected: FAIL，现有页面是内嵌表格编辑而非四步向导。
 
-- [ ] **Step 5: 提取桌面表格并实现移动四步流**
+- [x] **Step 5: 提取桌面表格并实现移动四步流**
 
 `OutboundPage({ userId })` 只负责待办、options、confirm/cancel API 与响应式选择；桌面行为移入 `DesktopOutboundTable`，不得更改现有按钮、请求体和成功文案的测试契约。移动端一次只打开一张审批单的 `OutboundDraft`：
 
@@ -704,7 +704,7 @@ Expected: FAIL，现有页面是内嵌表格编辑而非四步向导。
 
 confirm/cancel 返回 401 时保留当前 session 草稿并导航到企业微信登录，returnTo 指向 `/admin/outbound`；重新登录后仅当会话用户 id 与草稿 envelope 一致才恢复。成功或用户明确放弃时清除对应审批单草稿。
 
-- [ ] **Step 6: 增加路由回归以固定取消和并发错误**
+- [x] **Step 6: 增加路由回归以固定取消和并发错误**
 
 ```ts
 it("cancels only a pending approval with a reason", async () => {
@@ -721,7 +721,7 @@ it("cancels only a pending approval with a reason", async () => {
 
 同时保留/补齐：空原因 400、重复确认 409、余额变化 409、财务 403。不要改变现有服务错误分类。
 
-- [ ] **Step 7: 运行工作流、API、移动和桌面回归**
+- [x] **Step 7: 运行工作流、API、移动和桌面回归**
 
 Run:
 
@@ -734,7 +734,7 @@ corepack pnpm --filter @warehouse/web typecheck
 
 Expected: 纯函数、`tests/integration/inventory/outbound-service.test.ts` 服务/路由、移动向导和 `tests/e2e/admin/outbound.spec.ts` 桌面回归 PASS；类型检查退出码 0。
 
-- [ ] **Step 8: 提交四步出库**
+- [x] **Step 8: 提交四步出库**
 
 ```powershell
 git add apps/web/src/features/outbound apps/web/src/pages/OutboundPage.tsx apps/web/src/App.tsx apps/web/src/styles.css tests/unit/web/outbound-workflow.test.ts tests/e2e/mobile/outbound.spec.ts tests/integration/inventory/outbound-service.test.ts
@@ -765,7 +765,7 @@ git commit -m "feat: add guided mobile outbound workflow"
 - Produces: `useNotificationTasks({ enabled, open })`，返回 `{ tasks, loading, error, refresh }`。
 - Produces: `NotificationCenter({ role, mobile })`。
 
-- [ ] **Step 1: 写通知生命周期与链接失败测试**
+- [x] **Step 1: 写通知生命周期与链接失败测试**
 
 ```ts
 it("links actionable tasks to renderable mobile routes", async () => {
@@ -796,13 +796,13 @@ it("removes tasks when their source state is resolved", async () => {
 });
 ```
 
-- [ ] **Step 2: 运行确认 RED**
+- [x] **Step 2: 运行确认 RED**
 
 Run: `corepack pnpm vitest run tests/unit/inventory/notification-service.test.ts`
 
 Expected: FAIL，当前链接为 `/admin/outbound/pending` 和 `/admin/items`。
 
-- [ ] **Step 3: 修正服务端链接并实现任务刷新 hook**
+- [x] **Step 3: 修正服务端链接并实现任务刷新 hook**
 
 给 `AlertItem` 和 `LowStockItem` 增加 `itemCode`，由 `AlertService` 从现有物品主数据复制编码，不改数据库字段。低库存 href 固定为 `/admin/inventory?query=${encodeURIComponent(item.itemCode)}`，使用唯一物品编码命中现有库存检索。同步更新 alert-service 与 notification-service 单测，不得保留无法渲染的伪路由。
 
@@ -817,7 +817,7 @@ export function announceBusinessCompleted(): void {
 }
 ```
 
-- [ ] **Step 4: 写移动任务中心 E2E 失败测试**
+- [x] **Step 4: 写移动任务中心 E2E 失败测试**
 
 覆盖：通知按钮显示任务数；移动端打开为不溢出的 sheet；待出库跳 `/admin/outbound`；低库存跳 `/admin/inventory?query=...`；盘点/月结/异常显示“请在电脑端处理”；模拟业务完成事件后二次响应为空，任务从 DOM 消失。
 
@@ -825,11 +825,11 @@ Run: `corepack pnpm playwright test tests/e2e/mobile/notification-tasks.spec.ts`
 
 Expected: FAIL，当前通知是桌面 popover 且有“全部已读”。
 
-- [ ] **Step 5: 提取 NotificationCenter 并接入业务完成事件**
+- [x] **Step 5: 提取 NotificationCenter 并接入业务完成事件**
 
 桌面保持 popover；移动端使用全宽 bottom sheet。任务条目根据 kind 渲染：`PENDING_OUTBOUND`、`LOW_STOCK` 是链接；`STOCKTAKE`、`PERIOD_CLOSE`、`ANOMALY` 是摘要和电脑端提示。入库成功、出库成功、取消成功调用 `announceBusinessCompleted()`。
 
-- [ ] **Step 6: 运行通知和壳层回归**
+- [x] **Step 6: 运行通知和壳层回归**
 
 Run:
 
@@ -842,7 +842,7 @@ corepack pnpm typecheck
 
 Expected: 通知服务、移动任务中心、移动壳层和桌面 workspace 回归 PASS；全仓类型检查退出码 0。
 
-- [ ] **Step 7: 提交任务中心**
+- [x] **Step 7: 提交任务中心**
 
 ```powershell
 git add apps/api/src/application/inventory/alert-service.ts apps/api/src/application/inventory/notification-service.ts apps/web/src/features/notifications apps/web/src/components/AppShell.tsx apps/web/src/pages/DashboardPage.tsx apps/web/src/pages/InboundPage.tsx apps/web/src/pages/OutboundPage.tsx apps/web/src/styles.css tests/unit/inventory/alert-service.test.ts tests/unit/inventory/notification-service.test.ts tests/e2e/mobile/notification-tasks.spec.ts
@@ -867,7 +867,7 @@ git commit -m "feat: turn mobile notifications into live tasks"
 - Consumes: 所有移动页面和弹层。
 - Produces: 320×568、390×844、430×932、820×900 与 821×900 的边界回归矩阵。
 
-- [ ] **Step 1: 写视口矩阵失败测试**
+- [x] **Step 1: 写视口矩阵失败测试**
 
 ```ts
 import { loginAs } from "./mobile-test-helpers";
@@ -895,19 +895,19 @@ test("821px mounts only desktop navigation", async ({ page }) => {
 });
 ```
 
-- [ ] **Step 2: 运行确认 RED**
+- [x] **Step 2: 运行确认 RED**
 
 Run: `corepack pnpm playwright test tests/e2e/mobile/mobile-viewport-matrix.spec.ts`
 
 Expected: 任何安全区、溢出、重复交互树或 820/821 边界错误均明确 FAIL。
 
-- [ ] **Step 3: 修复布局与可访问性问题**
+- [x] **Step 3: 修复布局与可访问性问题**
 
 逐项满足：`100dvh` + `100vh` fallback；安全区；输入字号 16px；触控 44px；弹层打开锁 body；初始焦点进入弹层；Tab 不逃逸；Escape/返回关闭；关闭后焦点恢复；错误出现后滚动/聚焦首个错误；固定底栏不遮当前输入和提交按钮；所有 popover/sheet 最大宽度 `calc(100vw - 24px)`；不使用 hover-only 操作。
 
 在 `mobile-viewport-matrix.spec.ts` 再增加一条跨断点状态测试：在 820px 填写入库批次，切到 821px 后仍显示同一批次；页面只切换呈现树，不丢共享父级状态。弹层测试用 `Tab`/`Shift+Tab` 断言焦点循环，用 `Escape` 断言关闭并恢复焦点；浏览器历史返回在无打开弹层时仍回到上一个页面。
 
-- [ ] **Step 4: 跑完整移动矩阵和关键桌面 E2E**
+- [x] **Step 4: 跑完整移动矩阵和关键桌面 E2E**
 
 Run:
 
@@ -919,7 +919,7 @@ corepack pnpm --filter @warehouse/web build
 
 Expected: 全部移动 E2E、关键桌面 E2E PASS；web 构建退出码 0。
 
-- [ ] **Step 5: 提交兼容性门禁**
+- [x] **Step 5: 提交兼容性门禁**
 
 ```powershell
 git add apps/web/src/styles.css apps/web/src/components/ModalDialog.tsx apps/web/src/features/mobile/MobileMoreSheet.tsx apps/web/src/features/notifications/NotificationCenter.tsx tests/e2e/mobile
@@ -938,7 +938,7 @@ git commit -m "test: cover enterprise wechat mobile viewports"
 - Consumes: 所有实现、测试和提交。
 - Produces: 可供用户验收的本地分支、真实验证证据和未部署状态；不合并、不推送、不发布。
 
-- [ ] **Step 1: 更新 PROJECT_STATUS.md**
+- [x] **Step 1: 更新 PROJECT_STATUS.md**
 
 必须准确写入：
 
@@ -950,7 +950,7 @@ git commit -m "test: cover enterprise wechat mobile viewports"
 - 部署状态：仅本地实现和验证，尚未部署，等待用户验收。
 ```
 
-- [ ] **Step 2: 运行不依赖 Docker 的全量验证**
+- [x] **Step 2: 运行不依赖 Docker 的全量验证**
 
 Run with Node 24+ and freshly generated Prisma Client:
 
@@ -964,6 +964,8 @@ git status --short --branch
 ```
 
 Expected: 所有非部署 Vitest、类型检查、构建、E2E 和 whitespace check 退出码 0；工作树只允许存在正在更新的计划/状态文件，提交后必须 clean。必须读取输出中的测试总数和失败数，不得只看退出码。
+
+2026-08-13 新鲜证据：bundled Node `v24.19.0`；dummy `DATABASE_URL` 下 Prisma generate exit 0；非 deployment Vitest 为 48 files（45 passed/3 skipped）、252 tests（236 passed/16 skipped/0 failed）；typecheck/build exit 0；隔离 3301/5474 memory/local-auth E2E 为 104 passed/0 failed/0 skipped；`git diff --check 5f17963...HEAD` 无输出。完整细节见 `.superpowers/sdd/2026-08-13-mobile-responsive/task-8-report.md`。
 
 - [ ] **Step 3: Docker 恢复后运行部署验证**
 
@@ -987,15 +989,17 @@ Expected: deployment 测试 PASS；随后真正的完整 `corepack pnpm test` �
 
 若仍出现 `0x800705AA` 或 VM 为 Off，停止 Docker 验证并在 `PROJECT_STATUS.md` 记录环境阻塞；不得重装、重置 VM、改 Secret 或伪称通过。
 
+2026-08-13 前置结果：`DockerDesktopVM State=Off, Status=Operating normally`。已按规则停止，Step 3 保持未勾选；未进行 image inspect、挂载、deployment tests 或 Compose config。
+
 - [ ] **Step 4: 使用 requesting-code-review 做规格与代码评审**
 
 评审固定比较点：`5f17963...HEAD`。评审清单：手机/桌面权限；单一交互树；Decimal；草稿隔离；入库保留；出库重校验与取消；任务刷新；企业微信视口；无 Secret/部署变更。收到意见后必须先使用 `superpowers:receiving-code-review`，逐条验证后再修改。
 
-- [ ] **Step 5: 修复评审问题并重新运行受影响验证**
+- [x] **Step 5: 修复 deferred 审计问题并重新运行受影响验证**
 
 每个修复先增加/确认回归测试 RED，再最小修复至 GREEN。最后重新运行 Step 2 的完整命令；若触及部署文件，再运行 Step 3。
 
-- [ ] **Step 6: 提交状态文档并确认 clean**
+- [x] **Step 6: 提交状态文档并确认 clean**
 
 ```powershell
 git add PROJECT_STATUS.md docs/superpowers/plans/2026-08-13-mobile-responsive.md
@@ -1009,16 +1013,16 @@ Expected: `codex/mobile-responsive` 工作树 clean。不要合并、推送或�
 
 ## Final Verification Checklist
 
-- [ ] 管理员移动导航恰为五项，财务恰为四项，申请人仍被后台门禁拒绝。
-- [ ] 320、390、430、820 宽度仅挂载移动树；821 仅挂载桌面树。
-- [ ] 移动首页采用统一白色快捷面板、紧凑概览和约 18px 图标，不恢复大面积操作卡。
-- [ ] `/admin/inventory` 可按物品/仓库/批次查询，管理员和财务可见价格，申请人不可访问。
-- [ ] 手机入库为单页分组，一个物品一个批次，Decimal 金额与成功保留规则有测试。
-- [ ] 手机出库为四步，多仓/多批次、少出/零出、库存重校验、二次确认和取消均有测试。
-- [ ] 入库/出库草稿按版本、用户、业务隔离，成功/放弃清除，刷新可恢复。
-- [ ] 通知是源状态驱动的任务，不保留“全部已读”；打开时每 30 秒轮询，业务完成后立即刷新。
-- [ ] 盘点、月结、调拨、主数据维护在手机端只提示电脑端处理。
-- [ ] `100dvh` 回退、安全区、44px 触控、16px 输入、焦点、滚动锁和无横向溢出通过矩阵验证。
-- [ ] 桌面首页、搜索、入库、出库、报表和导航关键回归通过。
-- [ ] `PROJECT_STATUS.md` 记录基线、范围、真实验证结果和未部署状态。
-- [ ] 未修改/输出生产 Secret，未连接生产数据库，未部署、未推送。
+- [x] 管理员移动导航恰为五项，财务恰为四项，申请人仍被后台门禁拒绝。
+- [x] 320、390、430、820 宽度仅挂载移动树；821 仅挂载桌面树。
+- [x] 移动首页采用统一白色快捷面板、紧凑概览和约 18px 图标，不恢复大面积操作卡。
+- [x] `/admin/inventory` 可按物品/仓库/批次查询，管理员和财务可见价格，申请人不可访问。
+- [x] 手机入库为单页分组，一个物品一个批次，Decimal 金额与成功保留规则有测试。
+- [x] 手机出库为四步，多仓/多批次、少出/零出、库存重校验、二次确认和取消均有测试。
+- [x] 入库/出库草稿按版本、用户、业务隔离，成功/放弃清除，刷新可恢复。
+- [x] 通知是源状态驱动的任务，不保留“全部已读”；打开时每 30 秒轮询，业务完成后立即刷新。
+- [x] 盘点、月结、调拨、主数据维护在手机端只提示电脑端处理。
+- [x] `100dvh` 回退、安全区、44px 触控、16px 输入、焦点、滚动锁和无横向溢出通过矩阵验证。
+- [x] 桌面首页、搜索、入库、出库、报表和导航关键回归通过。
+- [x] `PROJECT_STATUS.md` 记录基线、范围、真实验证结果和未部署状态。
+- [x] 未修改/输出生产 Secret，未连接生产数据库，未部署、未推送。
