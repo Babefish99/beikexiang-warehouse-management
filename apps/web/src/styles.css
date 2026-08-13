@@ -184,4 +184,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   input, select, textarea { font-size: 16px; }
   .modal-dialog-shell { place-items: end center; padding: 12px; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .modal-dialog--shared { max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px - env(safe-area-inset-bottom)); border-radius: 18px; }
+  .modal-dialog--shared .modal-dialog__close { width: 44px; height: 44px; }
+  .modal-dialog--shared .modal-dialog__actions .button { min-width: 44px; min-height: 44px; }
 }
