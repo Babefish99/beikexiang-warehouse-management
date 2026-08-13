@@ -52,6 +52,63 @@ test("Back closes the latest modal after the more sheet transitions to notificat
   await expect(page.getByRole("button", { name: "更多" })).toBeFocused();
 });
 
+test("an internal notification link consumes its sentinel before navigation", async ({ page }) => {
+  await page.route(apiUrl("/admin/notifications"), (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(tasks) }));
+  await page.route(apiUrl("/admin/outbound/pending"), (route) => route.fulfill({ json: [] }));
+  await loginAs(page, "/admin/inventory", "ADMIN");
+  await expect(page.getByRole("heading", { name: "库存查询" })).toBeVisible();
+  await page.getByRole("link", { name: "首页", exact: true }).click();
+  await expect(page.getByRole("heading", { name: /你好/ })).toBeVisible();
+  const dashboardUrl = page.url();
+  const sourceHistoryLength = await page.evaluate(() => history.length);
+
+  const center = await openMobileNotificationCenter(page);
+  await center.getByRole("link", { name: /待出库审批/ }).click();
+  await expect(page).toHaveURL(/\/admin\/outbound$/);
+  await expect(page.getByRole("heading", { name: "选择待办" })).toBeVisible();
+  expect(await page.evaluate(() => history.length)).toBe(sourceHistoryLength + 1);
+
+  await page.goBack();
+  await expect(page).toHaveURL(dashboardUrl);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/admin\/inventory$/);
+});
+
+test("modal link coordination leaves external and alternate navigation semantics intact", async ({ page }) => {
+  await page.route(apiUrl("/admin/notifications"), (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(tasks) }));
+  await loginAs(page, "/", "ADMIN");
+  const center = await openMobileNotificationCenter(page);
+  await expect(center).toBeVisible();
+
+  const prevented = await center.evaluate((dialog) => {
+    const cases = [
+      { href: "https://example.com/external" },
+      { href: "/admin/outbound", target: "_blank" },
+      { href: "/admin/outbound", download: "tasks.csv" },
+      { href: "/admin/outbound", ctrlKey: true },
+    ];
+
+    return cases.map(({ ctrlKey = false, ...attributes }) => {
+      const link = document.createElement("a");
+      Object.assign(link, attributes);
+      dialog.append(link);
+      let preventedBeforeDocumentGuard = false;
+      const guardDefaultNavigation = (event: MouseEvent) => {
+        preventedBeforeDocumentGuard = event.defaultPrevented;
+        event.preventDefault();
+      };
+      document.addEventListener("click", guardDefaultNavigation, { once: true });
+      link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, ctrlKey }));
+      link.remove();
+      return preventedBeforeDocumentGuard;
+    });
+  });
+
+  expect(prevented).toEqual([false, false, false, false]);
+  await expect(page).toHaveURL(/\/$/);
+  await expect(center).toBeVisible();
+});
+
 test("business completion bypasses an older request and resolved tasks stay removed", async ({ page }) => {
   let requestCount = 0;
   let releaseOlderRequest!: () => void;

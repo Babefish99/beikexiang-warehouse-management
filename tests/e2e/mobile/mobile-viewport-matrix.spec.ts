@@ -265,6 +265,42 @@ test("a busy confirm modal rearms Back protection when its close callback refuse
   await expect(dialog.getByRole("alert")).toHaveText("暂时无法入库");
 });
 
+test("overlapping real modals close top to bottom before browser Back leaves the page", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockInboundOptions(page);
+  await loginAs(page, "/", "ADMIN");
+  const dashboardUrl = page.url();
+  await page.getByRole("link", { name: "入库", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "登记入库" })).toBeVisible();
+  const inboundUrl = page.url();
+  await page.getByLabel("仓库 *").selectOption("warehouse-long");
+  await page.getByLabel("物品 *").selectOption("item-long");
+  await page.getByLabel("批次号 *").fill(longBatch);
+  await page.getByLabel("采购日期 *").fill("2026-08-13");
+  await page.getByLabel("入库数量 *").fill("1");
+  await page.getByLabel("采购单价 *").fill("2");
+  await page.getByRole("button", { name: "保存入库" }).click();
+  const confirmDialog = page.getByRole("dialog", { name: "确认入库" });
+  await expect(confirmDialog).toBeVisible();
+
+  await page.getByRole("button", { name: "更多" }).evaluate((button: HTMLButtonElement) => button.click());
+  const moreDialog = page.getByRole("dialog", { name: "更多功能" });
+  await expect(moreDialog).toBeVisible();
+  await expect(confirmDialog).toBeVisible();
+
+  await page.goBack();
+  await expect(moreDialog).toHaveCount(0);
+  await expect(confirmDialog).toBeVisible();
+  await expect(page).toHaveURL(inboundUrl);
+
+  await page.goBack();
+  await expect(confirmDialog).toHaveCount(0);
+  await expect(page).toHaveURL(inboundUrl);
+
+  await page.goBack();
+  await expect(page).toHaveURL(dashboardUrl);
+});
+
 test("aria-invalid attribute changes focus errors and restore temporary tabindex state", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openInbound(page);

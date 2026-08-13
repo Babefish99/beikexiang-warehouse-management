@@ -189,3 +189,57 @@ An independent review subagent was requested at the submit gate but could not be
 ### Validation boundary
 
 The reduced-height browser test is a repeatable layout approximation: it changes the actual Chromium viewport height, focuses the inbound input, scrolls the focused input/current action, and compares their bounding boxes to the fixed navigation top. It does not emulate a native WeCom keyboard, JS bridge, visualViewport event quirks, or a physical safe-area inset and is not reported as device-equivalent verification.
+
+---
+
+## FixRound2/5 — Modal history review findings
+
+### Base and scope
+
+- Base commit: `8e058074b8c90644077827c71aa8798784c6c575`.
+- Scope was limited to two Modal history findings: sentinel-aware internal navigation and ordered overlapping Modal ownership.
+- Production changes are confined to `ModalDialog.tsx`; no business routes, persistence, authentication, deployment, or fixed-port migration changed.
+
+### TDD RED evidence
+
+Two browser tests were added before the coordinator rewrite:
+
+1. The notification task-link scenario started at inventory, navigated to dashboard, opened the notification Modal, and followed the outbound task. The target page had `history.length === 5` instead of the expected `4`; the Modal sentinel survived as a phantom history entry. Exact focused result: exit `1`, `1 failed`; assertion failed in `919ms`.
+2. A real inbound confirm Modal was overlapped by the real More Modal. The first browser Back left the More Modal present instead of closing the top layer; Playwright timed out after `5s`. Exact focused result: exit `1`, `1 failed`.
+
+These failures reproduced both review findings against the base implementation rather than matching source text.
+
+### Minimal production fix
+
+- Replaced the single owner/pending slot with an ordered Modal owner stack protected by one browser-history sentinel.
+- A Back pop synchronously removes only the current top owner before invoking its React close callback. Cleanup is therefore idempotent and cannot overwrite a newly registered top owner; if an underlying owner remains, it receives the next sentinel.
+- Each owner exposes its current dismissibility through the existing `busy` state. A refused Back does not call the close callback and immediately re-arms the same top owner, without a timer.
+- StrictMode cleanup consumption and active owner registration are coordinated explicitly. Close during sentinel consumption cannot enqueue a second Back.
+- Ordinary same-window, same-origin links inside a Modal prevent their default navigation, consume the active sentinel, close the initiating owner, then use `location.assign`. External links, non-self targets, downloads, modified clicks, and non-primary clicks retain native semantics.
+- Navigation-in-progress suppresses cleanup from reconstructing a sentinel before the new document loads.
+
+### GREEN and stability evidence
+
+- First focused GREEN: internal notification navigation `1/1`; overlapping real Modals `1/1`.
+- History stability batch: seven Back/history scenarios repeated three times, `21/21 passed` in `21.9s`. This included dismiss/confirm Back, programmatic close, busy refusal/re-arm, overlap, More-to-notification transition, and internal navigation.
+- Notification suite including native-link-semantics protection: `7/7 passed` in `9.5s`.
+- Fresh complete mobile suite after the final state ordering change: `56/56 passed` in `33.0s`.
+- Fresh key desktop and env-aware admin inbound suite: `11/11 passed` in `14.5s`.
+- Fresh web production build: exit `0`, `1612` modules transformed in `2.14s`.
+- Fresh web typecheck and `git diff --check`: exit `0`.
+
+### Resulting history contract
+
+| Scenario | Verified result |
+| --- | --- |
+| Modal internal task link | Sentinel is consumed before navigation; target Back returns directly to the real source page, with no phantom history entry |
+| External/new-window/download/modifier link | Modal coordination does not prevent native alternate-navigation semantics |
+| Two real overlapping Modals | Back closes top, then underlying; both closes keep the current URL; the following Back performs real navigation |
+| Busy top Modal | Back is refused and the same owner remains protected |
+| Programmatic close / Escape | Sentinel is consumed and focus restoration behavior remains covered |
+| React StrictMode | Development StrictMode full suite passes without duplicate owners or an unprotected open window |
+
+### Boundaries and concerns
+
+- Browser Back is covered with Chromium's real History API. Android hardware Back ultimately maps to that web history signal, but a physical WeCom/Android device was not available for native-container verification.
+- Link interception intentionally applies only after an unmodified primary click bubbles from a same-origin, same-window anchor. It does not attempt to replace a client router or handle custom non-anchor navigation.

@@ -1,4 +1,11 @@
-import { type ReactNode, type KeyboardEvent as ReactKeyboardEvent, useEffect, useId, useRef } from "react";
+import {
+  type ReactNode,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  useEffect,
+  useId,
+  useRef,
+} from "react";
 import { X } from "lucide-react";
 
 const modalHistoryKey = "__warehouseModal";
@@ -6,71 +13,121 @@ const modalHistoryKey = "__warehouseModal";
 type ModalHistoryEntry = {
   active: boolean;
   id: string;
+  canDismiss(): boolean;
   onBack(): void;
 };
 
-let historyOwner: ModalHistoryEntry | null = null;
-let pendingHistoryEntry: ModalHistoryEntry | null = null;
-let consumingHistoryEntry = false;
+const historyOwners: ModalHistoryEntry[] = [];
+let sentinelActive = false;
+let consumingSentinel = false;
+let pendingNavigation: { entry: ModalHistoryEntry; href: string } | null = null;
+let navigationInProgress = false;
 let listeningForHistory = false;
 
-function activatePendingHistoryEntry(): void {
-  if (historyOwner || consumingHistoryEntry || !pendingHistoryEntry) return;
-  const entry = pendingHistoryEntry;
-  pendingHistoryEntry = null;
-  if (!entry.active) return;
+function topHistoryOwner(): ModalHistoryEntry | null {
+  return historyOwners.at(-1) ?? null;
+}
+
+function ensureHistorySentinel(): void {
+  if (sentinelActive || consumingSentinel || navigationInProgress || !historyOwners.length) return;
+  const entry = topHistoryOwner()!;
   const currentState = history.state && typeof history.state === "object" ? history.state : {};
   history.pushState({ ...currentState, [modalHistoryKey]: entry.id }, "", location.href);
-  historyOwner = entry;
+  sentinelActive = true;
+}
+
+function removeHistoryOwner(entry: ModalHistoryEntry): void {
+  entry.active = false;
+  const index = historyOwners.lastIndexOf(entry);
+  if (index >= 0) historyOwners.splice(index, 1);
+}
+
+function dismissHistoryOwner(entry: ModalHistoryEntry): boolean {
+  if (!entry.active || !entry.canDismiss()) return false;
+  removeHistoryOwner(entry);
+  entry.onBack();
+  return true;
 }
 
 function ensureHistoryListener(): void {
   if (listeningForHistory) return;
   window.addEventListener("popstate", () => {
-    if (historyOwner) {
-      const entry = historyOwner;
-      historyOwner = null;
-      entry.onBack();
-      if (entry.active) pendingHistoryEntry = entry;
-      window.setTimeout(activatePendingHistoryEntry, 0);
+    sentinelActive = false;
+    if (pendingNavigation) {
+      const navigation = pendingNavigation;
+      pendingNavigation = null;
+      consumingSentinel = false;
+      navigationInProgress = true;
+      dismissHistoryOwner(navigation.entry);
+      window.location.assign(navigation.href);
       return;
     }
-    if (consumingHistoryEntry) {
-      consumingHistoryEntry = false;
-      activatePendingHistoryEntry();
+    if (consumingSentinel) {
+      consumingSentinel = false;
+      ensureHistorySentinel();
+      return;
     }
+    const entry = topHistoryOwner();
+    if (!entry) return;
+    if (!dismissHistoryOwner(entry)) {
+      ensureHistorySentinel();
+      return;
+    }
+    ensureHistorySentinel();
   });
   listeningForHistory = true;
 }
 
 function registerModalHistory(entry: ModalHistoryEntry): void {
   ensureHistoryListener();
+  if (entry.active) return;
   entry.active = true;
-  pendingHistoryEntry = entry;
-  activatePendingHistoryEntry();
+  historyOwners.push(entry);
+  ensureHistorySentinel();
 }
 
 function requestModalHistoryClose(entry: ModalHistoryEntry): void {
-  if (!entry.active) return;
-  if (historyOwner === entry && history.state?.[modalHistoryKey] === entry.id) {
+  if (!entry.active || !entry.canDismiss()) return;
+  if (consumingSentinel) {
+    dismissHistoryOwner(entry);
+    return;
+  }
+  if (topHistoryOwner() === entry && sentinelActive && history.state?.[modalHistoryKey]) {
     history.back();
     return;
   }
-  if (pendingHistoryEntry === entry) pendingHistoryEntry = null;
-  entry.onBack();
+  dismissHistoryOwner(entry);
 }
 
 function unregisterModalHistory(entry: ModalHistoryEntry): void {
-  entry.active = false;
-  if (pendingHistoryEntry === entry) pendingHistoryEntry = null;
-  if (historyOwner !== entry) return;
-  historyOwner = null;
-  if (history.state?.[modalHistoryKey] === entry.id) {
-    consumingHistoryEntry = true;
-    history.back();
-  } else {
-    activatePendingHistoryEntry();
+  removeHistoryOwner(entry);
+  if (historyOwners.length) {
+    ensureHistorySentinel();
+    return;
   }
+  if (!navigationInProgress && sentinelActive && history.state?.[modalHistoryKey]) {
+    consumingSentinel = true;
+    history.back();
+  }
+}
+
+function navigateFromModal(entry: ModalHistoryEntry, href: string): void {
+  if (!entry.active) {
+    window.location.assign(href);
+    return;
+  }
+  if (consumingSentinel) {
+    pendingNavigation = { entry, href };
+    return;
+  }
+  if (sentinelActive && history.state?.[modalHistoryKey]) {
+    pendingNavigation = { entry, href };
+    history.back();
+    return;
+  }
+  navigationInProgress = true;
+  dismissHistoryOwner(entry);
+  window.location.assign(href);
 }
 
 const focusableSelector = [
@@ -113,8 +170,11 @@ export function ModalDialog({
   const titleId = useId();
   const dialogRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
+  const busyRef = useRef(busy);
+  const historyEntryRef = useRef<ModalHistoryEntry | null>(null);
   const requestCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  busyRef.current = busy;
 
   useEffect(() => {
     if (!open) return;
@@ -173,8 +233,10 @@ export function ModalDialog({
     const historyEntry: ModalHistoryEntry = {
       active: false,
       id: titleId,
+      canDismiss: () => !busyRef.current,
       onBack: () => onCloseRef.current(),
     };
+    historyEntryRef.current = historyEntry;
     requestCloseRef.current = () => requestModalHistoryClose(historyEntry);
     registerModalHistory(historyEntry);
 
@@ -182,6 +244,7 @@ export function ModalDialog({
       observer?.disconnect();
       restoreTemporaryTabIndex();
       unregisterModalHistory(historyEntry);
+      if (historyEntryRef.current === historyEntry) historyEntryRef.current = null;
       requestCloseRef.current = onCloseRef.current;
       document.body.style.overflow = previousOverflow;
       trigger?.focus();
@@ -220,6 +283,21 @@ export function ModalDialog({
     }
   };
 
+  const navigateInternalLink = (event: ReactMouseEvent<HTMLElement>) => {
+    if (event.defaultPrevented || event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const target = event.target instanceof Element ? event.target.closest("a[href]") : null;
+    if (!(target instanceof HTMLAnchorElement)) return;
+    if (target.hasAttribute("download") || (target.target && target.target.toLowerCase() !== "_self")) return;
+
+    const url = new URL(target.href, window.location.href);
+    if (url.origin !== window.location.origin || !["http:", "https:"].includes(url.protocol)) return;
+    const historyEntry = historyEntryRef.current;
+    if (!historyEntry) return;
+
+    event.preventDefault();
+    navigateFromModal(historyEntry, url.href);
+  };
+
   return (
     <div
       className="modal-backdrop modal-dialog-shell"
@@ -236,6 +314,7 @@ export function ModalDialog({
         aria-busy={busy || undefined}
         tabIndex={-1}
         onKeyDown={trapFocus}
+        onClick={navigateInternalLink}
       >
         <header className="modal-dialog__header">
           <strong id={titleId}>{title}</strong>
