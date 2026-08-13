@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { CalendarDays, CheckCircle2, ClipboardCheck, FileSpreadsheet, RefreshCw, ShieldAlert } from "lucide-react";
+import { FileSpreadsheet, ShieldAlert } from "lucide-react";
 import { AdminLayout, type WarehouseOption, type WorkspaceUser } from "./layouts/AdminLayout";
+import { loadInventoryNotifications } from "./components/AppShell";
 import { PageHeader } from "./components/PageHeader";
-import { ApprovalMark, InboundMark, InventoryMark, OutboundMark } from "./components/DashboardIcons";
 import { LoginPage } from "./pages/LoginPage";
 import { ItemsPage } from "./pages/ItemsPage";
 import { WarehousesPage } from "./pages/WarehousesPage";
@@ -14,10 +14,11 @@ import { ReturnsPage } from "./pages/ReturnsPage";
 import { StocktakePage } from "./pages/StocktakePage";
 import { PeriodClosePage } from "./pages/PeriodClosePage";
 import { ReportsPage } from "./pages/ReportsPage";
+import { InventoryQueryPage } from "./pages/InventoryQueryPage";
+import { DashboardPage, type DashboardCard } from "./pages/DashboardPage";
 
 type WebUser = { id: string; weComUserId: string; name: string; role: "APPLICANT" | "ADMIN" | "FINANCE" };
 type AuthMetadata = { authorizeUrl: string; localAuthUrl?: string };
-type DashboardCard = { label: string; value: string; hint: string; tone: "inventory" | "approval" | "inbound" | "outbound" };
 type ItemRow = { isActive: boolean };
 type PendingApproval = { id: string };
 type TransactionRow = { quantity: string; amount: string };
@@ -31,8 +32,6 @@ const loadingCards = (): DashboardCard[] => [
   { label: "本月入库", value: "加载中", hint: "数量 / 金额", tone: "inbound" },
   { label: "本月出库", value: "加载中", hint: "数量 / 金额", tone: "outbound" },
 ];
-
-const metricIcons = { inventory: InventoryMark, approval: ApprovalMark, inbound: InboundMark, outbound: OutboundMark };
 
 function summariseTransactions(rows: TransactionRow[]): { quantity: string; amount: string } {
   const totals = rows.reduce((current, row) => ({
@@ -54,6 +53,7 @@ export default function App() {
   const [localAuthUrl, setLocalAuthUrl] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [cards, setCards] = useState<DashboardCard[]>(loadingCards);
+  const [dashboardLoading, setDashboardLoading] = useState(true);
   const [warehouses, setWarehouses] = useState<WarehouseOption[]>([]);
   const [selectedWarehouseId, setSelectedWarehouseId] = useState("all");
 
@@ -117,13 +117,15 @@ export default function App() {
     if (!user || user.role !== "ADMIN" || pathname !== "/") return;
     let active = true;
     const loadDashboard = async () => {
+      setDashboardLoading(true);
       const encodedWarehouseId = encodeURIComponent(selectedWarehouseId);
       try {
-        const [itemsResponse, pendingResponse, inboundResponse, outboundResponse] = await Promise.all([
+        const [itemsResponse, pendingResponse, inboundResponse, outboundResponse, notifications] = await Promise.all([
           fetch(`${apiBaseUrl}/admin/items?includeInactive=true`, { credentials: "include" }),
           fetch(`${apiBaseUrl}/admin/outbound/pending`, { credentials: "include" }),
           fetch(`${apiBaseUrl}/admin/reports/transactions?period=${currentPeriod}&type=inbound&warehouseId=${encodedWarehouseId}`, { credentials: "include" }),
           fetch(`${apiBaseUrl}/admin/reports/transactions?period=${currentPeriod}&type=outbound&warehouseId=${encodedWarehouseId}`, { credentials: "include" }),
+          loadInventoryNotifications(),
         ]);
         if (!itemsResponse.ok || !pendingResponse.ok || !inboundResponse.ok || !outboundResponse.ok) throw new Error("dashboard query failed");
         const items = await itemsResponse.json() as ItemRow[];
@@ -136,6 +138,9 @@ export default function App() {
           { label: "待出库审批", value: `${pending.length}`, hint: "企业微信已通过", tone: "approval" },
           { label: "本月入库", value: `${inbound.quantity} / ${inbound.amount}`, hint: "数量 / 金额", tone: "inbound" },
           { label: "本月出库", value: `${outbound.quantity} / ${outbound.amount}`, hint: "数量 / 金额", tone: "outbound" },
+          { label: "待出库", value: `${notifications.filter((notification) => notification.kind === "PENDING_OUTBOUND").length}`, hint: "待处理", tone: "approval" },
+          { label: "低库存", value: `${notifications.filter((notification) => notification.kind === "LOW_STOCK").length}`, hint: "需关注", tone: "low" },
+          { label: "通知", value: `${notifications.length}`, hint: "全部通知", tone: "notification" },
         ]);
       } catch {
         if (!active) return;
@@ -145,6 +150,8 @@ export default function App() {
           { label: "本月入库", value: "加载失败", hint: "数量 / 金额", tone: "inbound" },
           { label: "本月出库", value: "加载失败", hint: "数量 / 金额", tone: "outbound" },
         ]);
+      } finally {
+        if (active) setDashboardLoading(false);
       }
     };
 
@@ -186,11 +193,16 @@ export default function App() {
 
   const workspaceUser = toWorkspaceUser(user);
 
+  if (pathname === "/admin/inventory") {
+    return renderAdminLayout(workspaceUser, <InventoryQueryPage warehouseId={selectedWarehouseId} role={user.role} />);
+  }
+
   if (user.role === "FINANCE" && pathname === "/admin/reports") {
     return renderAdminLayout(workspaceUser, <ReportsPage warehouseId={selectedWarehouseId} />);
   }
 
   if (user.role === "FINANCE") {
+    if (pathname === "/") return renderAdminLayout(workspaceUser, <DashboardPage cards={[]} loading={false} role="FINANCE" warehouses={warehouses} selectedWarehouseId={selectedWarehouseId} onSelectWarehouse={onSelectWarehouse} />);
     return renderAdminLayout(
       workspaceUser,
       <div className="page">
@@ -217,77 +229,5 @@ export default function App() {
   if (pathname === "/admin/period-close") return renderAdminLayout(workspaceUser, <PeriodClosePage />);
   if (pathname === "/admin/reports") return renderAdminLayout(workspaceUser, <ReportsPage warehouseId={selectedWarehouseId} />);
 
-  return renderAdminLayout(
-    workspaceUser,
-    <div className="page">
-      <PageHeader
-        title="库存总览"
-        description="查看三个仓库的库存状态、待处理业务和本月变动。"
-        actions={<button className="button button--secondary" type="button" onClick={() => window.location.reload()}><RefreshCw size={15} />刷新数据</button>}
-      />
-      <section className="metric-strip" aria-label="库存概览指标">
-        {cards.map((card) => {
-          const MetricIcon = metricIcons[card.tone];
-          return (
-            <div className={`metric metric--${card.tone}`} key={card.label}>
-              <span className="metric__icon"><MetricIcon size={26} /></span>
-              <div className="metric__content">
-                <span className="metric__label">{card.label}</span>
-                <div className="metric__value">
-                  <strong>{card.value}</strong>
-                </div>
-                <span className="metric__hint">{card.hint}</span>
-              </div>
-            </div>
-          );
-        })}
-      </section>
-      <section className="dashboard-grid">
-        <article className="panel">
-          <header className="panel__header">
-            <div>
-              <h2>业务快捷入口</h2>
-              <small>管理员常用操作</small>
-            </div>
-          </header>
-          <div className="quick-actions">
-            <a href="/admin/inbound"><InboundMark size={28} /><span>登记入库</span></a>
-            <a href="/admin/outbound"><OutboundMark size={28} /><span>办理出库</span></a>
-            <a href="/admin/opening-stock"><InventoryMark size={28} /><span>录入期初库存</span></a>
-          </div>
-        </article>
-        <article className="panel">
-          <header className="panel__header">
-            <div>
-              <h2>当前运行状态</h2>
-              <small>管理员工作提示</small>
-            </div>
-          </header>
-          <div className="system-status">
-            <div className="system-status__item">
-              <span className="system-status__icon system-status__icon--approval"><ClipboardCheck size={17} /></span>
-              <div>
-                <strong>企业微信审批</strong>
-                <p>审批通过后自动进入后台待出库列表。</p>
-              </div>
-            </div>
-            <div className="system-status__item">
-              <span className="system-status__icon system-status__icon--outbound"><CheckCircle2 size={17} /></span>
-              <div>
-                <strong>实际出库登记</strong>
-                <p>管理员选择仓库、采购批次和实际出库数量。</p>
-              </div>
-            </div>
-            <div className="system-status__item">
-              <span className="system-status__icon system-status__icon--close"><CalendarDays size={17} /></span>
-              <div>
-                <strong>月末盘点与结账</strong>
-                <p>盘点后核对报表，完成当月库存结账。</p>
-              </div>
-            </div>
-          </div>
-        </article>
-      </section>
-    </div>,
-  );
+  return renderAdminLayout(workspaceUser, <DashboardPage cards={cards} loading={dashboardLoading} role="ADMIN" warehouses={warehouses} selectedWarehouseId={selectedWarehouseId} onSelectWarehouse={onSelectWarehouse} />);
 }

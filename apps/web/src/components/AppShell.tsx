@@ -4,32 +4,12 @@ import { MobileBottomNav } from "../features/mobile/MobileBottomNav";
 import { MobileMoreSheet } from "../features/mobile/MobileMoreSheet";
 import { useMobileViewport } from "../features/mobile/use-mobile-viewport";
 import { LogoMark } from "./LogoMark";
+import { searchInventory, type InventorySearchResult } from "../features/inventory/inventory-api";
 
 export type WarehouseOption = { id: string; code: string; name: string; isActive: boolean };
 export type WorkspaceUser = { name: string; roleLabel: string; role: "ADMIN" | "FINANCE" };
 
-type InventorySearchLocation = {
-  warehouseId: string;
-  warehouseName: string;
-  batchId: string;
-  batchNo: string;
-  quantity: string;
-  unitCost: string;
-  amount: string;
-};
-
-type InventorySearchResult = {
-  itemId: string;
-  code: string;
-  name: string;
-  specification?: string;
-  unit: string;
-  totalQuantity: string;
-  totalAmount: string;
-  locations: InventorySearchLocation[];
-};
-
-type InventoryNotification = {
+export type InventoryNotification = {
   id: string;
   kind: string;
   title: string;
@@ -37,6 +17,28 @@ type InventoryNotification = {
   href: string;
   priority: number;
 };
+
+let pendingNotifications: Promise<InventoryNotification[]> | null = null;
+let recentNotifications: { value: InventoryNotification[]; loadedAt: number } | null = null;
+
+export function loadInventoryNotifications(): Promise<InventoryNotification[]> {
+  if (recentNotifications && Date.now() - recentNotifications.loadedAt < 1_000) return Promise.resolve(recentNotifications.value);
+  if (!pendingNotifications) {
+    pendingNotifications = fetch(`${apiBaseUrl}/admin/notifications`, { credentials: "include" })
+      .then((response) => {
+        if (!response.ok) throw new Error("通知中心加载失败");
+        return response.json() as Promise<InventoryNotification[]>;
+      })
+      .then((value) => {
+        recentNotifications = { value, loadedAt: Date.now() };
+        return value;
+      })
+      .finally(() => {
+        pendingNotifications = null;
+      });
+  }
+  return pendingNotifications;
+}
 
 type NavigationItem = {
   label: string;
@@ -123,16 +125,7 @@ export function AppShell({
     const timer = window.setTimeout(async () => {
       setSearchLoading(true);
       try {
-        const params = new URLSearchParams({
-          query,
-          warehouseId: selectedWarehouseId,
-        });
-        const response = await fetch(`${apiBaseUrl}/admin/reports/inventory-search?${params.toString()}`, {
-          credentials: "include",
-          signal: controller.signal,
-        });
-        if (!response.ok) throw new Error("全局搜索加载失败");
-        const payload = await response.json() as InventorySearchResult[];
+        const payload = await searchInventory({ query, warehouseId: selectedWarehouseId, signal: controller.signal });
         if (controller.signal.aborted || searchRequestVersion.current !== requestVersion) return;
         setSearchResults(payload);
       } catch (error) {
@@ -187,10 +180,9 @@ export function AppShell({
     let active = true;
     const loadNotifications = async () => {
       try {
-        const response = await fetch(`${apiBaseUrl}/admin/notifications`, { credentials: "include" });
-        if (!response.ok) throw new Error("通知中心加载失败");
         if (!active) return;
-        const payload = await response.json() as InventoryNotification[];
+        const payload = await loadInventoryNotifications();
+        if (!active) return;
         setNotifications(payload);
         setNotificationError(null);
         setHasUnreadNotifications(payload.length > 0);
@@ -219,7 +211,7 @@ export function AppShell({
 
   const navigateToSearchResult = (code: string) => {
     clearSearch();
-    window.location.assign(`/admin/items?search=${encodeURIComponent(code)}`);
+    window.location.assign(`/admin/inventory?query=${encodeURIComponent(code)}`);
   };
 
   return (

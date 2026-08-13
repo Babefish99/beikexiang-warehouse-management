@@ -88,6 +88,9 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
       ]),
     });
   });
+  await page.route("http://127.0.0.1:3001/admin/notifications", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: "[]" });
+  });
 
   await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2F");
   await expect(page.locator(".page-header h1")).toBeVisible();

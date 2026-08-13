@@ -71,7 +71,7 @@ async function routeFinanceReports(page: Page) {
   });
 }
 
-test("global workspace search opens the filtered items page from a search result", async ({ page }) => {
+test("global workspace search opens the inventory query page from a search result", async ({ page }) => {
   await routeWorkspaceWarehouses(page);
   await routeItems(page);
   await page.route(/http:\/\/127\.0\.0\.1:3001\/admin\/reports\/inventory-search.*/, async (route) => {
@@ -117,11 +117,9 @@ test("global workspace search opens the filtered items page from a search result
   await expect(result).toContainText("数量 25");
 
   await result.click();
-  await expect(page).toHaveURL(/\/admin\/items\?search=TEA-001$/);
-  await expect(page.getByRole("heading", { name: "标准物品库" })).toBeVisible();
-  await expect(page.getByPlaceholder("搜索编码、名称或选项 key")).toHaveValue("TEA-001");
-  await expect(page.getByRole("cell", { name: "TEA-001" })).toBeVisible();
-  await expect(page.getByRole("cell", { name: "COF-001" })).toHaveCount(0);
+  await expect(page).toHaveURL(/\/admin\/inventory\?query=TEA-001$/);
+  await expect(page.getByRole("heading", { name: "库存查询" })).toBeVisible();
+  await expect(page.getByRole("searchbox", { name: "查询库存" })).toHaveValue("TEA-001");
 });
 
 test("changing the selected warehouse clears stale search results and shows the new warehouse context", async ({ page }) => {
