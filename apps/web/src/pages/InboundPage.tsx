@@ -9,7 +9,9 @@ import {
 } from "../features/drafts/session-draft";
 import {
   calculateInboundAmount,
+  createInboundPayload,
   createInboundDraft,
+  isInboundDraft,
   reconcileInboundDraft,
   resetInboundAfterSuccess,
   validateInboundDraft,
@@ -40,7 +42,7 @@ export function InboundPage({ userId }: { userId: string }) {
   const [items, setItems] = useState<SelectorItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<InboundDraft>(() => (
-    readSessionDraft<InboundDraft>(window.sessionStorage, draftKey, userId, draftVersion) ?? createInboundDraft(today())
+    readSessionDraft<InboundDraft>(window.sessionStorage, draftKey, userId, draftVersion, isInboundDraft) ?? createInboundDraft(today())
   ));
   const [errors, setErrors] = useState<InboundFieldErrors>({});
   const [staleFields, setStaleFields] = useState<Array<"warehouseId" | "itemId">>([]);
@@ -129,7 +131,7 @@ export function InboundPage({ userId }: { userId: string }) {
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(createInboundPayload(form)),
       });
       if (!response.ok) {
         setError(response.status === 401 ? "登录已失效，请重新登录后重试" : await readError(response));
@@ -227,6 +229,7 @@ export function InboundPage({ userId }: { userId: string }) {
           <div><dt>数量</dt><dd>{form.quantity}</dd></div>
           <div><dt>预计金额</dt><dd>{expectedAmount === null ? "—" : `¥${expectedAmount}`}</dd></div>
         </dl>
+        {error ? <div className="form-error modal-dialog__error" role="alert">{error}</div> : null}
       </ModalDialog>
     </div>
   );

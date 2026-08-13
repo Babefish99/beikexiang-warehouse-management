@@ -50,25 +50,51 @@ test("mobile inbound is grouped, confirms an exact amount, and restores a failed
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
   await fillInbound(page);
-  await expect(page.getByText("预计金额 ¥0.02")).toBeVisible();
+  await page.getByLabel("入库数量 *").fill("01.2300");
+  await page.getByLabel("采购单价 *").fill("0000.2000");
+  await expect(page.getByText("预计金额 ¥0.25")).toBeVisible();
   await page.getByRole("button", { name: "保存入库" }).click();
 
   const dialog = page.getByRole("dialog", { name: "确认入库" });
   await expect(dialog).toContainText("总部仓");
   await expect(dialog).toContainText("打印纸");
   await expect(dialog).toContainText("B-001");
-  await expect(dialog).toContainText("¥0.02");
+  await expect(dialog).toContainText("¥0.25");
+  const failedRequest = page.waitForRequest(apiUrl("/admin/inbound"));
   await dialog.getByRole("button", { name: "确认入库", exact: true }).click();
-  await expect(page.getByText("暂时无法入库")).toBeVisible();
+  const payload = (await failedRequest).postDataJSON();
+  expect(payload).toEqual(expect.objectContaining({
+    batchNo: "B-001",
+    quantity: "1.23",
+    unitCost: "0.2",
+    purchasedAt: "2026-08-13",
+  }));
+  await expect(dialog.getByRole("alert")).toHaveText("暂时无法入库");
+  await expect(dialog.getByRole("button", { name: "确认入库", exact: true })).toBeEnabled();
 
   await page.reload();
   await expect(page.getByLabel("批次号 *")).toHaveValue("B-001");
-  await expect(page.getByLabel("入库数量 *")).toHaveValue("0.1");
-  await expect(page.getByText("预计金额 ¥0.02")).toBeVisible();
+  await expect(page.getByLabel("入库数量 *")).toHaveValue("01.2300");
+  await expect(page.getByText("预计金额 ¥0.25")).toBeVisible();
 
   await page.getByRole("button", { name: "放弃草稿" }).click();
   await expect(page.getByLabel("批次号 *")).toHaveValue("");
   expect(await page.evaluate(() => sessionStorage.getItem("warehouse.inbound.v1.local-admin"))).toBeNull();
+});
+
+test("invalid runtime draft values are ignored and leave the page usable", async ({ page }) => {
+  await page.addInitScript(() => {
+    sessionStorage.setItem("warehouse.inbound.v1.local-admin", JSON.stringify({
+      version: 1,
+      userId: "local-admin",
+      value: { quantity: 2 },
+    }));
+  });
+  await openInbound(page);
+
+  await expect(page.getByLabel("批次号 *")).toHaveValue("");
+  await expect(page.getByLabel("入库数量 *")).toHaveValue("");
+  await expect(page.getByRole("button", { name: "保存入库" })).toBeEnabled();
 });
 
 test("successful inbound disables duplicate confirmation and enters a reset completion state", async ({ page }) => {

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   calculateInboundAmount,
   createInboundDraft,
+  createInboundPayload,
+  isInboundDraft,
   reconcileInboundDraft,
   resetInboundAfterSuccess,
   validateInboundDraft,
@@ -39,6 +41,55 @@ describe("inbound form", () => {
     expect(calculateInboundAmount("not-a-number", "20")).toBeNull();
   });
 
+  it("accepts only complete inbound drafts with string fields", () => {
+    expect(isInboundDraft(validInbound)).toBe(true);
+    for (const value of [
+      null,
+      [],
+      {},
+      { ...validInbound, remark: undefined },
+      { ...validInbound, quantity: 2 },
+    ]) {
+      expect(isInboundDraft(value)).toBe(false);
+    }
+  });
+
+  it("rejects non-plain or Decimal(18,4)-overflow numeric inputs", () => {
+    for (const quantity of ["1e3", "0x10", "-0", "1.00001", "123456789012345", "99999999999999.9999"]) {
+      const errors = validateInboundDraft({ ...validInbound, quantity });
+      if (quantity === "99999999999999.9999") expect(errors.quantity).toBeUndefined();
+      else expect(errors.quantity).toBe("数量必须为最多 14 位整数和 4 位小数的普通十进制数");
+    }
+    for (const unitCost of ["1e3", "0x10", "-0", "1.00001", "123456789012345"]) {
+      expect(validateInboundDraft({ ...validInbound, unitCost }).unitCost).toBe("单价必须为最多 14 位整数和 4 位小数的普通十进制数");
+    }
+  });
+
+  it("normalizes Decimal fields and trimmed business fields for submission", () => {
+    expect(createInboundPayload({
+      ...validInbound,
+      batchNo: " B-001 ",
+      quantity: "01.2300",
+      unitCost: "0002.5000",
+      purchasedAt: "2026-08-13",
+      purchaser: " 仓库管理员 ",
+      remark: " 采购入库 ",
+    })).toEqual({
+      ...validInbound,
+      batchNo: "B-001",
+      quantity: "1.23",
+      unitCost: "2.5",
+      purchasedAt: "2026-08-13",
+      purchaser: "仓库管理员",
+      remark: "采购入库",
+    });
+  });
+
+  it("does not calculate amounts for rejected numeric formats", () => {
+    expect(calculateInboundAmount("1e1000000", "2")).toBeNull();
+    expect(calculateInboundAmount("1.00001", "2")).toBeNull();
+  });
+
   it("requires every required field with precise validation errors", () => {
     expect(validateInboundDraft(createInboundDraft(""))).toEqual({
       warehouseId: "请选择仓库",
@@ -52,7 +103,7 @@ describe("inbound form", () => {
 
   it("rejects non-positive quantities and negative or non-numeric costs", () => {
     expect(validateInboundDraft({ ...validInbound, quantity: "0" })).toEqual({ quantity: "数量必须为正数" });
-    expect(validateInboundDraft({ ...validInbound, quantity: "abc" })).toEqual({ quantity: "数量必须为正数" });
+    expect(validateInboundDraft({ ...validInbound, quantity: "abc" })).toEqual({ quantity: "数量必须为最多 14 位整数和 4 位小数的普通十进制数" });
     expect(validateInboundDraft({ ...validInbound, unitCost: "-0.01" })).toEqual({ unitCost: "单价必须为非负数" });
   });
 

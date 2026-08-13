@@ -48,6 +48,24 @@ describe("session draft", () => {
     expect(readSessionDraft(storage, "inbound", "admin-1", 1)).toBeNull();
   });
 
+  it("rejects draft values that fail the provided runtime guard", () => {
+    const storage = createStorage();
+    const isNamedValue = (value: unknown): value is { name: string } => (
+      value !== null
+      && typeof value === "object"
+      && !Array.isArray(value)
+      && typeof (value as { name?: unknown }).name === "string"
+    );
+
+    for (const value of [null, [], {}, { other: "value" }, { name: 42 }]) {
+      writeSessionDraft(storage, "inbound", { version: 1, userId: "admin-1", value });
+      expect(readSessionDraft(storage, "inbound", "admin-1", 1, isNamedValue)).toBeNull();
+    }
+
+    writeSessionDraft(storage, "inbound", { version: 1, userId: "admin-1", value: { name: "valid" } });
+    expect(readSessionDraft(storage, "inbound", "admin-1", 1, isNamedValue)).toEqual({ name: "valid" });
+  });
+
   it("clears only the requested draft", () => {
     const storage = createStorage();
     storage.setItem("inbound", "draft");

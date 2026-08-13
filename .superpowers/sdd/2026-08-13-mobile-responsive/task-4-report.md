@@ -161,3 +161,115 @@ git diff --check
 - 所有 Task 4 浏览器验证均由 Playwright `webServer` 启动并拥有本工作树命令，固定 API 3301 / Web 5474；API 为 memory persistence。
 - Playwright 结束后自动回收其子进程；最终确认 3301/5474 均空闲。
 - 3001/5174 原有监听全程保留，未终止、未修改；未访问生产数据库、未部署、未 push。
+
+---
+
+## Fix Round 1 / 5（base `14ca575`）
+
+### Status
+
+已修复三个 Important：入库草稿 runtime shape、Decimal(18,4) 输入域与提交规范化、提交失败在仍打开确认弹窗中的可见性与重试语义。
+
+### 真实 schema / API 语义核对
+
+- `prisma/schema.prisma` 中 `InboundLine.quantity/unitCost` 与 `ProcurementBatch.quantity/unitCost` 均为 `@db.Decimal(18, 4)`；即最多 18 位总精度、4 位小数、14 位整数。
+- `InboundService.create()` 接收字符串 quantity/unitCost，使用 Decimal 校验并传入 store；purchasedAt 是字符串并由服务端转换为 ISO DateTime。
+- 本轮不连接真实数据库；客户端在 POST 前对两个 Decimal 字段执行相同精度边界约束，并发送规范化普通十进制字符串，日期发送已 trim 的 `YYYY-MM-DD`。
+
+### RED 1：runtime shape 与 Decimal(18,4) 纯逻辑
+
+命令：
+
+```powershell
+corepack pnpm vitest run tests/unit/web/session-draft.test.ts tests/unit/web/inbound-form.test.ts
+```
+
+精确结果：退出码 1；`2 failed` test files，`5 failed | 11 passed` tests。
+
+- `readSessionDraft(..., guard)` 未消费 guard，array `[]` 被原样返回而非 `null`。
+- `isInboundDraft` 与 `createInboundPayload` 不存在。
+- 科学计数/超精度格式没有字段错误。
+- `calculateInboundAmount("1e1000000", "2")` 未返回 `null`，而是展开为巨量零字符串，证明存在无界 `toFixed` 风险。
+
+### RED 2：浏览器页面接线 mutation check
+
+为了证明 E2E 能捕获页面接线缺失，在保持纯函数实现的情况下临时移除 InboundPage 的 guard、payload builder 与 modal alert 接线；mutation 随后全部恢复，未提交。
+
+隔离命令（临时 Playwright config 托管本树 API 3301 / Web 5474，API 为 memory persistence + local auth）：
+
+```powershell
+$env:API_BASE_URL='http://127.0.0.1:3301'
+$env:WEB_BASE_URL='http://127.0.0.1:5474'
+corepack pnpm playwright test tests/e2e/mobile/inbound.spec.ts --config playwright.task4-fix.config.ts --grep "failed draft|invalid runtime"
+```
+
+精确结果：退出码 1；`2 failed`。
+
+- POST 实际 payload 为 `quantity: "01.2300"`、`unitCost: "0000.2000"`，期望 `"1.23"`、`"0.2"`。
+- sessionStorage 中 `{ quantity: 2 }` 的损坏入库草稿导致页面标题 `登记入库` 5 秒内不可见，即页面白屏。
+
+随后单独推进失败可见性断言：
+
+```powershell
+corepack pnpm playwright test tests/e2e/mobile/inbound.spec.ts --config playwright.task4-fix.config.ts --grep "failed draft"
+```
+
+精确结果：退出码 1；`1 failed`。仍打开的 `确认入库` dialog 内 `getByRole("alert")` 5 秒内不存在；证明原页面 alert 被 backdrop 隔离，用户在弹窗语义中看不到失败原因。
+
+### 修复
+
+- `readSessionDraft` 新增可选 type guard；匹配 envelope 后仍必须通过 value runtime guard。
+- `isInboundDraft` 仅接受非 null、非 array 对象，且 brief 中 8 个必需字段全部是字符串。
+- Decimal 输入先用有界普通十进制格式解析：拒绝指数、hex、负零、超过 4 位小数、超过 14 位整数；`99999999999999.9999` 上限通过。格式检查通过后才构造 Decimal 并执行正数/非负业务规则。
+- `calculateInboundAmount` 共用有界解析，巨大指数在 Decimal/toFixed 前返回 `null`。
+- `createInboundPayload` 对 quantity/unitCost 使用 Decimal `toString()`，并 trim batchNo、purchasedAt、purchaser、remark；E2E mock POST 断言关键 payload。
+- 服务端或网络错误继续保持确认弹窗打开，并在 dialog body 内以 `role=alert` 显示；busy 结束后确认按钮重新 enabled，可修复外部状态后重试，草稿不清除。
+
+### GREEN / 回归
+
+纯逻辑：
+
+```powershell
+corepack pnpm vitest run tests/unit/web/session-draft.test.ts tests/unit/web/inbound-form.test.ts
+```
+
+精确结果：退出码 0；`2 passed` test files，`16 passed` tests。
+
+移动 / 桌面 / 权限隔离回归：
+
+```powershell
+$env:API_BASE_URL='http://127.0.0.1:3301'
+$env:WEB_BASE_URL='http://127.0.0.1:5474'
+corepack pnpm playwright test tests/e2e/mobile/inbound.spec.ts --config playwright.task4-fix.config.ts
+```
+
+精确结果：退出码 0；`9 passed (9.1s)`：
+
+- 未登录入库与期初库存 401 权限语义；
+- 失败草稿、规范化 payload、dialog 内 alert、按钮重新 enabled、刷新恢复；
+- 损坏 runtime 草稿安全忽略且页面可用；
+- 成功与防重复提交；
+- 320 / 390 / 430 / 820 手机无横溢与触控；
+- 1280 桌面双列与完整确认摘要。
+
+类型检查：
+
+```powershell
+corepack pnpm --filter @warehouse/web typecheck
+```
+
+精确结果：退出码 0；`tsc -b --pretty false` 无错误。
+
+`git diff --check`：退出码 0，无 whitespace error。
+
+### 隔离进程清理与 concerns
+
+- 启动前 3301/5474 均空闲；临时 Playwright config 与两个本地启动脚本只用于本轮隔离验证，GREEN 后已删除，未提交。
+- 验证后 3301/5474 均 `FREE`；3001/5174 原监听仍在，未停止、未修改。
+- 未读取生产 Secret、未连接生产数据库、未部署、未 push。
+- 本轮无剩余产品 concern；旧 admin spec 的隔离问题按指示不扩张。
+
+### Fix Round 1 commits / status
+
+- Fix commit：见本节所在提交。
+- 提交后确认 `git status` clean。

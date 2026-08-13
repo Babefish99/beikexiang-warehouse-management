@@ -9,6 +9,7 @@ export function readSessionDraft<T>(
   key: string,
   expectedUserId: string,
   version: number,
+  isValue?: (value: unknown) => value is T,
 ): T | null {
   try {
     const parsed = JSON.parse(storage.getItem(key) ?? "null") as DraftEnvelope<T> | null;
@@ -17,7 +18,7 @@ export function readSessionDraft<T>(
       && parsed.version === version
       && parsed.userId === expectedUserId
       && Object.prototype.hasOwnProperty.call(parsed, "value")
-      ? parsed.value
+      ? (isValue && !isValue(parsed.value) ? null : parsed.value)
       : null;
   } catch {
     return null;
