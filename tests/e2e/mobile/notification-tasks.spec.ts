@@ -40,10 +40,15 @@ test("mobile notifications open as a readable task sheet with real routes", asyn
 
 test("business completion bypasses an older request and resolved tasks stay removed", async ({ page }) => {
   let requestCount = 0;
+  let releaseOlderRequest!: () => void;
+  const olderRequestReleased = new Promise<void>((resolve) => { releaseOlderRequest = resolve; });
+  let olderRequestStarted!: () => void;
+  const olderRequestHasStarted = new Promise<void>((resolve) => { olderRequestStarted = resolve; });
   await page.route(apiUrl("/admin/notifications"), async (route) => {
     requestCount += 1;
     if (requestCount === 2) {
-      await new Promise((resolve) => setTimeout(resolve, 700));
+      olderRequestStarted();
+      await olderRequestReleased;
       await route.fulfill({ contentType: "application/json", body: JSON.stringify(tasks) });
       return;
     }
@@ -53,10 +58,10 @@ test("business completion bypasses an older request and resolved tasks stay remo
   await expect(page.getByRole("button", { name: "更多" })).toBeVisible();
   await expect.poll(() => requestCount).toBeGreaterThanOrEqual(1);
   const center = await openMobileNotificationCenter(page);
-  await expect.poll(() => requestCount).toBeGreaterThanOrEqual(2);
+  await olderRequestHasStarted;
   await page.evaluate(() => window.dispatchEvent(new Event("warehouse:business-completed")));
   await expect.poll(() => requestCount).toBeGreaterThanOrEqual(3);
-  await page.waitForTimeout(800);
+  releaseOlderRequest();
 
   await expect(center.getByText("暂无待处理任务")).toBeVisible();
   await expect(center.getByText("待出库审批")).toHaveCount(0);

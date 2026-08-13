@@ -199,7 +199,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
   }
   .mobile-bottom-nav a.is-active { color: var(--orange); font-weight: 650; }
   .mobile-bottom-nav svg { width: 18px; height: 18px; }
-  input, select, textarea { font-size: 16px; }
+  input, select, textarea,
+  .form-grid input, .form-grid select, .form-grid textarea { font-size: 16px; }
   .modal-dialog-shell { place-items: end center; padding: 12px; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .modal-dialog--shared { max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px - env(safe-area-inset-bottom)); border-radius: 18px; }
   .mobile-notification-center { max-width: 100%; overflow-x: hidden; }

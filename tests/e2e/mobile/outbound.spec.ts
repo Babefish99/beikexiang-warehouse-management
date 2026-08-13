@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { apiUrl, apiUrlPattern, loginAs } from "./mobile-test-helpers";
+import { apiUrl, apiUrlPattern, loginAs, webBaseUrl } from "./mobile-test-helpers";
 
 const pending = [{
   id: "approval-1",
@@ -222,7 +222,7 @@ test("waits for pending before classifying a persisted draft as active or stale"
   });
   await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ approvalId: "approval-1", batches }) }));
   await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Foutbound&role=ADMIN"));
-  await page.goto("http://127.0.0.1:5474/admin/outbound");
+  await page.goto(new URL("/admin/outbound", webBaseUrl).toString());
   await page.evaluate(({ draftKey, indexKey }) => {
     sessionStorage.setItem(draftKey, JSON.stringify({ version: 1, userId: "local-admin", value: { approvalId: "approval-1", step: "allocate", reason: "", allocations: [{ id: "a1", approvalLineId: "line-1", warehouseId: "", batchId: "", quantity: "" }] } }));
     sessionStorage.setItem(indexKey, JSON.stringify({ version: 1, userId: "local-admin", value: [{ approvalId: "approval-1", weComSpNo: "202608130001" }] }));
@@ -289,7 +289,7 @@ test("shows a persisted stale draft only after pending successfully loads empty"
     await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
   });
   await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Foutbound&role=ADMIN"));
-  await page.goto("http://127.0.0.1:5474/admin/outbound");
+  await page.goto(new URL("/admin/outbound", webBaseUrl).toString());
   await page.evaluate(({ draftKey, indexKey }) => {
     sessionStorage.setItem(draftKey, JSON.stringify({ version: 1, userId: "local-admin", value: { approvalId: "approval-1", step: "allocate", reason: "", allocations: [] } }));
     sessionStorage.setItem(indexKey, JSON.stringify({ version: 1, userId: "local-admin", value: [{ approvalId: "approval-1", weComSpNo: "202608130001" }] }));

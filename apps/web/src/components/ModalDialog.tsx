@@ -15,6 +15,16 @@ function getFocusableElements(container: HTMLElement): HTMLElement[] {
     .filter((element) => element.tabIndex >= 0 && !element.hasAttribute("hidden"));
 }
 
+function focusError(error: HTMLElement): void {
+  if (!error.matches(focusableSelector)) error.tabIndex = -1;
+  error.focus({ preventScroll: true });
+  error.scrollIntoView({ block: "nearest" });
+}
+
+function findFirstError(container: ParentNode): HTMLElement | null {
+  return container.querySelector<HTMLElement>('[role="alert"], [aria-invalid="true"]');
+}
+
 export function ModalDialog({
   open,
   title,
@@ -47,8 +57,22 @@ export function ModalDialog({
     const dialog = dialogRef.current;
     const focusable = dialog ? getFocusableElements(dialog) : [];
     (focusable[0] ?? dialog)?.focus();
+    const existingError = dialog ? findFirstError(dialog) : null;
+    if (existingError) focusError(existingError);
+    const observer = dialog ? new MutationObserver((records) => {
+      for (const node of records.flatMap((record) => Array.from(record.addedNodes))) {
+        if (!(node instanceof HTMLElement)) continue;
+        const error = node.matches('[role="alert"], [aria-invalid="true"]') ? node : findFirstError(node);
+        if (error) {
+          focusError(error);
+          return;
+        }
+      }
+    }) : null;
+    observer?.observe(dialog!, { childList: true, subtree: true });
 
     return () => {
+      observer?.disconnect();
       document.body.style.overflow = previousOverflow;
       trigger?.focus();
     };
