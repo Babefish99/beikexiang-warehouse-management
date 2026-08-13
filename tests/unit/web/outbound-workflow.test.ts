@@ -93,6 +93,22 @@ describe("outbound workflow", () => {
     expect(reconciled.draft.step).toBe("review");
   });
 
+  it("preserves the current workflow step while reconciling batch options", () => {
+    const draft: OutboundDraft = {
+      approvalId: "approval-1",
+      step: "allocate",
+      reason: "",
+      allocations: [{ id: "allocation-1", approvalLineId: "line-1", warehouseId: "wh-1", batchId: "batch-1", quantity: "" }],
+    };
+
+    const reconciled = reconcileBatchOptions(draft, [
+      { batchId: "batch-1", warehouseId: "wh-1", itemId: "item-1", remainingQuantity: "4", unitCost: "20" },
+    ]);
+
+    expect(reconciled.draft).toEqual(draft);
+    expect(reconciled.invalidAllocationIds).toEqual([]);
+  });
+
   it("isolates draft keys by encoded user and approval and rejects malformed runtime shapes", () => {
     expect(outboundDraftKey("user/a", "approval b")).toBe("warehouse.outbound.v1.user%2Fa.approval%20b");
     expect(isOutboundDraft({ approvalId: "a", step: "allocate", reason: "", allocations: [] })).toBe(true);

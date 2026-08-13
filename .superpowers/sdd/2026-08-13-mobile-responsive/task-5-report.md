@@ -115,3 +115,86 @@ git diff --check
 - 启动前 3301/5474 空闲；仅本树进程使用这两个端口，API 为 memory/local-auth。
 - 最终 3301、5474 均 `FREE`；3001/5174 原有监听保持，未停止或修改。
 - 无部署、无 push、无生产数据库连接、无生产 Secret 读取/修改。
+
+---
+
+## Fix Round 1 / 5（base `3af19c9`）
+
+### Status
+
+DONE。仅修复三个 Important：reconcile 保留当前步骤、options 请求防陈旧响应、active approval 离开 pending 后安全退出；并补充库存变化后 confirm POST 必须为 0 的直接负断言。
+
+### RED
+
+纯函数：
+
+```powershell
+corepack pnpm vitest run tests/unit/web/outbound-workflow.test.ts
+```
+
+退出码 1；`1 failed / 6 passed`。`reconcileBatchOptions()` 对 allocate draft 的唯一差异为 `step` 从 `allocate` 错误变为 `review`。
+
+隔离移动目标组（本树 API 3301 / Web 5474、memory/local-auth）：
+
+```powershell
+$env:API_BASE_URL='http://127.0.0.1:3301'
+$env:WEB_BASE_URL='http://127.0.0.1:5474'
+corepack pnpm playwright test tests/e2e/mobile/outbound.spec.ts --config playwright.task5-fix1.config.ts --grep "restores an allocate|does not resurrect|exits a draft safely|keeps the review visible"
+```
+
+退出码 1；`3 failed / 1 passed (24.4s)`：
+
+- allocate 刷新后找不到“分配库存”，证明恢复绕到了 review；
+- 加载中放弃后旧 options fulfill，session 草稿数期望 0、实际 1；
+- pending 移除当前审批后找不到“待办状态已变化”，页面空白；
+- 库存变化停留复核用例通过，并新增 `confirmPosts === 0` 断言。
+
+### 最小修复
+
+- `reconcileBatchOptions()` 返回复制 draft，不再修改 step；allocate 恢复仍在分配步骤并必须通过 `validateAllocationStep()`，review 重校验自然保持 review。
+- `MobileOutboundFlow` 为 options 请求维护单调 epoch 与 active approvalId；响应只有同时满足 mounted、epoch 最新、approvalId 当前才可更新 state/session。放弃、pending 消失与卸载均递增 epoch 并清 active id，使旧响应无效。
+- StrictMode effect setup 每次将 mounted 恢复 true，cleanup 使请求失效；合法第二次 setup 响应不被误丢。
+- active draft 对应 approval 离开 pending 时，仅退出内存流程并显示“待办状态已变化”；session 草稿保留，其他待办可继续选择，用户可显式“放弃该草稿”后清除。
+
+### GREEN / 回归
+
+目标移动组：退出码 0；`4 passed (7.7s)`。
+
+完整移动组：
+
+```powershell
+corepack pnpm playwright test tests/e2e/mobile/outbound.spec.ts --config playwright.task5-fix1.config.ts
+```
+
+退出码 0；`7 passed (9.7s)`。
+
+纯函数 / allocator / API：
+
+```powershell
+corepack pnpm vitest run tests/unit/web/outbound-workflow.test.ts tests/unit/inventory/outbound-allocator.test.ts tests/integration/inventory/outbound-service.test.ts
+```
+
+退出码 0；`3 passed` test files、`24 passed` tests。
+
+桌面回归：
+
+```powershell
+corepack pnpm playwright test tests/e2e/admin/outbound.spec.ts --config playwright.task5-fix1.config.ts
+```
+
+退出码 0；`3 passed (6.4s)`。
+
+```powershell
+corepack pnpm --filter @warehouse/web typecheck
+corepack pnpm --filter @warehouse/api typecheck
+git diff --check
+```
+
+均退出码 0；Web/API TypeScript 0 errors；无 whitespace error（仅 LF→CRLF 提示）。
+
+### Commit / Concerns / 清理
+
+- Fix commit：见本节所在提交。
+- 本轮无产品 concern；成功 payload 与真实路由 stock-changed→409 留作已登记 Minor，未扩张。
+- 临时 Playwright config/启动脚本验证后删除，未提交。
+- 最终 3301/5474 释放；3001/5174 原监听未停止或修改；无生产 DB、Secret、部署或 push。

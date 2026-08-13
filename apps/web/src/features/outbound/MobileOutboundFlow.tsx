@@ -49,37 +49,67 @@ export function MobileOutboundFlow({ userId, pending, onReloadOptions, onConfirm
   const [cancelStage, setCancelStage] = useState<"reason" | "confirm">("reason");
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [staleDraft, setStaleDraft] = useState<OutboundDraft | null>(null);
   const submitLock = useRef(false);
   const cancelLock = useRef(false);
   const mounted = useRef(true);
+  const optionsRequestEpoch = useRef(0);
+  const activeApprovalId = useRef<string | null>(null);
 
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; };
+    return () => {
+      mounted.current = false;
+      optionsRequestEpoch.current += 1;
+      activeApprovalId.current = null;
+    };
   }, []);
+
+  const beginOptionsRequest = (approvalId: string) => {
+    activeApprovalId.current = approvalId;
+    optionsRequestEpoch.current += 1;
+    return optionsRequestEpoch.current;
+  };
+  const isCurrentOptionsRequest = (epoch: number, approvalId: string) => mounted.current
+    && optionsRequestEpoch.current === epoch
+    && activeApprovalId.current === approvalId;
 
   useEffect(() => {
     if (draft || result || !pending.length) return;
     for (const approval of pending) {
       const stored = readSessionDraft<OutboundDraft>(window.sessionStorage, outboundDraftKey(userId, approval.id), userId, draftVersion, isOutboundDraft);
-      if (stored?.approvalId === approval.id && stored.step !== "complete") {
+      if (stored?.approvalId === approval.id && stored.step !== "complete" && stored.approvalId !== staleDraft?.approvalId) {
+        activeApprovalId.current = stored.approvalId;
         setDraft(stored);
         setLoadingOptions(true);
+        const epoch = beginOptionsRequest(approval.id);
         void onReloadOptions(approval.id).then((next) => {
-          if (!mounted.current) return;
+          if (!isCurrentOptionsRequest(epoch, approval.id)) return;
           const reconciled = reconcileBatchOptions(stored, next);
           setOptions(next);
           setInvalidAllocationIds(reconciled.invalidAllocationIds);
           setDraft(reconciled.draft);
         }).catch((error: unknown) => {
-          if (mounted.current) setReviewError(error instanceof Error ? error.message : "读取可用批次失败");
-        }).finally(() => { if (mounted.current) setLoadingOptions(false); });
+          if (isCurrentOptionsRequest(epoch, approval.id)) setReviewError(error instanceof Error ? error.message : "读取可用批次失败");
+        }).finally(() => { if (isCurrentOptionsRequest(epoch, approval.id)) setLoadingOptions(false); });
         break;
       }
     }
-  }, [draft, onReloadOptions, pending, result, userId]);
+  }, [draft, onReloadOptions, pending, result, staleDraft?.approvalId, userId]);
+
+  useEffect(() => {
+    if (!draft || result || pending.some((candidate) => candidate.id === draft.approvalId)) return;
+    optionsRequestEpoch.current += 1;
+    activeApprovalId.current = null;
+    setStaleDraft(draft);
+    setDraft(null);
+    setOptions([]);
+    setLoadingOptions(false);
+    setReviewError(null);
+  }, [draft, pending, result]);
 
   const saveDraft = (next: OutboundDraft) => {
+    activeApprovalId.current = next.approvalId;
     writeSessionDraft(window.sessionStorage, outboundDraftKey(userId, next.approvalId), { version: draftVersion, userId, value: next });
     setDraft(next);
   };
@@ -91,17 +121,18 @@ export function MobileOutboundFlow({ userId, pending, onReloadOptions, onConfirm
     saveDraft(next);
     setLoadingOptions(true);
     setReviewError(null);
+    const epoch = beginOptionsRequest(selected.id);
     try {
       const loaded = await onReloadOptions(selected.id);
-      if (!mounted.current) return;
+      if (!isCurrentOptionsRequest(epoch, selected.id)) return;
       setOptions(loaded);
       const reconciled = reconcileBatchOptions(next, loaded);
       setInvalidAllocationIds(reconciled.invalidAllocationIds);
       saveDraft({ ...reconciled.draft, step: next.step === "select" ? "allocate" : next.step });
     } catch (error) {
-      if (mounted.current) setReviewError(error instanceof Error ? error.message : "读取可用批次失败");
+      if (isCurrentOptionsRequest(epoch, selected.id)) setReviewError(error instanceof Error ? error.message : "读取可用批次失败");
     } finally {
-      if (mounted.current) setLoadingOptions(false);
+      if (isCurrentOptionsRequest(epoch, selected.id)) setLoadingOptions(false);
     }
   };
   const updateAllocation = (rowId: string, patch: Partial<AllocationRow>) => {
@@ -125,9 +156,10 @@ export function MobileOutboundFlow({ userId, pending, onReloadOptions, onConfirm
     if (reviewErrors.reason) return;
     submitLock.current = true;
     setSubmitting(true);
+    const epoch = beginOptionsRequest(approval.id);
     try {
       const latest = await onReloadOptions(approval.id);
-      if (!mounted.current) return;
+      if (!isCurrentOptionsRequest(epoch, approval.id)) return;
       setOptions(latest);
       const reconciled = reconcileBatchOptions(draft, latest);
       setInvalidAllocationIds(reconciled.invalidAllocationIds);
@@ -138,7 +170,7 @@ export function MobileOutboundFlow({ userId, pending, onReloadOptions, onConfirm
       }
       setConfirming(true);
     } catch (error) {
-      if (mounted.current) setReviewError(error instanceof Error ? error.message : "提交前校验失败，草稿已保留");
+      if (isCurrentOptionsRequest(epoch, approval.id)) setReviewError(error instanceof Error ? error.message : "提交前校验失败，草稿已保留");
     } finally {
       submitLock.current = false;
       if (mounted.current) setSubmitting(false);
@@ -165,6 +197,8 @@ export function MobileOutboundFlow({ userId, pending, onReloadOptions, onConfirm
     }
   };
   const discard = () => {
+    optionsRequestEpoch.current += 1;
+    activeApprovalId.current = null;
     if (draft) clearSessionDraft(window.sessionStorage, outboundDraftKey(userId, draft.approvalId));
     setDraft(null);
     setOptions([]);
@@ -172,6 +206,11 @@ export function MobileOutboundFlow({ userId, pending, onReloadOptions, onConfirm
     setReviewError(null);
     setAllocationErrors({});
     setInvalidAllocationIds([]);
+  };
+  const discardStaleDraft = () => {
+    if (!staleDraft) return;
+    clearSessionDraft(window.sessionStorage, outboundDraftKey(userId, staleDraft.approvalId));
+    setStaleDraft(null);
   };
   const advanceCancel = () => {
     if (!cancelReason.trim()) {
@@ -207,7 +246,7 @@ export function MobileOutboundFlow({ userId, pending, onReloadOptions, onConfirm
   if (result && draft?.step === "complete") return <section className="outbound-flow"><h2>出库完成</h2><div className="success-notice" role="status"><CheckCircle2 size={18} />出库已完成</div><dl className="outbound-review"><div><dt>服务端 ID</dt><dd>{result.id}</dd></div><div><dt>状态</dt><dd>{result.status}</dd></div><div><dt>实际数量</dt><dd>{result.actualQuantity}</dd></div><div><dt>金额</dt><dd>{result.amount}</dd></div></dl><button className="button button--primary" type="button" onClick={discard}>返回待办</button></section>;
 
   return <section className="outbound-flow">
-    {!draft ? <><h2>选择待办</h2>{reviewError ? <div className="success-notice" role="status">{reviewError}</div> : null}<div className="outbound-card-list">{pending.map((item) => <article className="outbound-card" key={item.id}><strong>{item.weComSpNo}</strong><span>{item.lines.length} 个物品 · {item.status}</span><div className="outbound-card__actions"><button className="button button--primary" type="button" onClick={() => void start(item)}>办理出库</button><button className="button button--danger" type="button" onClick={() => { setCancelApproval(item); setCancelReason(""); setCancelStage("reason"); setCancelError(null); }}>取消待办</button></div></article>)}</div></> : null}
+    {!draft ? <><h2>选择待办</h2>{staleDraft ? <div className="notice outbound-stale-draft" role="status"><strong>待办状态已变化</strong><p>当前办理已退出，草稿仍保留。你可以选择其他待办，或主动放弃该草稿。</p><button className="button button--secondary" type="button" onClick={discardStaleDraft}>放弃该草稿</button></div> : null}{reviewError ? <div className="success-notice" role="status">{reviewError}</div> : null}<div className="outbound-card-list">{pending.map((item) => <article className="outbound-card" key={item.id}><strong>{item.weComSpNo}</strong><span>{item.lines.length} 个物品 · {item.status}</span><div className="outbound-card__actions"><button className="button button--primary" type="button" onClick={() => void start(item)}>办理出库</button><button className="button button--danger" type="button" onClick={() => { setCancelApproval(item); setCancelReason(""); setCancelStage("reason"); setCancelError(null); }}>取消待办</button></div></article>)}</div></> : null}
     {draft?.step === "allocate" && approval ? <><h2>分配库存</h2>{loadingOptions ? <div className="notice">正在读取可用批次…</div> : null}{reviewError ? <div className="form-error" role="alert">{reviewError}</div> : null}{approval.lines.map((line) => {
       const rows = draft.allocations.filter((row) => row.approvalLineId === line.id);
       const lineOptions = options.filter((option) => option.itemId === line.itemId);

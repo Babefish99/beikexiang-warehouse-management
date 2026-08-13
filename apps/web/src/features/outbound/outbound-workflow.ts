@@ -130,7 +130,7 @@ export function reconcileBatchOptions(draft: OutboundDraft, options: readonly Ba
     if (quantity) totals.set(key, (totals.get(key) ?? new Decimal(0)).plus(quantity));
   }
   return {
-    draft: { ...draft, step: "review" },
+    draft: { ...draft },
     invalidAllocationIds: draft.allocations.filter((row) => {
       if (!row.batchId) return false;
       const key = `${row.warehouseId}:${row.batchId}`;
