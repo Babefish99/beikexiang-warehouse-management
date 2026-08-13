@@ -1,5 +1,8 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, BarChart3, Building2, ChevronDown, LayoutDashboard, Menu, PackageSearch, Search, Settings, ShieldCheck, UserCircle, Warehouse, X } from "lucide-react";
+import { Bell, BarChart3, Building2, ChevronDown, LayoutDashboard, PackageSearch, Search, Settings, ShieldCheck, UserCircle, Warehouse, X } from "lucide-react";
+import { MobileBottomNav } from "../features/mobile/MobileBottomNav";
+import { MobileMoreSheet } from "../features/mobile/MobileMoreSheet";
+import { useMobileViewport } from "../features/mobile/use-mobile-viewport";
 import { LogoMark } from "./LogoMark";
 
 export type WarehouseOption = { id: string; code: string; name: string; isActive: boolean };
@@ -81,6 +84,7 @@ export function AppShell({
   onSelectWarehouse(warehouseId: string): void;
 }) {
   const pathname = window.location.pathname;
+  const isMobileViewport = useMobileViewport();
   const currentSection = navItems.find((item) => isActivePath(pathname, item))?.label ?? "工作台";
   const selectedWarehouseLabel = useMemo(
     () => toWarehouseLabel(selectedWarehouseId, warehouses),
@@ -88,7 +92,7 @@ export function AppShell({
   );
   const loginChannel = window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost" ? "本地开发登录" : "企业微信登录";
 
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [moreSheetOpen, setMoreSheetOpen] = useState(false);
   const [warehouseMenuOpen, setWarehouseMenuOpen] = useState(false);
   const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -149,10 +153,6 @@ export function AppShell({
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (mobileMenuOpen) {
-        setMobileMenuOpen(false);
-        return;
-      }
       if (warehouseMenuOpen) {
         setWarehouseMenuOpen(false);
         return;
@@ -174,7 +174,7 @@ export function AppShell({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [mobileMenuOpen, notificationMenuOpen, searchPopoverOpen, userMenuOpen, warehouseMenuOpen]);
+  }, [notificationMenuOpen, searchPopoverOpen, userMenuOpen, warehouseMenuOpen]);
 
   useEffect(() => {
     if (user.role !== "ADMIN") {
@@ -222,13 +222,9 @@ export function AppShell({
     window.location.assign(`/admin/items?search=${encodeURIComponent(code)}`);
   };
 
-  const closeDrawer = () => {
-    setMobileMenuOpen(false);
-  };
-
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <div className="app-shell mobile-app-frame">
+      {!isMobileViewport ? <aside className="sidebar">
         <div className="sidebar__brand">
           <LogoMark />
         </div>
@@ -247,48 +243,11 @@ export function AppShell({
           <strong>库存数据安全运行中</strong>
           <small>三仓库统一管理</small>
         </div>
-      </aside>
-
-      {mobileMenuOpen ? (
-        <div className="mobile-drawer" role="dialog" aria-modal="true" aria-label="移动导航">
-          <button className="mobile-drawer__backdrop" type="button" aria-label="关闭菜单" onClick={closeDrawer} />
-          <div className="mobile-drawer__panel">
-            <div className="mobile-drawer__header">
-              <div>
-                <strong>集团仓库</strong>
-                <small>库存管理后台</small>
-              </div>
-              <button className="topbar-icon-button" type="button" aria-label="关闭菜单" onClick={closeDrawer}>
-                <X size={18} />
-              </button>
-            </div>
-            <nav className="mobile-drawer__nav" aria-label="移动主导航">
-              {navItems.map(({ label, href, icon: Icon, ...item }) => {
-                const active = isActivePath(pathname, { label, href, icon: Icon, ...item });
-                return (
-                  <a
-                    className={`nav-item ${active ? "is-active" : ""}`}
-                    key={`mobile-${label}`}
-                    href={href}
-                    aria-current={active ? "page" : undefined}
-                    onClick={closeDrawer}
-                  >
-                    <Icon size={18} strokeWidth={1.8} />
-                    <span>{label}</span>
-                  </a>
-                );
-              })}
-            </nav>
-          </div>
-        </div>
-      ) : null}
+      </aside> : null}
 
       <div className="workspace">
-        <header className="topbar">
+        {!isMobileViewport ? <header className="topbar">
           <div className="topbar__leading">
-            <button className="topbar-icon-button mobile-nav-toggle" type="button" aria-label="打开菜单" onClick={() => setMobileMenuOpen(true)}>
-              <Menu size={18} />
-            </button>
             <div className="topbar__crumb">
               <span>集团仓库管理系统</span>
               <strong>{currentSection}</strong>
@@ -484,9 +443,15 @@ export function AppShell({
               ) : null}
             </div>
           </div>
-        </header>
+        </header> : null}
         <main className="main-content">{children}</main>
       </div>
+      {isMobileViewport ? (
+        <>
+          <MobileBottomNav role={user.role} pathname={pathname} onOpenMore={() => setMoreSheetOpen(true)} />
+          <MobileMoreSheet open={moreSheetOpen} user={user} loginChannel={loginChannel} onClose={() => setMoreSheetOpen(false)} />
+        </>
+      ) : null}
     </div>
   );
 }
