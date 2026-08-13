@@ -19,23 +19,31 @@ export function OutboundPage({ userId }: { userId: string }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const mounted = useRef(true);
+  const pendingRequestEpoch = useRef(0);
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; };
+    return () => {
+      mounted.current = false;
+      pendingRequestEpoch.current += 1;
+    };
   }, []);
 
   const loadPending = useCallback(async () => {
+    if (!mounted.current) return;
+    pendingRequestEpoch.current += 1;
+    const epoch = pendingRequestEpoch.current;
+    const isCurrentRequest = () => mounted.current && pendingRequestEpoch.current === epoch;
     setLoading(true);
     setLoadError(null);
     try {
       const response = await fetch(`${apiBaseUrl}/admin/outbound/pending`, { credentials: "include" });
       if (!response.ok) throw new Error(await readError(response));
       const next = await response.json() as PendingApproval[];
-      if (mounted.current) setPending(next);
+      if (isCurrentRequest()) setPending(next);
     } catch (error) {
-      if (mounted.current) setLoadError(error instanceof Error ? error.message : "读取待出库审批失败");
+      if (isCurrentRequest()) setLoadError(error instanceof Error ? error.message : "读取待出库审批失败");
     } finally {
-      if (mounted.current) setLoading(false);
+      if (isCurrentRequest()) setLoading(false);
     }
   }, []);
   useEffect(() => { void loadPending(); }, [loadPending]);

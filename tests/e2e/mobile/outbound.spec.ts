@@ -238,6 +238,48 @@ test("waits for pending before classifying a persisted draft as active or stale"
   await expect(page.getByTestId("stale-draft-approval-1")).toHaveCount(0);
 });
 
+test("ignores an older empty pending response after a newer refresh restores the active draft", async ({ page }) => {
+  let overlapStarted!: () => void;
+  const firstOverlapStarted = new Promise<void>((resolve) => { overlapStarted = resolve; });
+  let releaseOlderResponse!: () => void;
+  const olderResponseReleased = new Promise<void>((resolve) => { releaseOlderResponse = resolve; });
+  let overlapping = false;
+  let overlapReads = 0;
+  await page.unroute(apiUrl("/admin/outbound/pending"));
+  await page.route(apiUrl("/admin/outbound/pending"), async (route) => {
+    if (!overlapping) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(pending) });
+      return;
+    }
+    overlapReads += 1;
+    if (overlapReads === 1) {
+      overlapStarted();
+      await olderResponseReleased;
+      await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(pending) });
+  });
+  await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ approvalId: "approval-1", batches }) }));
+  await loginAs(page, "/admin/outbound", "ADMIN");
+  await page.getByRole("button", { name: "办理出库" }).click();
+  await expect(page.getByRole("heading", { name: "分配库存" })).toBeVisible();
+
+  overlapping = true;
+  await page.getByRole("button", { name: "刷新" }).click();
+  await firstOverlapStarted;
+  await page.getByRole("button", { name: "刷新" }).click();
+  await expect(page.getByText("待处理 1 张审批单")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "分配库存" })).toBeVisible();
+
+  releaseOlderResponse();
+  await page.waitForTimeout(100);
+  await expect(page.getByText("待处理 1 张审批单")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "分配库存" })).toBeVisible();
+  await expect(page.getByTestId("stale-draft-approval-1")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "放弃该草稿" })).toHaveCount(0);
+});
+
 test("shows a persisted stale draft only after pending successfully loads empty", async ({ page }) => {
   let releasePending!: () => void;
   const delayedPending = new Promise<void>((resolve) => { releasePending = resolve; });

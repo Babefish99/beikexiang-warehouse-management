@@ -259,6 +259,70 @@ git diff --check
 
 ---
 
+## Fix Round 4 / 5（base `2e88d88`）
+
+### Status
+
+DONE。仅修复唯一 open Important：`OutboundPage.loadPending()` 的并发旧响应可覆盖较新刷新结果。所有初始 effect、手动刷新以及 confirm/cancel 完成后的刷新继续统一经过同一 `loadPending()` 接缝。
+
+### RED
+
+在隔离的 API 3301 / Web 5474、`PERSISTENCE_DRIVER=memory`、`LOCAL_AUTH_BYPASS=true` 环境增加可控重叠请求 E2E：先保持 active 草稿，随后让较早请求 A 延迟返回空数组、较新请求 B 立即返回 `approval-1`；B 恢复 active 后再释放 A。
+
+```powershell
+$env:API_BASE_URL='http://127.0.0.1:3301'
+$env:WEB_BASE_URL='http://127.0.0.1:5474'
+corepack pnpm playwright test tests/e2e/mobile/outbound.spec.ts --config playwright.task5-fix4.config.ts --grep "ignores an older empty pending response"
+```
+
+旧实现退出码 1；`1 failed (11.2s)`。释放 A 后最终找不到“待处理 1 张审批单”，失败定位在 active 状态保持断言，证明旧空响应覆盖 B 并把草稿重新归为 stale。
+
+### 最小修复
+
+- `OutboundPage` 增加单调 `pendingRequestEpoch`；每次 `loadPending()` 获取独立 epoch。
+- 只有组件仍 mounted 且请求 epoch 仍为最新时，才能提交 `pending`、`loadError` 或 `loading=false`；旧成功、旧错误与旧 finally 均不能覆盖新状态。
+- unmount / StrictMode cleanup 递增 epoch 并置 mounted=false，使全部在途请求失效；合法第二次 setup 恢复 mounted=true 后可发起新请求。
+- 已卸载组件拒绝再启动 pending 请求；`loadPending` 仍保持空依赖，未形成 effect 自激。
+
+### GREEN / 回归
+
+目标并发 E2E：退出码 0；`1 passed (4.7s)`。
+
+完整移动组：
+
+```powershell
+corepack pnpm playwright test tests/e2e/mobile/outbound.spec.ts --config playwright.task5-fix4.config.ts
+```
+
+退出码 0；`12 passed (11.6s)`。
+
+纯函数 / allocator / API：
+
+```powershell
+corepack pnpm vitest run tests/unit/web/outbound-workflow.test.ts tests/unit/inventory/outbound-allocator.test.ts tests/integration/inventory/outbound-service.test.ts
+```
+
+退出码 0；`3 passed` test files、`26 passed` tests。
+
+桌面回归：退出码 0；`3 passed (5.2s)`。
+
+```powershell
+corepack pnpm --filter @warehouse/web typecheck
+corepack pnpm --filter @warehouse/api typecheck
+git diff --check
+```
+
+均退出码 0；Web/API TypeScript 0 errors；无 whitespace error（仅 LF→CRLF 提示）。
+
+### Commit / Concerns / 清理
+
+- Fix commit：`fix: ignore stale pending responses`（见本节所在提交）；提交后工作树应为 clean。
+- 本轮无新增产品 concern；progress ledger 中既有 render-purity 与其他 deferred Minor 未扩张、未处理。
+- 临时 Playwright config 已删除且不提交。
+- 验证后 3301/5474 均释放；3001/5174 原有监听保持，未停止或修改；无生产 DB、Secret、部署或 push。
+
+---
+
 ## Fix Round 2 / 5（base `80f5c53`）
 
 ### Status
