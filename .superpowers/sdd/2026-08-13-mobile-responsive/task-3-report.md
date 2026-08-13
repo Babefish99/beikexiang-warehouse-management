@@ -99,3 +99,68 @@ corepack pnpm playwright test tests/e2e/navigation/dashboard.spec.ts tests/e2e/n
 - Playwright 的固定 3001/5174 + `reuseExistingServer` 会复用其他工作树服务；这是 Task2 ledger 已知的 workspace-tools 测试隔离问题。本任务没有修改测试基础设施或停止外部服务。
 - 本次没有读取/修改生产 Secret、没有连接生产数据库、没有部署、没有 push。
 - 因无新鲜 Playwright GREEN，交付状态不能标为 DONE；集成者应在端口隔离且本地认证明确启用的干净环境重跑 brief 两组 E2E。
+
+## Fix / Verification Round
+
+### 进程所有权核验与清理
+
+开始前通过 `Get-NetTCPConnection` 与 `Get-CimInstance Win32_Process` 核验：
+
+- 5474 / PID 28228 的命令行指向 `D:\桌面\仓库\.worktrees\mobile-responsive\apps\web\...vite.js`。
+- 3301 / PID 35108 的命令行指向 `D:\桌面\仓库\.worktrees\mobile-responsive\node_modules\...tsx... src/server.ts`。
+
+仅终止上述两个本工作树进程。终止后 3301/5474 均释放；3001/5174 原有监听仍保持，未停止或修改。
+
+只读确认本地测试持久化变量为 `PERSISTENCE_DRIVER=memory`，`LOCAL_AUTH_BYPASS=true` 仅在非生产环境有效。
+
+### 干净隔离栈
+
+API 显式环境：
+
+```powershell
+$env:API_PORT='3301'
+$env:API_BASE_URL='http://127.0.0.1:3301'
+$env:WEB_BASE_URL='http://127.0.0.1:5474'
+$env:LOCAL_AUTH_BYPASS='true'
+$env:PERSISTENCE_DRIVER='memory'
+corepack pnpm --filter @warehouse/api dev
+```
+
+Web 显式环境：
+
+```powershell
+$env:VITE_API_BASE_URL='http://127.0.0.1:3301'
+corepack pnpm --filter @warehouse/web exec vite --host 127.0.0.1 --port 5474 --strictPort
+```
+
+健康结果：API 返回 `{"status":"ok","service":"warehouse-api","persistenceDriver":"memory","database":{"status":"not_required"}}`；Web 5474 返回 HTTP 200。
+
+### 移动组合 GREEN
+
+```powershell
+$env:API_BASE_URL='http://127.0.0.1:3301'
+$env:WEB_BASE_URL='http://127.0.0.1:5474'
+corepack pnpm playwright test tests/e2e/mobile/inventory-query.spec.ts tests/e2e/mobile/mobile-shell.spec.ts
+```
+
+精确结果：退出码 0；`11 passed (5.2s)`。覆盖管理员/财务库存查询、移动首页、导航、更多面板、44px 对话框触控目标，以及 320/390/430/820 宽度无横向溢出。
+
+### 桌面组合已知隔离失败
+
+```powershell
+$env:API_BASE_URL='http://127.0.0.1:3301'
+$env:WEB_BASE_URL='http://127.0.0.1:5474'
+corepack pnpm playwright test tests/e2e/navigation/dashboard.spec.ts tests/e2e/navigation/workspace-tools.spec.ts
+```
+
+精确结果：退出码 1；`9 failed (77.7s)`。`dashboard.spec.ts` 与 `workspace-tools.spec.ts` 均在测试体内硬编码导航到 `http://127.0.0.1:3001/auth/local...`，因此没有进入隔离 5474；所有失败均为首页/控件不可见或等待超时，没有出现本任务产品逻辑断言失败。按 Task2 ledger 不扩张测试基础设施。
+
+### 最终静态验证与清理
+
+```powershell
+corepack pnpm --filter @warehouse/web typecheck
+```
+
+精确结果：退出码 0；输出 `$ tsc -b --pretty false`，0 errors。
+
+本轮无需生产代码修复；仅追加本报告。隔离验证完成后终止本轮从该工作树启动的 3301/5474 进程，并再次确认端口释放、3001/5174 未受影响、Git 工作树干净。
