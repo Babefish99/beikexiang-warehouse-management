@@ -38,18 +38,35 @@ test("mobile notifications open as a readable task sheet with real routes", asyn
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
+test("Back closes the latest modal after the more sheet transitions to notifications", async ({ page }) => {
+  await page.route(apiUrl("/admin/notifications"), (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(tasks) }));
+  await loginAs(page, "/", "ADMIN");
+  const dashboardUrl = page.url();
+
+  const center = await openMobileNotificationCenter(page);
+  await expect(center).toBeVisible();
+  await page.goBack();
+
+  await expect(center).toHaveCount(0);
+  await expect(page).toHaveURL(dashboardUrl);
+  await expect(page.getByRole("button", { name: "更多" })).toBeFocused();
+});
+
 test("business completion bypasses an older request and resolved tasks stay removed", async ({ page }) => {
   let requestCount = 0;
   let releaseOlderRequest!: () => void;
   const olderRequestReleased = new Promise<void>((resolve) => { releaseOlderRequest = resolve; });
   let olderRequestStarted!: () => void;
   const olderRequestHasStarted = new Promise<void>((resolve) => { olderRequestStarted = resolve; });
+  let olderRequestFinished!: () => void;
+  const olderRequestHasFinished = new Promise<void>((resolve) => { olderRequestFinished = resolve; });
   await page.route(apiUrl("/admin/notifications"), async (route) => {
     requestCount += 1;
     if (requestCount === 2) {
       olderRequestStarted();
       await olderRequestReleased;
       await route.fulfill({ contentType: "application/json", body: JSON.stringify(tasks) });
+      olderRequestFinished();
       return;
     }
     await route.fulfill({ contentType: "application/json", body: requestCount === 1 ? JSON.stringify(tasks) : "[]" });
@@ -62,6 +79,7 @@ test("business completion bypasses an older request and resolved tasks stay remo
   await page.evaluate(() => window.dispatchEvent(new Event("warehouse:business-completed")));
   await expect.poll(() => requestCount).toBeGreaterThanOrEqual(3);
   releaseOlderRequest();
+  await olderRequestHasFinished;
 
   await expect(center.getByText("暂无待处理任务")).toBeVisible();
   await expect(center.getByText("待出库审批")).toHaveCount(0);
