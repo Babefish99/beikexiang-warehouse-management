@@ -201,6 +201,64 @@ git diff --check
 
 ---
 
+## Fix Round 3 / 5（base `23f787c`）
+
+### Status
+
+DONE。仅修复 pending 请求未决时把所有持久草稿误判 stale 并开放删除入口的问题；未处理 render-purity 与其他已登记 Minor。
+
+### RED
+
+隔离移动目标组（API 3301 / Web 5474、memory/local-auth）：
+
+```powershell
+$env:API_BASE_URL='http://127.0.0.1:3301'
+$env:WEB_BASE_URL='http://127.0.0.1:5474'
+corepack pnpm playwright test tests/e2e/mobile/outbound.spec.ts --config playwright.task5-fix3.config.ts --grep "waits for pending|only after pending"
+```
+
+退出码 1；`2 failed`。两个延迟 pending 用例在“正在读取待出库审批…”期间，`stale-draft-approval-1` 期望 count 0、实际均为 1，证明未决空数组被误当为已加载空列表。
+
+### 最小修复
+
+- `OutboundPage` 显式传递 `loading | loaded | error` pending 状态。
+- `MobileOutboundFlow` 只在 `loaded` 时运行 active 草稿恢复、active approval 离开 pending 判定，以及 stale 列表分类/删除入口渲染。
+- loading 期间不显示 stale、不恢复错误状态；error 期间由父页显示加载错误且不开放未知状态草稿删除；loaded 且含审批时恢复 active，loaded 空列表时才显示 stale。
+- 保留 StrictMode 的 mounted/epoch 语义，不改变 options 请求生命周期。
+
+### GREEN / 回归
+
+目标 E2E：退出码 0；`2 passed (6.5s)`。
+
+移动全组：
+
+```powershell
+corepack pnpm playwright test tests/e2e/mobile/outbound.spec.ts --config playwright.task5-fix3.config.ts
+```
+
+退出码 0；`11 passed (13.1s)`。
+
+纯函数 / allocator / API：退出码 0；`3 passed` test files、`26 passed` tests。
+
+桌面回归：退出码 0；`3 passed (6.6s)`。
+
+```powershell
+corepack pnpm --filter @warehouse/web typecheck
+corepack pnpm --filter @warehouse/api typecheck
+git diff --check
+```
+
+均退出码 0；Web/API TypeScript 0 errors；无 whitespace error（仅 LF→CRLF 提示）。
+
+### Commit / Concerns / 清理
+
+- Fix commit：见本节所在提交。
+- 本轮无产品 concern；render-purity 与其他已登记 Minor 未处理。
+- 临时 Playwright config/启动脚本已删除，未提交。
+- 最终 3301/5474 释放；3001/5174 原监听未停止或修改；无生产 DB、Secret、部署或 push。
+
+---
+
 ## Fix Round 2 / 5（base `80f5c53`）
 
 ### Status

@@ -31,9 +31,10 @@ function createDraft(approval: PendingApproval): OutboundDraft {
   return { approvalId: approval.id, step: "allocate", allocations: approval.lines.map((line) => createAllocation(line.id)), reason: "" };
 }
 
-export function MobileOutboundFlow({ userId, pending, onReloadOptions, onConfirm, onCancel, onCompleted }: {
+export function MobileOutboundFlow({ userId, pending, pendingState, onReloadOptions, onConfirm, onCancel, onCompleted }: {
   userId: string;
   pending: PendingApproval[];
+  pendingState: "loading" | "loaded" | "error";
   onReloadOptions(approvalId: string): Promise<BatchOption[]>;
   onConfirm(input: { approvalId: string; allocations: Array<Omit<AllocationRow, "id">>; reason: string }): Promise<OutboundResult>;
   onCancel(approvalId: string, reason: string): Promise<{ approvalId: string; status: string }>;
@@ -79,7 +80,7 @@ export function MobileOutboundFlow({ userId, pending, onReloadOptions, onConfirm
     && activeApprovalId.current === approvalId;
 
   useEffect(() => {
-    if (draft || result || !pending.length) return;
+    if (pendingState !== "loaded" || draft || result || !pending.length) return;
     for (const approval of pending) {
       const stored = readSessionDraft<OutboundDraft>(window.sessionStorage, outboundDraftKey(userId, approval.id), userId, draftVersion, isOutboundDraft);
       if (stored?.approvalId === approval.id && stored.step !== "complete") {
@@ -99,10 +100,10 @@ export function MobileOutboundFlow({ userId, pending, onReloadOptions, onConfirm
         break;
       }
     }
-  }, [draft, onReloadOptions, pending, result, userId]);
+  }, [draft, onReloadOptions, pending, pendingState, result, userId]);
 
   useEffect(() => {
-    if (!draft || result || pending.some((candidate) => candidate.id === draft.approvalId)) return;
+    if (pendingState !== "loaded" || !draft || result || pending.some((candidate) => candidate.id === draft.approvalId)) return;
     optionsRequestEpoch.current += 1;
     activeApprovalId.current = null;
     setStaleDrafts(readIndexedOutboundDrafts(window.sessionStorage, userId));
@@ -110,7 +111,7 @@ export function MobileOutboundFlow({ userId, pending, onReloadOptions, onConfirm
     setOptions([]);
     setLoadingOptions(false);
     setReviewError(null);
-  }, [draft, pending, result]);
+  }, [draft, pending, pendingState, result, userId]);
 
   const saveDraft = (next: OutboundDraft) => {
     activeApprovalId.current = next.approvalId;
@@ -121,7 +122,9 @@ export function MobileOutboundFlow({ userId, pending, onReloadOptions, onConfirm
   };
   const approval = draft ? pending.find((candidate) => candidate.id === draft.approvalId) : undefined;
   const summary = approval && draft ? summarizeOutbound(approval, draft.allocations, options) : null;
-  const visibleStaleDrafts = staleDrafts.filter(({ entry }) => !pending.some((candidate) => candidate.id === entry.approvalId));
+  const visibleStaleDrafts = pendingState === "loaded"
+    ? staleDrafts.filter(({ entry }) => !pending.some((candidate) => candidate.id === entry.approvalId))
+    : [];
 
   const start = async (selected: PendingApproval) => {
     const next = readSessionDraft<OutboundDraft>(window.sessionStorage, outboundDraftKey(userId, selected.id), userId, draftVersion, isOutboundDraft) ?? createDraft(selected);
