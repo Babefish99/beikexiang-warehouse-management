@@ -273,3 +273,54 @@ corepack pnpm --filter @warehouse/web typecheck
 
 - Fix commit：见本节所在提交。
 - 提交后确认 `git status` clean。
+
+---
+
+## Fix Round 2 / 5（base `49829c2`）
+
+### Scope 与 RED
+
+仅修复确认弹窗失败时重复 live-region：旧实现同时在页面背景与仍打开的 dialog 内渲染相同 `role="alert"`。E2E 在失败/重试场景新增断言：全页 alert 数量恰好 1，且该 alert 的最近 `[role="dialog"]` 非空。
+
+隔离命令：
+
+```powershell
+$env:API_BASE_URL='http://127.0.0.1:3301'
+$env:WEB_BASE_URL='http://127.0.0.1:5474'
+corepack pnpm playwright test tests/e2e/mobile/inbound.spec.ts --config playwright.task4-fix2.config.ts --grep "failed draft"
+```
+
+精确 RED：退出码 1；`1 failed`。`page.getByRole("alert")` 期望 count 1、实际 count 2；5 秒内连续 14 次解析都得到 2 个元素。
+
+### 最小修复
+
+页面级错误只在 `error && !confirming` 时渲染；确认 dialog 内的 alert 保留。未改失败保持草稿、按钮重新 enabled 或重试行为。
+
+### GREEN / 回归
+
+目标覆盖：同一隔离命令退出码 0；`1 passed (6.2s)`。确认失败后全页只有一个 alert，且位于 dialog 内。
+
+完整入库 E2E 首轮：`8 passed / 1 failed (11.4s)`；唯一失败在 320px 用例进入产品页面前，Windows 导航到本地登录地址返回 `net::ERR_NO_BUFFER_SPACE`。按有界环境诊断，在确认 3301/5474 已释放后只重跑完整组一次：
+
+```powershell
+corepack pnpm playwright test tests/e2e/mobile/inbound.spec.ts --config playwright.task4-fix2.config.ts
+```
+
+精确最终结果：退出码 0；`9 passed (9.7s)`，包括失败/重试、损坏草稿、成功防重复、320/390/430/820 手机、1280 桌面、未登录权限。
+
+类型与静态验证：
+
+```powershell
+corepack pnpm --filter @warehouse/web typecheck
+git diff --check
+```
+
+精确结果：两条命令均退出码 0；TypeScript 无错误、无 whitespace error。
+
+### 隔离清理 / concerns / status
+
+- 临时 Playwright config 与本地启动脚本验证后删除，未提交。
+- 3301/5474 最终空闲；3001/5174 原监听未停止、未修改。
+- 未触生产、数据库、Secret、部署或 push；未处理任何其他 Minor。
+- 唯一环境瞬态为已在一次有界重跑中消失的 `ERR_NO_BUFFER_SPACE`；无产品 concern。
+- Fix commit：见本节所在提交；提交后 `git status` clean。

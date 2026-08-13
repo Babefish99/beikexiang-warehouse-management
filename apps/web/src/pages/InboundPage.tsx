@@ -211,7 +211,7 @@ export function InboundPage({ userId }: { userId: string }) {
           </div>
         </form>
         {result ? <div className="success-notice" role="status"><CheckCircle2 size={18} />{result}</div> : null}
-        {error ? <div className="form-error" role="alert">{error}</div> : null}
+        {error && !confirming ? <div className="form-error" role="alert">{error}</div> : null}
       </section>
 
       <ModalDialog

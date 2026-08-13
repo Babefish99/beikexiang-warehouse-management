@@ -70,6 +70,9 @@ test("mobile inbound is grouped, confirms an exact amount, and restores a failed
     purchasedAt: "2026-08-13",
   }));
   await expect(dialog.getByRole("alert")).toHaveText("暂时无法入库");
+  await expect(page.getByRole("alert")).toHaveCount(1);
+  await expect(page.getByRole("alert")).toBeAttached();
+  expect(await page.getByRole("alert").evaluate((alert) => alert.closest('[role="dialog"]') !== null)).toBe(true);
   await expect(dialog.getByRole("button", { name: "确认入库", exact: true })).toBeEnabled();
 
   await page.reload();
