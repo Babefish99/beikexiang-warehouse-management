@@ -216,6 +216,22 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .inbound-summary div { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; }
 .inbound-summary dt { color: var(--muted); font-size: 13px; }
 .inbound-summary dd { margin: 0; font-weight: 650; text-align: right; }
+.outbound-desktop-row { display: grid; grid-template-columns: 1.25fr 1fr 1fr 1fr auto; gap: 10px; align-items: end; }
+.outbound-flow { min-width: 0; display: grid; gap: 14px; }
+.outbound-flow h2 { margin: 0; font-size: 18px; }
+.outbound-card-list { display: grid; gap: 12px; }
+.outbound-card { min-width: 0; padding: 16px; display: grid; gap: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow-wrap: anywhere; }
+.outbound-card > span { color: var(--muted); font-size: 13px; }
+.outbound-card__actions, .outbound-flow__actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.outbound-allocation-line { min-width: 0; margin: 0; padding: 14px; display: grid; gap: 12px; border: 1px solid var(--border); border-radius: 10px; }
+.outbound-allocation-line legend { padding: 0 5px; font-size: 13px; font-weight: 700; }
+.outbound-allocation-row { min-width: 0; padding: 12px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; border-radius: 8px; background: #f8fafc; }
+.outbound-allocation-row label { min-width: 0; }
+.outbound-review { margin: 0; display: grid; gap: 8px; }
+.outbound-review div { min-width: 0; padding: 10px 12px; display: flex; justify-content: space-between; gap: 16px; border-radius: 8px; background: #f8fafc; overflow-wrap: anywhere; }
+.outbound-review dt { color: var(--muted); font-size: 13px; }.outbound-review dd { margin: 0; text-align: right; font-weight: 650; }
+.outbound-review-row { min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; overflow-wrap: anywhere; }
+.outbound-review-row--invalid { border-color: #b23c2c; background: #fff4f1; color: #8d2c20; }
 
 @media (max-width: 820px) {
   .inbound-panel { padding: 0; overflow: visible; border: 0; background: transparent; }
@@ -229,4 +245,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .inbound-hint, .inbound-stale { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
   .inbound-actions { gap: 10px; }
   .inbound-actions .button { min-height: 44px; flex: 1 1 0; }
+  .outbound-panel { padding: 14px; overflow: visible; }
+  .outbound-flow .button, .outbound-flow input, .outbound-flow select, .outbound-flow textarea { min-height: 44px; }
+  .outbound-flow input, .outbound-flow select, .outbound-flow textarea { width: 100%; min-width: 0; box-sizing: border-box; }
+  .outbound-flow textarea { min-height: 88px; }
+  .outbound-allocation-row { grid-template-columns: minmax(0, 1fr); }
+  .outbound-card__actions .button, .outbound-flow__actions .button { flex: 1 1 0; }
+  .outbound-review div { display: grid; gap: 4px; }
+  .outbound-review dd { text-align: left; }
 }
