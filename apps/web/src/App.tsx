@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { FileSpreadsheet, ShieldAlert } from "lucide-react";
 import { AdminLayout, type WarehouseOption, type WorkspaceUser } from "./layouts/AdminLayout";
-import { loadInventoryNotifications } from "./features/notifications/notification-tasks";
+import { loadInventoryNotifications, notificationIdentityKey } from "./features/notifications/notification-tasks";
 import { PageHeader } from "./components/PageHeader";
 import { LoginPage } from "./pages/LoginPage";
 import { ItemsPage } from "./pages/ItemsPage";
@@ -42,8 +42,8 @@ function summariseTransactions(rows: TransactionRow[]): { quantity: string; amou
 }
 
 function toWorkspaceUser(user: WebUser): WorkspaceUser {
-  if (user.role === "FINANCE") return { name: user.name, roleLabel: "财务", role: "FINANCE" };
-  return { name: user.name, roleLabel: "库存管理员", role: "ADMIN" };
+  if (user.role === "FINANCE") return { id: user.id, name: user.name, roleLabel: "财务", role: "FINANCE", notificationIdentityKey: notificationIdentityKey(user.id, "FINANCE") };
+  return { id: user.id, name: user.name, roleLabel: "库存管理员", role: "ADMIN", notificationIdentityKey: notificationIdentityKey(user.id, "ADMIN") };
 }
 
 export default function App() {
@@ -125,7 +125,7 @@ export default function App() {
           fetch(`${apiBaseUrl}/admin/outbound/pending`, { credentials: "include" }),
           fetch(`${apiBaseUrl}/admin/reports/transactions?period=${currentPeriod}&type=inbound&warehouseId=${encodedWarehouseId}`, { credentials: "include" }),
           fetch(`${apiBaseUrl}/admin/reports/transactions?period=${currentPeriod}&type=outbound&warehouseId=${encodedWarehouseId}`, { credentials: "include" }),
-          loadInventoryNotifications(),
+          loadInventoryNotifications(notificationIdentityKey(user.id, "ADMIN")),
         ]);
         if (!itemsResponse.ok || !pendingResponse.ok || !inboundResponse.ok || !outboundResponse.ok) throw new Error("dashboard query failed");
         const items = await itemsResponse.json() as ItemRow[];
@@ -202,7 +202,7 @@ export default function App() {
   }
 
   if (user.role === "FINANCE") {
-    if (pathname === "/") return renderAdminLayout(workspaceUser, <DashboardPage cards={[]} loading={false} role="FINANCE" warehouses={warehouses} selectedWarehouseId={selectedWarehouseId} onSelectWarehouse={onSelectWarehouse} />);
+    if (pathname === "/") return renderAdminLayout(workspaceUser, <DashboardPage cards={[]} loading={false} notificationIdentityKey={workspaceUser.notificationIdentityKey} role="FINANCE" warehouses={warehouses} selectedWarehouseId={selectedWarehouseId} onSelectWarehouse={onSelectWarehouse} />);
     return renderAdminLayout(
       workspaceUser,
       <div className="page">
@@ -229,5 +229,5 @@ export default function App() {
   if (pathname === "/admin/period-close") return renderAdminLayout(workspaceUser, <PeriodClosePage />);
   if (pathname === "/admin/reports") return renderAdminLayout(workspaceUser, <ReportsPage warehouseId={selectedWarehouseId} />);
 
-  return renderAdminLayout(workspaceUser, <DashboardPage cards={cards} loading={dashboardLoading} role="ADMIN" warehouses={warehouses} selectedWarehouseId={selectedWarehouseId} onSelectWarehouse={onSelectWarehouse} />);
+  return renderAdminLayout(workspaceUser, <DashboardPage cards={cards} loading={dashboardLoading} notificationIdentityKey={workspaceUser.notificationIdentityKey} role="ADMIN" warehouses={warehouses} selectedWarehouseId={selectedWarehouseId} onSelectWarehouse={onSelectWarehouse} />);
 }

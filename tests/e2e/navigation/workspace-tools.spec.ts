@@ -302,12 +302,54 @@ test("notification center shows the live task count without local read state", a
   await expect(page.locator(".sidebar__footer small")).toHaveCSS("font-size", "12px");
   await expect(page.getByText("Inventory Center", { exact: true })).toHaveCount(0);
 
-  const notificationButton = page.getByRole("button", { name: "通知中心" });
+  const notificationButton = page.getByRole("button", { name: /通知中心/ });
   await expect(notificationButton).toContainText("1");
   await notificationButton.click();
   await expect(page.getByText("盘点差异待复核")).toBeVisible();
   await expect(page.getByRole("button", { name: "全部已读" })).toHaveCount(0);
   await expect(notificationButton).toContainText("1");
+});
+
+test("desktop notification popover toggles and stays mutually exclusive with other workspace tools", async ({ page }) => {
+  await routeWorkspaceWarehouses(page);
+  await routeItems(page);
+  await page.route(apiUrlPattern("/admin/reports/inventory-search.*"), async (route) => {
+    await route.fulfill({ contentType: "application/json", body: "[]" });
+  });
+  await page.route(apiUrl("/admin/notifications"), async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify([{
+        id: "notification-1",
+        kind: "ANOMALY",
+        title: "盘点差异待复核",
+        description: "杭州一仓存在 1 条盘点差异，请及时处理。",
+        href: "/admin/stocktake",
+        priority: 1,
+      }]),
+    });
+  });
+
+  await loginAs(page, "/", "ADMIN");
+  const notificationButton = page.getByRole("button", { name: /通知中心/ });
+  const notificationPopover = page.getByRole("region", { name: "通知与待办" });
+
+  await notificationButton.click();
+  await expect(notificationPopover).toBeVisible();
+  await notificationButton.click();
+  await expect(notificationPopover).toHaveCount(0);
+
+  await notificationButton.click();
+  await page.getByRole("button", { name: /全部仓库/ }).click();
+  await expect(notificationPopover).toHaveCount(0);
+
+  await notificationButton.click();
+  await page.getByLabel("全局搜索").fill("Tea");
+  await expect(notificationPopover).toHaveCount(0);
+
+  await notificationButton.click();
+  await page.getByRole("button", { name: /本地管理员/ }).click();
+  await expect(notificationPopover).toHaveCount(0);
 });
 
 test("saved warehouse selection restores from localStorage", async ({ page }) => {

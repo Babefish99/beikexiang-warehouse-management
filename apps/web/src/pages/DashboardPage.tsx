@@ -13,9 +13,9 @@ function cardValue(cards: DashboardCard[], label: string, loading: boolean): str
   return loading ? "加载中" : cards.find((card) => card.label === label)?.value ?? "0";
 }
 
-export function DashboardPage({ cards, loading, role, warehouses = [], selectedWarehouseId = "all", onSelectWarehouse }: { cards: DashboardCard[]; loading: boolean; role: "ADMIN" | "FINANCE"; warehouses?: WarehouseOption[]; selectedWarehouseId?: string; onSelectWarehouse?(warehouseId: string): void }) {
+export function DashboardPage({ cards, loading, notificationIdentityKey, role, warehouses = [], selectedWarehouseId = "all", onSelectWarehouse }: { cards: DashboardCard[]; loading: boolean; notificationIdentityKey: string; role: "ADMIN" | "FINANCE"; warehouses?: WarehouseOption[]; selectedWarehouseId?: string; onSelectWarehouse?(warehouseId: string): void }) {
   const isMobileViewport = useMobileViewport();
-  const notificationSnapshot = useNotificationTaskSnapshot();
+  const notificationSnapshot = useNotificationTaskSnapshot(notificationIdentityKey);
 
   if (isMobileViewport) {
     return (

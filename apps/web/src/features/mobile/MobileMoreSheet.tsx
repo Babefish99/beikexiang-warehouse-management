@@ -15,7 +15,7 @@ export function MobileMoreSheet({
   loginChannel: string;
   onClose(): void;
 }) {
-  const notificationSnapshot = useNotificationTaskSnapshot();
+  const notificationSnapshot = useNotificationTaskSnapshot(user.notificationIdentityKey);
   return (
     <ModalDialog open={open} title="更多功能" onClose={onClose}>
       <div className="mobile-more-sheet">

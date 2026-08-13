@@ -7,14 +7,16 @@ import {
   subscribeNotificationTasks,
 } from "./notification-tasks";
 
-export function useNotificationTasks({ enabled, open }: { enabled: boolean; open: boolean }) {
-  const snapshot = useSyncExternalStore(subscribeNotificationTasks, getNotificationTasksSnapshot);
+export function useNotificationTasks({ identityKey, enabled, open }: { identityKey: string; enabled: boolean; open: boolean }) {
+  const subscribe = useCallback((listener: () => void) => subscribeNotificationTasks(identityKey, listener), [identityKey]);
+  const getSnapshot = useCallback(() => getNotificationTasksSnapshot(identityKey), [identityKey]);
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot);
   const wasOpen = useRef(open);
-  const refresh = useCallback(() => refreshNotificationTasks({ fresh: true }), []);
+  const refresh = useCallback(() => refreshNotificationTasks({ identityKey, enabled, fresh: true }), [enabled, identityKey]);
 
   useEffect(() => {
-    if (enabled) void refreshNotificationTasks();
-  }, [enabled]);
+    void refreshNotificationTasks({ identityKey, enabled });
+  }, [enabled, identityKey]);
 
   useEffect(() => {
     if (enabled && open && !wasOpen.current) void refresh();
@@ -32,18 +34,20 @@ export function useNotificationTasks({ enabled, open }: { enabled: boolean; open
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") void refresh();
     };
-    const onBusinessCompleted = () => void refreshNotificationTasks({ fresh: true, supersede: true });
+    const onBusinessCompleted = () => void refreshNotificationTasks({ identityKey, enabled, fresh: true, supersede: true });
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener(BUSINESS_COMPLETED_EVENT, onBusinessCompleted);
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener(BUSINESS_COMPLETED_EVENT, onBusinessCompleted);
     };
-  }, [enabled, refresh]);
+  }, [enabled, identityKey, refresh]);
 
   return { ...snapshot, refresh };
 }
 
-export function useNotificationTaskSnapshot() {
-  return useSyncExternalStore(subscribeNotificationTasks, getNotificationTasksSnapshot);
+export function useNotificationTaskSnapshot(identityKey: string) {
+  const subscribe = useCallback((listener: () => void) => subscribeNotificationTasks(identityKey, listener), [identityKey]);
+  const getSnapshot = useCallback(() => getNotificationTasksSnapshot(identityKey), [identityKey]);
+  return useSyncExternalStore(subscribe, getSnapshot);
 }

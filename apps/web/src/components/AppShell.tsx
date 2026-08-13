@@ -9,7 +9,7 @@ import { NotificationCenter } from "../features/notifications/NotificationCenter
 export { loadInventoryNotifications } from "../features/notifications/notification-tasks";
 
 export type WarehouseOption = { id: string; code: string; name: string; isActive: boolean };
-export type WorkspaceUser = { name: string; roleLabel: string; role: "ADMIN" | "FINANCE" };
+export type WorkspaceUser = { id: string; name: string; roleLabel: string; role: "ADMIN" | "FINANCE"; notificationIdentityKey: string };
 
 type NavigationItem = {
   label: string;
@@ -67,6 +67,7 @@ export function AppShell({
 
   const [moreSheetOpen, setMoreSheetOpen] = useState(false);
   const [warehouseMenuOpen, setWarehouseMenuOpen] = useState(false);
+  const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchPopoverOpen, setSearchPopoverOpen] = useState(false);
@@ -121,6 +122,10 @@ export function AppShell({
         setSearchPopoverOpen(false);
         return;
       }
+      if (notificationMenuOpen) {
+        setNotificationMenuOpen(false);
+        return;
+      }
       if (userMenuOpen) {
         setUserMenuOpen(false);
       }
@@ -130,7 +135,7 @@ export function AppShell({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [searchPopoverOpen, userMenuOpen, warehouseMenuOpen]);
+  }, [notificationMenuOpen, searchPopoverOpen, userMenuOpen, warehouseMenuOpen]);
 
   const showSearchPopover = searchPopoverOpen && searchQuery.trim().length > 0;
 
@@ -184,6 +189,7 @@ export function AppShell({
                 aria-expanded={warehouseMenuOpen}
                 onClick={() => {
                   setWarehouseMenuOpen((open) => !open);
+                  setNotificationMenuOpen(false);
                   setSearchPopoverOpen(false);
                   setUserMenuOpen(false);
                 }}
@@ -246,6 +252,7 @@ export function AppShell({
                 onFocus={() => {
                   if (searchQuery.trim()) setSearchPopoverOpen(true);
                   setWarehouseMenuOpen(false);
+                  setNotificationMenuOpen(false);
                   setUserMenuOpen(false);
                 }}
               />
@@ -288,11 +295,20 @@ export function AppShell({
           </div>
 
           <div className="topbar__actions">
-            <NotificationCenter role={user.role} mobile={false} onOpen={() => {
-              setWarehouseMenuOpen(false);
-              setSearchPopoverOpen(false);
-              setUserMenuOpen(false);
-            }} />
+            <NotificationCenter
+              identityKey={user.notificationIdentityKey}
+              role={user.role}
+              mobile={false}
+              open={notificationMenuOpen}
+              onOpenChange={(open) => {
+                setNotificationMenuOpen(open);
+                if (open) {
+                  setWarehouseMenuOpen(false);
+                  setSearchPopoverOpen(false);
+                  setUserMenuOpen(false);
+                }
+              }}
+            />
 
             <div className="topbar-panel">
               <button
@@ -304,6 +320,7 @@ export function AppShell({
                   setUserMenuOpen((open) => !open);
                   setWarehouseMenuOpen(false);
                   setSearchPopoverOpen(false);
+                  setNotificationMenuOpen(false);
                 }}
               >
                 <UserCircle size={22} />
@@ -337,7 +354,7 @@ export function AppShell({
         <>
           <MobileBottomNav role={user.role} pathname={pathname} onOpenMore={() => setMoreSheetOpen(true)} />
           <MobileMoreSheet open={moreSheetOpen} user={user} loginChannel={loginChannel} onClose={() => setMoreSheetOpen(false)} />
-          <NotificationCenter role={user.role} mobile renderTrigger={false} />
+          <NotificationCenter identityKey={user.notificationIdentityKey} role={user.role} mobile renderTrigger={false} />
         </>
       ) : null}
     </div>

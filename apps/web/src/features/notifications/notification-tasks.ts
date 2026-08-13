@@ -16,58 +16,94 @@ export const OPEN_NOTIFICATION_CENTER_EVENT = "warehouse:open-notification-cente
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
 
 type Snapshot = { tasks: NotificationTask[]; loading: boolean; error: string | null };
-let snapshot: Snapshot = { tasks: [], loading: false, error: null };
-let requestSequence = 0;
-let inFlight: { promise: Promise<void>; forced: boolean } | null = null;
-const listeners = new Set<() => void>();
+type RefreshOptions = { identityKey: string; enabled: boolean; fresh?: boolean; supersede?: boolean };
+type FetchNotifications = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+const emptySnapshot: Snapshot = { tasks: [], loading: false, error: null };
 
-function publish(next: Snapshot): void {
-  snapshot = next;
-  listeners.forEach((listener) => listener());
+export function notificationIdentityKey(userId: string, role: "ADMIN" | "FINANCE"): string {
+  return `${userId}:${role}`;
 }
 
-export function getNotificationTasksSnapshot(): Snapshot {
-  return snapshot;
+export function createNotificationTaskStore(fetchNotifications: FetchNotifications) {
+  let snapshot = emptySnapshot;
+  let activeIdentityKey: string | null = null;
+  let activeEnabled = false;
+  let generation = 0;
+  let requestSequence = 0;
+  let inFlight: { identityKey: string; generation: number; promise: Promise<void>; forced: boolean } | null = null;
+  const listeners = new Set<() => void>();
+
+  const publish = (next: Snapshot) => {
+    snapshot = next;
+    listeners.forEach((listener) => listener());
+  };
+
+  const selectIdentity = (identityKey: string, enabled: boolean) => {
+    if (activeIdentityKey === identityKey && activeEnabled === enabled) return;
+    activeIdentityKey = identityKey;
+    activeEnabled = enabled;
+    generation += 1;
+    requestSequence += 1;
+    inFlight = null;
+    publish(emptySnapshot);
+  };
+
+  const getSnapshot = (identityKey: string): Snapshot => activeIdentityKey === identityKey ? snapshot : emptySnapshot;
+
+  const subscribe = (identityKey: string, listener: () => void): (() => void) => {
+    const notifyIdentity = () => listener();
+    listeners.add(notifyIdentity);
+    return () => listeners.delete(notifyIdentity);
+  };
+
+  const refresh = ({ identityKey, enabled, fresh = false, supersede = false }: RefreshOptions): Promise<void> => {
+    selectIdentity(identityKey, enabled);
+    if (!enabled) return Promise.resolve();
+    if (inFlight && !supersede && (!fresh || inFlight.forced)) return inFlight.promise;
+
+    requestSequence += 1;
+    const sequence = requestSequence;
+    const requestGeneration = generation;
+    publish({ ...snapshot, loading: true, error: null });
+
+    const promise = fetchNotifications(`${apiBaseUrl}/admin/notifications`, { credentials: "include" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("通知中心加载失败");
+        const tasks = await response.json() as NotificationTask[];
+        if (activeEnabled && identityKey === activeIdentityKey && requestGeneration === generation && sequence === requestSequence) {
+          publish({ tasks, loading: false, error: null });
+        }
+      })
+      .catch((error: unknown) => {
+        if (activeEnabled && identityKey === activeIdentityKey && requestGeneration === generation && sequence === requestSequence) {
+          publish({ tasks: [], loading: false, error: error instanceof Error ? error.message : "通知中心加载失败" });
+        }
+      })
+      .finally(() => {
+        if (inFlight?.promise === promise) inFlight = null;
+      });
+
+    inFlight = { identityKey, generation: requestGeneration, promise, forced: fresh };
+    return promise;
+  };
+
+  const load = async (identityKey: string): Promise<NotificationTask[]> => {
+    await refresh({ identityKey, enabled: true });
+    while (inFlight?.identityKey === identityKey && inFlight.generation === generation) await inFlight.promise;
+    const current = getSnapshot(identityKey);
+    if (current.error) throw new Error(current.error);
+    return current.tasks;
+  };
+
+  return { getSnapshot, subscribe, refresh, load };
 }
 
-export function subscribeNotificationTasks(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
+const notificationTaskStore = createNotificationTaskStore((input, init) => fetch(input, init));
 
-export function refreshNotificationTasks({ fresh = false, supersede = false }: { fresh?: boolean; supersede?: boolean } = {}): Promise<void> {
-  if (inFlight && !supersede && (!fresh || inFlight.forced)) return inFlight.promise;
-
-  requestSequence += 1;
-  const sequence = requestSequence;
-  publish({ ...snapshot, loading: true, error: null });
-
-  const promise = fetch(`${apiBaseUrl}/admin/notifications`, { credentials: "include" })
-    .then(async (response) => {
-      if (!response.ok) throw new Error("通知中心加载失败");
-      const tasks = await response.json() as NotificationTask[];
-      if (sequence === requestSequence) publish({ tasks, loading: false, error: null });
-    })
-    .catch((error: unknown) => {
-      if (sequence === requestSequence) {
-        publish({ tasks: [], loading: false, error: error instanceof Error ? error.message : "通知中心加载失败" });
-      }
-    })
-    .finally(() => {
-      if (inFlight?.promise === promise) inFlight = null;
-    });
-
-  inFlight = { promise, forced: fresh };
-  return promise;
-}
-
-export async function loadInventoryNotifications(): Promise<NotificationTask[]> {
-  await refreshNotificationTasks();
-  while (inFlight) await inFlight.promise;
-  const current = getNotificationTasksSnapshot();
-  if (current.error) throw new Error(current.error);
-  return current.tasks;
-}
+export const getNotificationTasksSnapshot = notificationTaskStore.getSnapshot;
+export const subscribeNotificationTasks = notificationTaskStore.subscribe;
+export const refreshNotificationTasks = notificationTaskStore.refresh;
+export const loadInventoryNotifications = notificationTaskStore.load;
 
 export function announceBusinessCompleted(): void {
   window.dispatchEvent(new Event(BUSINESS_COMPLETED_EVENT));

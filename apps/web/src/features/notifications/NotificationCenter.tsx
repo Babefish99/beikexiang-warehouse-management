@@ -27,9 +27,11 @@ function Contents({ tasks, loading, error, refresh }: ReturnType<typeof useNotif
   return <TaskList tasks={tasks} />;
 }
 
-export function NotificationCenter({ role, mobile, onOpen, renderTrigger = true }: { role: "ADMIN" | "FINANCE"; mobile: boolean; onOpen?(): void; renderTrigger?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const state = useNotificationTasks({ enabled: role === "ADMIN", open });
+export function NotificationCenter({ identityKey, role, mobile, open: controlledOpen, onOpenChange, renderTrigger = true }: { identityKey: string; role: "ADMIN" | "FINANCE"; mobile: boolean; open?: boolean; onOpenChange?(open: boolean): void; renderTrigger?: boolean }) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const open = mobile ? mobileOpen : (controlledOpen ?? false);
+  const setOpen = (next: boolean) => mobile ? setMobileOpen(next) : onOpenChange?.(next);
+  const state = useNotificationTasks({ identityKey, enabled: role === "ADMIN", open });
 
   useEffect(() => {
     if (!open || mobile) return;
@@ -55,8 +57,7 @@ export function NotificationCenter({ role, mobile, onOpen, renderTrigger = true 
     aria-label={label}
     aria-expanded={open}
     onClick={() => {
-      onOpen?.();
-      setOpen(true);
+      setOpen(!open);
     }}
   ><Bell size={18} /><span>{mobile ? "通知中心" : ""}</span><strong>{state.tasks.length}</strong></button>;
 
