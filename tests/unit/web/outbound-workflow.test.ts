@@ -7,6 +7,7 @@ import {
   normalizeAllocations,
   outboundDraftIndexKey,
   outboundDraftKey,
+  pruneOutboundDraftIndex,
   readIndexedOutboundDrafts,
   removeOutboundDraftIndexEntry,
   reconcileBatchOptions,
@@ -169,10 +170,13 @@ describe("outbound workflow", () => {
     writeSessionDraft(storage, outboundDraftKey("admin-1", "valid"), { version: 1, userId: "admin-1", value: { approvalId: "valid", step: "allocate", reason: "", allocations: [] } });
     storage.setItem(outboundDraftKey("admin-1", "broken"), "not-json");
 
-    expect(readIndexedOutboundDrafts(storage, "admin-1")).toEqual([{
+    const indexed = readIndexedOutboundDrafts(storage, "admin-1");
+    expect(indexed).toEqual([{
       entry: { approvalId: "valid", weComSpNo: "1" },
       draft: { approvalId: "valid", step: "allocate", reason: "", allocations: [] },
     }]);
+    expect(JSON.parse(storage.getItem(outboundDraftIndexKey("admin-1")) ?? "null").value).toHaveLength(3);
+    pruneOutboundDraftIndex(storage, "admin-1", indexed);
     expect(JSON.parse(storage.getItem(outboundDraftIndexKey("admin-1")) ?? "null").value).toEqual([{ approvalId: "valid", weComSpNo: "1" }]);
   });
 });

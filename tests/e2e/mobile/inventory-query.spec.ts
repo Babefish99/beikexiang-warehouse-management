@@ -62,3 +62,71 @@ test("finance inventory route renders the shared query without admin dashboard r
   await expect(page.getByRole("searchbox", { name: "查询库存" })).toHaveValue("TEA");
   expect(forbiddenRequests).toEqual([]);
 });
+
+test("finance dashboard makes zero administrator data requests", async ({ page }) => {
+  const forbiddenRequests: string[] = [];
+  await page.route(/\/admin\/(items|outbound\/pending|reports\/transactions|notifications)(?:\?|$)/, (route) => {
+    forbiddenRequests.push(route.request().url());
+    return route.fulfill({ json: [] });
+  });
+
+  await loginAs(page, "/", "FINANCE");
+
+  await expect(page.getByRole("heading", { name: /你好/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: "库存查询" })).toBeVisible();
+  expect(forbiddenRequests).toEqual([]);
+});
+
+test("keeps loading through debounce and ignores older query, warehouse, and error responses", async ({ page }) => {
+  const releases = new Map<string, () => void>();
+  await page.route(/\/admin\/reports\/warehouses$/, (route) => route.fulfill({ json: [
+    { id: "wh-1", code: "WH-01", name: "总部仓", isActive: true },
+    { id: "wh-2", code: "WH-02", name: "上海二仓", isActive: true },
+  ] }));
+  await page.route(/\/admin\/reports\/inventory-search.*/, async (route) => {
+    const url = new URL(route.request().url());
+    const key = `${url.searchParams.get("query")}:${url.searchParams.get("warehouseId")}`;
+    await new Promise<void>((resolve) => releases.set(key, resolve));
+    if (key.startsWith("broken:")) {
+      await route.fulfill({ status: 500, json: { error: "旧请求失败" } });
+      return;
+    }
+    await route.fulfill({ json: [{
+      itemId: key, code: key, name: key, unit: "盒", totalQuantity: "1", totalAmount: "1.00",
+      locations: [{ warehouseId: "wh-1", warehouseName: "总部仓", batchId: key, batchNo: key, quantity: "1", unitCost: "1", amount: "1.00" }],
+    }] });
+  });
+  await loginAs(page, "/admin/inventory", "ADMIN");
+  const search = page.getByRole("searchbox", { name: "查询库存" });
+
+  await search.fill("old");
+  expect(await page.getByText("正在查询库存…").count()).toBe(1);
+  await expect(page.getByText("未找到匹配的库存结果")).toHaveCount(0);
+  await page.waitForTimeout(300);
+  await search.fill("new");
+  await page.waitForTimeout(300);
+  releases.get("new:all")?.();
+  await expect(page.getByRole("article", { name: /new:all/ })).toBeVisible();
+  releases.get("old:all")?.();
+  await expect(page.getByRole("article", { name: /new:all/ })).toBeVisible();
+
+  await search.fill("switch");
+  await expect.poll(() => releases.has("switch:all")).toBe(true);
+  await page.setViewportSize({ width: 821, height: 844 });
+  await page.getByRole("button", { name: /全部仓库/ }).click();
+  await page.getByRole("menuitemradio", { name: /WH-02 · 上海二仓/ }).click();
+  await expect.poll(() => releases.has("switch:wh-2")).toBe(true);
+  releases.get("switch:wh-2")?.();
+  await expect(page.locator("tbody tr").filter({ hasText: "switch:wh-2" })).toBeVisible();
+  releases.get("switch:all")?.();
+  await expect(page.locator("tbody tr").filter({ hasText: "switch:wh-2" })).toBeVisible();
+
+  await search.fill("broken");
+  await page.waitForTimeout(300);
+  await search.fill("recovered");
+  await page.waitForTimeout(300);
+  releases.get("recovered:wh-2")?.();
+  await expect(page.locator("tbody tr").filter({ hasText: "recovered:wh-2" })).toBeVisible();
+  releases.get("broken:wh-2")?.();
+  await expect(page.getByText("旧请求失败")).toHaveCount(0);
+});

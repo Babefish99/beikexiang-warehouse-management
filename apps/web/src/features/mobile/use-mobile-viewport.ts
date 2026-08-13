@@ -1,19 +1,25 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { MOBILE_MEDIA_QUERY } from "./mobile-navigation";
 
+export type MobileViewportStore = {
+  getSnapshot(): boolean;
+  subscribe(listener: () => void): () => void;
+};
+
+export function createMobileViewportStore(target: Pick<Window, "matchMedia">): MobileViewportStore {
+  const media = target.matchMedia(MOBILE_MEDIA_QUERY);
+  return {
+    getSnapshot: () => media.matches,
+    subscribe(listener) {
+      media.addEventListener("change", listener);
+      return () => media.removeEventListener("change", listener);
+    },
+  };
+}
+
+let browserStore: MobileViewportStore | undefined;
+
 export function useMobileViewport(): boolean {
-  const [viewport, setViewport] = useState(() => {
-    const media = window.matchMedia(MOBILE_MEDIA_QUERY);
-    return { media, mobile: media.matches };
-  });
-
-  useEffect(() => {
-    const sync = () => setViewport({ media: viewport.media, mobile: viewport.media.matches });
-
-    sync();
-    viewport.media.addEventListener("change", sync);
-    return () => viewport.media.removeEventListener("change", sync);
-  }, [viewport.media]);
-
-  return viewport.mobile;
+  browserStore ??= createMobileViewportStore(window);
+  return useSyncExternalStore(browserStore.subscribe, browserStore.getSnapshot, browserStore.getSnapshot);
 }

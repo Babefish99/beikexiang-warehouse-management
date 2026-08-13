@@ -63,12 +63,16 @@ test("mobile inbound is grouped, confirms an exact amount, and restores a failed
   const failedRequest = page.waitForRequest(apiUrl("/admin/inbound"));
   await dialog.getByRole("button", { name: "确认入库", exact: true }).click();
   const payload = (await failedRequest).postDataJSON();
-  expect(payload).toEqual(expect.objectContaining({
+  expect(payload).toEqual({
+    warehouseId: "warehouse-1",
+    itemId: "item-1",
     batchNo: "B-001",
     quantity: "1.23",
     unitCost: "0.2",
     purchasedAt: "2026-08-13",
-  }));
+    purchaser: "仓库管理员",
+    remark: "",
+  });
   await expect(dialog.getByRole("alert")).toHaveText("暂时无法入库");
   await expect(page.getByRole("alert")).toHaveCount(1);
   await expect(page.getByRole("alert")).toBeAttached();

@@ -88,12 +88,15 @@ export function removeOutboundDraftIndexEntry(storage: Storage, userId: string, 
 
 export function readIndexedOutboundDrafts(storage: Storage, userId: string): IndexedOutboundDraft[] {
   const entries = readOutboundDraftIndex(storage, userId);
-  const indexed = entries.flatMap((entry) => {
+  return entries.flatMap((entry) => {
     const draft = readSessionDraft<OutboundDraft>(storage, outboundDraftKey(userId, entry.approvalId), userId, outboundDraftVersion, isOutboundDraft);
     return draft?.approvalId === entry.approvalId && draft.step !== "complete" ? [{ entry, draft }] : [];
   });
+}
+
+export function pruneOutboundDraftIndex(storage: Storage, userId: string, indexed: readonly IndexedOutboundDraft[]): void {
+  const entries = readOutboundDraftIndex(storage, userId);
   if (indexed.length !== entries.length) writeOutboundDraftIndex(storage, userId, indexed.map(({ entry }) => entry));
-  return indexed;
 }
 
 export function summarizeOutbound(approval: PendingApproval, allocations: readonly AllocationRow[], options: readonly BatchOption[]): OutboundSummary {

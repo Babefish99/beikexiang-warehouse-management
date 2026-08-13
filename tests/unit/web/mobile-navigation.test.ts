@@ -1,6 +1,5 @@
-import * as React from "../../../apps/web/node_modules/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useMobileViewport } from "../../../apps/web/src/features/mobile/use-mobile-viewport";
+import { createMobileViewportStore } from "../../../apps/web/src/features/mobile/use-mobile-viewport";
 import {
   getMobileNavigation,
   isMobileNavigationActive,
@@ -42,63 +41,8 @@ function stubMatchMedia(initialMatches: boolean): MatchMediaStub {
   return { matches: initialMatches, media, emitChange: (matches) => media[0].emitChange(matches) };
 }
 
-const hookRuntime = vi.hoisted(() => {
-  let initialized = false;
-  let effectInstalled = false;
-  let value: unknown;
-  let cleanup: (() => void) | undefined;
-
-  return {
-    reset() {
-      initialized = false;
-      effectInstalled = false;
-      cleanup = undefined;
-    },
-    useState(initialValue: unknown | (() => unknown)) {
-      if (!initialized) {
-        value = typeof initialValue === "function" ? initialValue() : initialValue;
-        initialized = true;
-      }
-      return [value, (nextValue: unknown) => (value = nextValue)] as const;
-    },
-    useEffect(effect: () => (() => void) | void) {
-      if (!effectInstalled) {
-        effectInstalled = true;
-        cleanup = effect();
-      }
-    },
-    unmount() {
-      cleanup?.();
-    },
-  };
-});
-
-function renderMobileViewportHook(): {
-  current(): boolean;
-  rerender(): void;
-  unmount(): void;
-} {
-  hookRuntime.reset();
-  (React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE as { H: unknown }).H = {
-    useEffect: hookRuntime.useEffect as never,
-    useState: hookRuntime.useState as never,
-  };
-  let rendered: boolean;
-  const rerender = () => {
-    rendered = useMobileViewport();
-  };
-  rerender();
-
-  return {
-    current: () => rendered,
-    rerender,
-    unmount: () => hookRuntime.unmount(),
-  };
-}
-
 afterEach(() => {
   vi.unstubAllGlobals();
-  (React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE as { H: unknown }).H = null;
 });
 
 describe("mobile navigation", () => {
@@ -126,41 +70,51 @@ describe("mobile navigation", () => {
     const inventory = getMobileNavigation("ADMIN").find((item) => item.label === "查询")!;
     expect(isMobileNavigationActive("/admin/inventory", inventory)).toBe(true);
     expect(isMobileNavigationActive("/admin/items", inventory)).toBe(false);
+    const root = getMobileNavigation("ADMIN").find((item) => item.label === "首页")!;
+    const more = getMobileNavigation("ADMIN").find((item) => item.label === "更多")!;
+    expect(isMobileNavigationActive("/", root)).toBe(true);
+    expect(isMobileNavigationActive("/admin/inventory", root)).toBe(false);
+    expect(isMobileNavigationActive("/", more)).toBe(false);
+    expect(isMobileNavigationActive("/admin/inventory", more)).toBe(false);
   });
 });
 
-describe("useMobileViewport", () => {
+describe("mobile viewport store", () => {
   it("reads matchMedia matches as its initial value", () => {
     const media = stubMatchMedia(true);
-    const hook = renderMobileViewportHook();
+    const store = createMobileViewportStore(window);
 
-    expect(hook.current()).toBe(true);
+    expect(store.getSnapshot()).toBe(true);
     expect(window.matchMedia).toHaveBeenCalledWith("(max-width: 820px)");
     expect(media.media).toHaveLength(1);
   });
 
   it("synchronizes React state when matchMedia emits a change", () => {
     const media = stubMatchMedia(false);
-    const hook = renderMobileViewportHook();
+    const store = createMobileViewportStore(window);
+    const listener = vi.fn();
+    const unsubscribe = store.subscribe(listener);
 
     media.emitChange(true);
-    hook.rerender();
 
-    expect(hook.current()).toBe(true);
+    expect(listener).toHaveBeenCalledOnce();
+    expect(store.getSnapshot()).toBe(true);
+    unsubscribe();
   });
 
   it("removes its change listener when unmounted", () => {
     const media = stubMatchMedia(false);
-    const hook = renderMobileViewportHook();
+    const store = createMobileViewportStore(window);
+    const listener = vi.fn();
+    const unsubscribe = store.subscribe(listener);
 
-    hook.unmount();
+    unsubscribe();
     media.emitChange(true);
-    hook.rerender();
 
     expect(media.media[0].removeEventListener).toHaveBeenCalledWith(
       "change",
       media.media[0].addEventListener.mock.calls[0][1],
     );
-    expect(hook.current()).toBe(false);
+    expect(listener).not.toHaveBeenCalled();
   });
 });

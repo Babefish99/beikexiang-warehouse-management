@@ -38,6 +38,15 @@ test("guides allocation across batches, restores a draft, revalidates, and submi
   });
   await page.route(apiUrl("/admin/outbound/confirm"), async (route) => {
     confirmPosts += 1;
+    expect(route.request().postDataJSON()).toEqual({
+      approvalId: "approval-1",
+      allocations: [
+        { approvalLineId: "line-1", warehouseId: "wh-1", batchId: "batch-1", quantity: "1" },
+        { approvalLineId: "line-2", warehouseId: "wh-1", batchId: "batch-3", quantity: "2" },
+        { approvalLineId: "line-1", warehouseId: "wh-2", batchId: "batch-2", quantity: "1" },
+      ],
+      reason: "本次只需部分领用",
+    });
     await new Promise((resolve) => setTimeout(resolve, 100));
     await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ id: "outbound-1", status: "PARTIALLY_ISSUED", actualQuantity: "4", amount: "73.00" }) });
   });

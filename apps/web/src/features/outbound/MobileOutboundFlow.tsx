@@ -7,6 +7,7 @@ import {
   isOutboundDraft,
   normalizeAllocations,
   outboundDraftKey,
+  pruneOutboundDraftIndex,
   readIndexedOutboundDrafts,
   reconcileBatchOptions,
   removeOutboundDraftIndexEntry,
@@ -54,7 +55,7 @@ export function MobileOutboundFlow({ userId, pending, pendingState, onReloadOpti
   const [cancelStage, setCancelStage] = useState<"reason" | "confirm">("reason");
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
-  const [staleDrafts, setStaleDrafts] = useState<IndexedOutboundDraft[]>(() => readIndexedOutboundDrafts(window.sessionStorage, userId));
+  const [staleDrafts, setStaleDrafts] = useState<IndexedOutboundDraft[]>([]);
   const submitLock = useRef(false);
   const cancelLock = useRef(false);
   const mounted = useRef(true);
@@ -63,12 +64,15 @@ export function MobileOutboundFlow({ userId, pending, pendingState, onReloadOpti
 
   useEffect(() => {
     mounted.current = true;
+    const indexed = readIndexedOutboundDrafts(window.sessionStorage, userId);
+    pruneOutboundDraftIndex(window.sessionStorage, userId, indexed);
+    setStaleDrafts(indexed);
     return () => {
       mounted.current = false;
       optionsRequestEpoch.current += 1;
       activeApprovalId.current = null;
     };
-  }, []);
+  }, [userId]);
 
   const beginOptionsRequest = (approvalId: string) => {
     activeApprovalId.current = approvalId;

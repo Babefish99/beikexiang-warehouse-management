@@ -167,6 +167,37 @@ describe("outbound mutation routes", () => {
     } finally { await app.close(); }
   });
 
+  it("returns 409 when stock changes between route validation and commit", async () => {
+    const app = Fastify();
+    const { store } = makeService();
+    const service = new OutboundService({
+      getApproval: (approvalId) => store.getApproval(approvalId),
+      listPending: () => store.listPending(),
+      listBatches: (itemIds) => store.listBatches(itemIds),
+      cancelApproval: (approvalId, reason) => store.cancelApproval(approvalId, reason),
+      commitOutbound: (approval, validation, reason) => {
+        store.seedBatch({ id: "batch-1", warehouseId: "wh-1", itemId: "item-1", remainingQuantity: "9", unitCost: "20" });
+        return store.commitOutbound(approval, validation, reason);
+      },
+    });
+    registerOutboundRoutes(app, { outboundService: service });
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/admin/outbound/confirm",
+        payload: {
+          approvalId: "approval-1",
+          allocations: [{ approvalLineId: "line-1", warehouseId: "wh-1", batchId: "batch-1", quantity: "10" }],
+        },
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({ error: "stock balance changed; retry transaction" });
+      expect(store.batch("batch-1")?.remainingQuantity).toBe("9");
+      expect(store.ledger()).toHaveLength(0);
+    } finally { await app.close(); }
+  });
+
   it("keeps mutation routes administrator-only", async () => {
     const app = buildServer();
     try {
