@@ -240,14 +240,14 @@ D:\桌面\仓库
 所有命令将 bundled Node `C:\Users\Administrator\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin` 放在 PATH 首位，实际版本 `v24.19.0`。Prisma generate 使用仅指向 `127.0.0.1:65432` 的 dummy `DATABASE_URL`，没有连接数据库。
 
 - `corepack pnpm exec prisma generate`：exit 0，Prisma Client v7.9.1 生成成功。
-- `corepack pnpm exec vitest run --exclude 'tests/deployment/**'`：48 个文件，45 passed、3 skipped；252 个测试，236 passed、16 skipped、0 failed；exit 0。
+- `corepack pnpm exec vitest run --exclude 'tests/deployment/**'`：48 个文件，45 passed、3 skipped；254 个测试，238 passed、16 skipped、0 failed；exit 0。
 - `corepack pnpm typecheck`：API/Web 均完成，exit 0。
-- `corepack pnpm build`：API/Web 均完成；Web 1612 modules transformed，exit 0。
-- `corepack pnpm test:e2e`（隔离 3301/5474、memory/local-auth）：104 passed、0 failed、0 skipped，31.7s，exit 0。
+- `corepack pnpm build`：API/Web 均完成；Web 1613 modules transformed，exit 0。
+- `corepack pnpm test:e2e`（隔离 3301/5474、memory/local-auth）：119 passed、0 failed、0 skipped，36.3s，exit 0。
 - `git diff --check 5f17963...HEAD`：无输出，exit 0。
 - Docker/deployment：环境阻塞。`DockerDesktopVM` 为 Off，未运行 image inspect、只读挂载、deployment tests、完整含部署测试或 Compose config。
 
-E2E 首次完整运行曾为 75 passed、29 failed；29 个失败全部来自旧 spec 硬编码 API 端口 3001。将 7 个 legacy spec 改为 env-aware 后，相关定向验证 30/30 通过，最终全量 104/104 通过。该 failing run 是测试隔离缺陷证据，不是产品行为失败。财务零管理员请求、完整入库 payload/memory persistence、完整出库 payload/route 409 是在既有正确行为上新增且首次即过的表征覆盖，不记作 TDD RED。
+Task 8 首轮完整 E2E 曾为 75 passed、29 failed；29 个失败全部来自旧 spec 硬编码 API 端口 3001。将 7 个 legacy spec 改为 env-aware 后，相关定向验证 30/30 通过，当时全量 104/104 通过；加入最终手机直达路由门禁等回归后，主流程最终为 119/119。该 failing run 是测试隔离缺陷证据，不是产品行为失败。财务零管理员请求、完整入库 payload/memory persistence、完整出库 payload/route 409 是在既有正确行为上新增且首次即过的表征覆盖，不记作 TDD RED。
 
 ### 10.2 通用发布门禁
 
@@ -257,8 +257,9 @@ E2E 首次完整运行曾为 75 passed、29 failed；29 个失败全部来自旧
 
 - 手机端桌面专属路由已统一门禁：标准物品库、仓库设置、期初库存、调拨、退库、盘点和月结在 `<=820px` 只显示“请在电脑端处理”，不挂载原可写页面或发起页面专属请求；`821px+` 保留完整页面。
 - 手机可用范围不变：入库、出库、库存查询和报表继续可用。
-- 入库重复批次号服务端错误现在同时保留确认弹窗/输入值，并在批次号字段显示错误与 `aria-invalid`；未知及网络错误仍使用通用错误处理。
-- 本轮按要求只做有界验证：移动相关 63/63、关键桌面 17/17、Web typecheck/build、diff-check 均通过。未替代主流程的最终 fresh 全量验证。
+- 前端在收到稳定的 `batch number already exists` 业务错误时，会同时保留确认弹窗/输入值，并在批次号字段显示错误与 `aria-invalid`；未知及网络错误仍使用通用错误处理。生产 Prisma 唯一约束的 `P2002` 尚未在服务端统一转换为该稳定业务错误，作为非阻塞后端契约 Minor 留待后续补齐。
+- 最终整分支评审的规格级 Important（手机直达电脑端专属可写页面）已经关闭；scoped re-review 为 0 Critical、0 Important，剩余上述 1 个后端错误契约 Minor 已明确停放。
+- 主流程最终新鲜验证：非部署 Vitest 238 passed/16 skipped、隔离 E2E 119/119、API/Web typecheck、API/Web build 和 diff-check 均通过；Docker 门禁仍因 VM Off 未运行。
 
 ## 11. 文档维护规则
 
