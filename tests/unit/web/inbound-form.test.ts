@@ -4,6 +4,7 @@ import {
   createInboundDraft,
   createInboundPayload,
   isInboundDraft,
+  mapInboundServerError,
   reconcileInboundDraft,
   resetInboundAfterSuccess,
   validateInboundDraft,
@@ -134,6 +135,20 @@ describe("inbound form", () => {
       purchasedAt: validInbound.purchasedAt,
       purchaser: validInbound.purchaser,
       remark: "",
+    });
+  });
+
+  it("maps the stable duplicate-batch server code to the batch number field", () => {
+    expect(mapInboundServerError("batch number already exists")).toEqual({
+      message: "批次号已存在，请更换批次号",
+      fieldErrors: { batchNo: "批次号已存在，请更换批次号" },
+    });
+  });
+
+  it("keeps unknown server errors as dialog-only messages", () => {
+    expect(mapInboundServerError("closed period: 2026-08")).toEqual({
+      message: "closed period: 2026-08",
+      fieldErrors: {},
     });
   });
 });

@@ -16,6 +16,8 @@ import { PeriodClosePage } from "./pages/PeriodClosePage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { InventoryQueryPage } from "./pages/InventoryQueryPage";
 import { DashboardPage, type DashboardCard } from "./pages/DashboardPage";
+import { DesktopOnlyCapabilityNotice, getDesktopOnlyCapability } from "./features/mobile/desktop-only-capabilities";
+import { useMobileViewport } from "./features/mobile/use-mobile-viewport";
 
 type WebUser = { id: string; weComUserId: string; name: string; role: "APPLICANT" | "ADMIN" | "FINANCE" };
 type AuthMetadata = { authorizeUrl: string; localAuthUrl?: string };
@@ -48,6 +50,7 @@ function toWorkspaceUser(user: WebUser): WorkspaceUser {
 
 export default function App() {
   const pathname = window.location.pathname;
+  const isMobileViewport = useMobileViewport();
   const [user, setUser] = useState<WebUser | null>(null);
   const [authorizeUrl, setAuthorizeUrl] = useState(`${apiBaseUrl}/auth/wecom/authorize`);
   const [localAuthUrl, setLocalAuthUrl] = useState<string | undefined>(undefined);
@@ -192,6 +195,11 @@ export default function App() {
   }
 
   const workspaceUser = toWorkspaceUser(user);
+  const desktopOnlyCapability = getDesktopOnlyCapability(pathname);
+
+  if (user.role === "ADMIN" && isMobileViewport && desktopOnlyCapability) {
+    return renderAdminLayout(workspaceUser, <DesktopOnlyCapabilityNotice capability={desktopOnlyCapability} />);
+  }
 
   if (pathname === "/admin/inventory") {
     return renderAdminLayout(workspaceUser, <InventoryQueryPage warehouseId={selectedWarehouseId} role={user.role} />);

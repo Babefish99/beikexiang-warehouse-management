@@ -12,6 +12,7 @@ import {
   createInboundPayload,
   createInboundDraft,
   isInboundDraft,
+  mapInboundServerError,
   reconcileInboundDraft,
   resetInboundAfterSuccess,
   validateInboundDraft,
@@ -135,7 +136,13 @@ export function InboundPage({ userId }: { userId: string }) {
         body: JSON.stringify(createInboundPayload(form)),
       });
       if (!response.ok) {
-        setError(response.status === 401 ? "登录已失效，请重新登录后重试" : await readError(response));
+        if (response.status === 401) {
+          setError("登录已失效，请重新登录后重试");
+        } else {
+          const mappedError = mapInboundServerError(await readError(response));
+          setError(mappedError.message);
+          setErrors((current) => ({ ...current, ...mappedError.fieldErrors }));
+        }
         setResult(null);
         return;
       }

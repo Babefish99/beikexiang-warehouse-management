@@ -110,3 +110,27 @@ Status : Operating normally
 - 修正本报告证据分类：财务零请求、完整 inbound payload/memory persistence、完整 outbound payload/route 409 均是首次即过的 characterization coverage，不再表述为 RED→GREEN。计划 Step 5 同步限定为“真实缺陷按 TDD，补证如实记录首次结果”。
 - inventory query 的 query/error 竞态移除固定 300ms 和可选 release；与切仓段统一使用 `expect.poll(releases.has(...))` 后必选 release。该 spec 5 passed、0 failed。
 - 本轮没有修改生产代码。定向 Vitest 为 4 files / 33 tests passed；其中 inherited `prisma` 的 shared-memory 单独复核为 1 file / 3 tests passed。inventory-query E2E 为 5 passed、0 failed、0 skipped；typecheck API/Web 均 Done；`git diff --check` 无输出。提交后再核对 branch status 和 `5f17963...HEAD` diff-check。
+
+## 10. Final Whole-Branch Review Fix Round（2026-08-14）
+
+### 移动端桌面专属能力门禁
+
+- 按规格 3.2 和手机白名单核对后，统一门禁清单为：`/admin/items`、`/admin/warehouses`、`/admin/opening-stock`、`/admin/transfers`、`/admin/returns`、`/admin/stocktake`、`/admin/period-close`。
+- `opening-stock` 属于初始化/主数据维护性质的可写能力；`returns` 是关联原出库记录的库存写操作，且不在手机可用的入库、出库、查询、报表白名单，因此一并门禁。
+- `<=820px` 的已登录 ADMIN 直达上述 URL 时只挂载统一“请在电脑端处理”只读提示，不实例化原业务页面，不发起页面专属读取请求。`821px+` 继续挂载原完整页面。
+- RED：390px 的 7 个直达路由全部找不到统一提示并挂载原业务页面。GREEN：新 spec 14/14，通过 7 个移动门禁/请求零断言和 7 个 821px 桌面保留断言。
+
+### 入库字段级服务端错误
+
+- 新增精确服务端错误代码映射接缝；`batch number already exists` 映射为批次号字段错误，未知错误保持 dialog-only 通用信息，不使用散落 substring 判断。
+- duplicate batch 响应保留确认 dialog、alert 和原批次输入，同时将批次号设置为 `aria-invalid=true`。
+- RED：`mapInboundServerError` 缺失，2 failed / 11 passed。GREEN：inbound form unit 13/13，duplicate batch 定向 E2E 1/1。
+
+### 有界验证
+
+- 移动相关 6 个 specs：63/63 passed。
+- 关键桌面 master-data、inventory-operations、period-close、inbound：17/17 passed。
+- Web typecheck：exit 0。
+- Web production build：1613 modules transformed，exit 0。
+- `git diff --check`：exit 0。
+- 未运行全仓 Vitest 或全仓 E2E；由主流程执行最终 fresh 全量门禁。

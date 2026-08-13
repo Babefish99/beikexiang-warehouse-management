@@ -13,9 +13,24 @@ export type InboundDraft = {
 
 export type InboundFieldErrors = Partial<Record<keyof InboundDraft, string>>;
 
+export type InboundServerError = {
+  message: string;
+  fieldErrors: InboundFieldErrors;
+};
+
 const inboundFields = ["warehouseId", "itemId", "batchNo", "quantity", "unitCost", "purchasedAt", "purchaser", "remark"] as const;
 const plainDecimalPattern = /^-?\d+(?:\.\d{1,4})?$/;
 const decimalFormatError = "必须为最多 14 位整数和 4 位小数的普通十进制数";
+const inboundServerErrorMappings: Record<string, InboundServerError> = {
+  "batch number already exists": {
+    message: "批次号已存在，请更换批次号",
+    fieldErrors: { batchNo: "批次号已存在，请更换批次号" },
+  },
+};
+
+export function mapInboundServerError(serverMessage: string): InboundServerError {
+  return inboundServerErrorMappings[serverMessage] ?? { message: serverMessage, fieldErrors: {} };
+}
 
 export function isInboundDraft(value: unknown): value is InboundDraft {
   return value !== null

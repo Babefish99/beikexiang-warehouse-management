@@ -89,6 +89,25 @@ test("mobile inbound is grouped, confirms an exact amount, and restores a failed
   expect(await page.evaluate(() => sessionStorage.getItem("warehouse.inbound.v1.local-admin"))).toBeNull();
 });
 
+test("duplicate batch errors mark batch number invalid without discarding the dialog or input", async ({ page }) => {
+  await page.route(apiUrl("/admin/inbound"), (route) => route.fulfill({
+    status: 409,
+    json: { error: "batch number already exists" },
+  }));
+  await openInbound(page);
+  await fillInbound(page);
+
+  await page.getByRole("button", { name: "保存入库" }).click();
+  const dialog = page.getByRole("dialog", { name: "确认入库" });
+  await dialog.getByRole("button", { name: "确认入库", exact: true }).click();
+
+  await expect(dialog.getByRole("alert")).toHaveText("批次号已存在，请更换批次号");
+  await expect(page.getByLabel("批次号 *")).toHaveAttribute("aria-invalid", "true");
+  await expect(page.getByLabel("批次号 *")).toHaveValue("B-001");
+  await expect(page.getByText("批次号已存在，请更换批次号", { exact: true })).toHaveCount(2);
+  await expect(dialog).toBeVisible();
+});
+
 test("invalid runtime draft values are ignored and leave the page usable", async ({ page }) => {
   await page.addInitScript(() => {
     sessionStorage.setItem("warehouse.inbound.v1.local-admin", JSON.stringify({
