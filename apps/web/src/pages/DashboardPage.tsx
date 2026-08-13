@@ -61,7 +61,8 @@ export function DashboardPage({ cards, loading, role, warehouses = [], selectedW
     return <div className="page"><PageHeader title="财务工作台" description="查询库存与已结账期间的报表数据。" /><section className="panel"><div className="quick-actions quick-actions--finance"><a href="/admin/inventory"><PackageSearch size={28} /><span>库存查询</span></a><a href="/admin/reports"><FileSpreadsheet size={28} /><span>报表中心</span></a></div></section></div>;
   }
 
-  const desktopCards = cards.filter((card) => ["inventory", "approval", "inbound", "outbound"].includes(card.tone));
+  const desktopCardLabels = new Set(["库存品类", "待出库审批", "本月入库", "本月出库"]);
+  const desktopCards = cards.filter((card) => desktopCardLabels.has(card.label));
   return <div className="page">
     <PageHeader title="库存总览" description="查看三个仓库的库存状态、待处理业务和本月变动。" actions={<button className="button button--secondary" type="button" onClick={() => window.location.reload()}><RefreshCw size={15} />刷新数据</button>} />
     <section className="metric-strip" aria-label="库存概览指标">{desktopCards.map((card) => { const MetricIcon = metricIcons[card.tone]; return <div className={`metric metric--${card.tone}`} key={card.label}><span className="metric__icon"><MetricIcon size={26} /></span><div className="metric__content"><span className="metric__label">{card.label}</span><div className="metric__value"><strong>{card.value}</strong></div><span className="metric__hint">{card.hint}</span></div></div>; })}</section>

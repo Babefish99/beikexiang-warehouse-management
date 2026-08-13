@@ -138,7 +138,7 @@ export default function App() {
           { label: "待出库审批", value: `${pending.length}`, hint: "企业微信已通过", tone: "approval" },
           { label: "本月入库", value: `${inbound.quantity} / ${inbound.amount}`, hint: "数量 / 金额", tone: "inbound" },
           { label: "本月出库", value: `${outbound.quantity} / ${outbound.amount}`, hint: "数量 / 金额", tone: "outbound" },
-          { label: "待出库", value: `${notifications.filter((notification) => notification.kind === "PENDING_OUTBOUND").length}`, hint: "待处理", tone: "approval" },
+          { label: "待出库", value: `${pending.length}`, hint: "待处理", tone: "approval" },
           { label: "低库存", value: `${notifications.filter((notification) => notification.kind === "LOW_STOCK").length}`, hint: "需关注", tone: "low" },
           { label: "通知", value: `${notifications.length}`, hint: "全部通知", tone: "notification" },
         ]);

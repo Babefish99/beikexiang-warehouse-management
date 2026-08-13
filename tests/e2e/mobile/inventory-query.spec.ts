@@ -22,13 +22,17 @@ test("mobile admin dashboard shows task actions and notification-derived overvie
   await page.route(/\/admin\/items\?includeInactive=true$/, (route) => route.fulfill({
     json: [{ isActive: true }, { isActive: true }, { isActive: false }],
   }));
-  await page.route(/\/admin\/outbound\/pending$/, (route) => route.fulfill({ json: [] }));
+  await page.route(/\/admin\/outbound\/pending$/, (route) => route.fulfill({
+    json: [
+      { id: "approval-1", weComSpNo: "202608130001", status: "PENDING_OUTBOUND", lines: [] },
+      { id: "approval-2", weComSpNo: "202608130002", status: "PENDING_OUTBOUND", lines: [] },
+    ],
+  }));
   await page.route(/\/admin\/reports\/transactions.*/, (route) => route.fulfill({ json: [] }));
   await page.route(/\/admin\/notifications$/, (route) => route.fulfill({
     json: [
-      { id: "n-1", kind: "PENDING_OUTBOUND", title: "待出库", description: "", href: "/admin/outbound", priority: 1 },
-      { id: "n-2", kind: "PENDING_OUTBOUND", title: "待出库", description: "", href: "/admin/outbound", priority: 1 },
-      { id: "n-3", kind: "LOW_STOCK", title: "低库存", description: "", href: "/admin/inventory", priority: 2 },
+      { id: "n-1", kind: "PENDING_OUTBOUND", title: "待出库", description: "当前有 2 个审批单待完成实际出库。", href: "/admin/outbound", priority: 1 },
+      { id: "n-2", kind: "LOW_STOCK", title: "低库存", description: "当前有 1 个物品低于最低库存。", href: "/admin/inventory", priority: 2 },
     ],
   }));
 
@@ -38,7 +42,7 @@ test("mobile admin dashboard shows task actions and notification-derived overvie
   await expect(dashboard.getByRole("heading", { name: /你好/ })).toBeVisible();
   await expect(dashboard.getByRole("link", { name: "手机入库" })).toBeVisible();
   await expect(dashboard.getByRole("link", { name: "实际出库" })).toBeVisible();
-  await expect(dashboard.getByRole("region", { name: "今日概览" })).toContainText("待出库2低库存1库存品类2通知3");
+  await expect(dashboard.getByRole("region", { name: "今日概览" })).toContainText("待出库2低库存1库存品类2通知2");
   const iconSizes = await dashboard.locator(".mobile-dashboard svg").evaluateAll((icons) => icons.map((icon) => icon.getBoundingClientRect().width));
   expect(iconSizes.length).toBeGreaterThan(0);
   expect(iconSizes.every((size) => size === 18)).toBe(true);

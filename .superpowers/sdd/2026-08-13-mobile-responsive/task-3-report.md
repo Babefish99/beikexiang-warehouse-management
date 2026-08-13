@@ -164,3 +164,101 @@ corepack pnpm --filter @warehouse/web typecheck
 精确结果：退出码 0；输出 `$ tsc -b --pretty false`，0 errors。
 
 本轮无需生产代码修复；仅追加本报告。隔离验证完成后终止本轮从该工作树启动的 3301/5474 进程，并再次确认端口释放、3001/5174 未受影响、Git 工作树干净。
+
+## Fix Round 1/5
+
+### Status
+
+DONE
+
+Fix base：`cd23dc4`。仅修复审查提出的三个 Important；未处理已登记的两个 Minor，未扩张生产实现范围。
+
+### RED
+
+1. 真实聚合通知与 pending 数组数量：
+
+```powershell
+$env:API_BASE_URL='http://127.0.0.1:3301'
+$env:WEB_BASE_URL='http://127.0.0.1:5474'
+corepack pnpm playwright test tests/e2e/mobile/inventory-query.spec.ts --grep "notification-derived overview"
+```
+
+精确结果：退出码 1；`1 failed`。夹具使用 2 条 `/admin/outbound/pending` 和真实 NotificationService 形态的 1 条 `PENDING_OUTBOUND` 聚合通知；预期 `待出库2`，实际 `待出库1`。
+
+2. 桌面严格四指标：在隔离 URL helper 修复后，临时恢复旧 tone 过滤并运行现有严格断言：
+
+```powershell
+$env:API_BASE_URL='http://127.0.0.1:3301'
+$env:WEB_BASE_URL='http://127.0.0.1:5474'
+corepack pnpm playwright test tests/e2e/navigation/dashboard.spec.ts --grep "dashboard quick actions"
+```
+
+精确结果：退出码 1；`1 failed`。`.metric__value` 预期 4，实际 5。随后立即恢复 label 白名单修复；旧实现未提交。
+
+3. 桌面隔离登录：Fix/Verification Round 已记录旧硬编码命令在同一 3301/5474 隔离栈上 `9 failed (77.7s)`，所有测试通过硬编码 `127.0.0.1:3001/auth/local` 未进入隔离 Web；这条已有失败证据作为本 Important 的 RED，未重复运行污染命令。
+
+### 最小修复
+
+- `App.tsx`：移动“待出库”复用已并行读取的 `pending.length`，不新增请求；低库存仍映射 `LOW_STOCK` 通知条目数，通知仍映射通知数组长度。
+- `DashboardPage.tsx`：桌面按明确 label 白名单选择原四指标，不再依赖非唯一 tone；移动端仍按四个确认 label 读取今日概览。
+- `mobile-test-helpers.ts`：导出 `apiBaseUrl`、`webBaseUrl`、`apiUrl()`、`apiUrlPattern()` 和既有 `loginAs()`，统一尊重 `API_BASE_URL` / `WEB_BASE_URL`。
+- `dashboard.spec.ts`、`workspace-tools.spec.ts`：所有登录和 API 拦截改用共享 helper，不改生产配置。
+- `inventory-query.spec.ts`：使用真实单条聚合通知形态，pending 数组两条，并分别期待待出库 2、通知 2。
+
+### 隔离栈所有权
+
+启动前确认 3301/5474 无监听。随后仅从本工作树启动：
+
+```powershell
+$env:API_PORT='3301'
+$env:API_BASE_URL='http://127.0.0.1:3301'
+$env:WEB_BASE_URL='http://127.0.0.1:5474'
+$env:LOCAL_AUTH_BYPASS='true'
+$env:PERSISTENCE_DRIVER='memory'
+corepack pnpm --filter @warehouse/api dev
+
+$env:VITE_API_BASE_URL='http://127.0.0.1:3301'
+corepack pnpm --filter @warehouse/web exec vite --host 127.0.0.1 --port 5474 --strictPort
+```
+
+健康检查通过：API memory / `database.status=not_required`，Web HTTP 200。验证后仅按命令行包含 `D:\桌面\仓库\.worktrees\mobile-responsive` 的进程所有权终止 3301/5474；3001/5174 不触碰。
+
+### GREEN / 回归
+
+桌面组合：
+
+```powershell
+$env:API_BASE_URL='http://127.0.0.1:3301'
+$env:WEB_BASE_URL='http://127.0.0.1:5474'
+corepack pnpm playwright test tests/e2e/navigation/dashboard.spec.ts tests/e2e/navigation/workspace-tools.spec.ts
+```
+
+精确结果：退出码 0；`9 passed (10.2s)`。
+
+移动组合：
+
+```powershell
+$env:API_BASE_URL='http://127.0.0.1:3301'
+$env:WEB_BASE_URL='http://127.0.0.1:5474'
+corepack pnpm playwright test tests/e2e/mobile/inventory-query.spec.ts tests/e2e/mobile/mobile-shell.spec.ts
+```
+
+精确结果：退出码 0；`11 passed (5.0s)`。
+
+类型与差异检查：
+
+```powershell
+corepack pnpm --filter @warehouse/web typecheck
+git diff --check
+```
+
+精确结果：均退出码 0；TypeScript 0 errors；无 whitespace error（仅 LF→CRLF 提示）。
+
+### Commit
+
+- `fix: correct mobile dashboard counts and test isolation`（Fix Round 1 提交）
+
+### Concerns
+
+- 无本轮阻塞或剩余 Important。
+- 未读取/修改生产 Secret，未连接生产数据库，未部署，未 push，未触碰主工作树服务。
