@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { FileSpreadsheet, ShieldAlert } from "lucide-react";
 import { AdminLayout, type WarehouseOption, type WorkspaceUser } from "./layouts/AdminLayout";
-import { loadInventoryNotifications } from "./components/AppShell";
+import { loadInventoryNotifications } from "./features/notifications/notification-tasks";
 import { PageHeader } from "./components/PageHeader";
 import { LoginPage } from "./pages/LoginPage";
 import { ItemsPage } from "./pages/ItemsPage";

@@ -5,6 +5,7 @@ import { DesktopOutboundTable, type OutboundResult } from "../features/outbound/
 import { MobileOutboundFlow } from "../features/outbound/MobileOutboundFlow";
 import type { AllocationRow, BatchOption, PendingApproval } from "../features/outbound/outbound-workflow";
 import { useMobileViewport } from "../features/mobile/use-mobile-viewport";
+import { announceBusinessCompleted } from "../features/notifications/notification-tasks";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
 
@@ -66,6 +67,7 @@ export function OutboundPage({ userId }: { userId: string }) {
     }
     if (!response.ok) throw new Error(await readError(response));
     const result = await response.json() as OutboundResult;
+    announceBusinessCompleted();
     await loadPending();
     return result;
   }, [loadPending]);
@@ -78,6 +80,7 @@ export function OutboundPage({ userId }: { userId: string }) {
     }
     if (!response.ok) throw new Error(await readError(response));
     const result = await response.json() as { approvalId: string; status: string };
+    announceBusinessCompleted();
     await loadPending();
     return result;
   }, [loadPending]);

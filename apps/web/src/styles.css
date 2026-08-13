@@ -54,7 +54,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .topbar-icon-button { width: 40px; display: inline-grid; place-items: center; position: relative; color: var(--navy); }
 .topbar-icon-button:hover, .topbar-selector:hover, .workspace-user-button:hover, .workspace-menu-item:hover, .workspace-search-result:hover, .workspace-notification:hover { border-color: #d5dbe6; background: #f8fafc; }
 .mobile-nav-toggle { display: none; }
-.workspace-icon-button__badge { width: 8px; height: 8px; border-radius: 50%; background: var(--orange); position: absolute; top: 10px; right: 10px; box-shadow: 0 0 0 2px #fff; }
+.topbar-icon-button > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.topbar-icon-button > strong { min-width: 18px; height: 18px; padding: 0 5px; display: grid; place-items: center; position: absolute; top: -7px; right: -7px; border-radius: 99px; background: var(--orange); color: #fff; font-size: 10px; line-height: 1; box-shadow: 0 0 0 2px #fff; }
 .workspace-user-button { padding: 0 12px; display: inline-flex; align-items: center; gap: 8px; color: var(--navy); }
 .workspace-user-button span { display: grid; text-align: left; }
 .workspace-user-button strong { font-size: 13px; line-height: 1.2; }
@@ -76,6 +77,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .workspace-menu-item small, .workspace-search-result small, .workspace-search-result__meta, .workspace-notification p, .workspace-user-card small, .workspace-info-row small { color: var(--muted); font-size: 11px; line-height: 1.5; }
 .workspace-menu-item.is-selected { border-color: #ffd9c7; background: #fff7f2; }
 .workspace-search-results, .workspace-notification-list { display: grid; gap: 4px; }
+.workspace-notification { min-height: 44px; }
+.workspace-notification p { margin: 0; }
+.workspace-notification--desktop-only small { display: inline-flex; align-items: center; gap: 5px; color: var(--orange); font-size: 11px; }
+.workspace-notification-state { padding: 12px 8px; color: #b23c2c; font-size: 12px; }
+.workspace-notification-state p { margin: 0 0 10px; }
+.workspace-notification-state button { min-height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
 .workspace-search-result__title { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .workspace-search-result__title span { font-size: 13px; }
 .workspace-link-button { padding: 0; border: 0; background: transparent; color: var(--orange); font-size: 12px; }
@@ -137,6 +144,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .modal-dialog__actions { padding: 16px 22px 20px; display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--border); }
 .button--danger { background: #b23c2c; color: #fff; }
 .mobile-more-sheet { display: grid; gap: 18px; }
+.mobile-notification-trigger { width: 100%; min-height: 48px; padding: 0 14px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: 10px; background: #fff; color: var(--navy); text-align: left; }
+.mobile-notification-trigger > strong { min-width: 26px; height: 26px; display: grid; place-items: center; border-radius: 99px; background: #fff0e9; color: var(--orange); font-size: 12px; }
+.mobile-notification-center { min-width: 0; }
+.mobile-notification-center .workspace-notification-list { gap: 8px; }
+.mobile-notification-center .workspace-notification { padding: 14px; border-color: var(--border); background: #fff; overflow-wrap: anywhere; }
 .mobile-more-sheet__account { margin: 0; display: grid; gap: 10px; }
 .mobile-more-sheet__account div { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; }
 .mobile-more-sheet__account dt { color: var(--muted); font-size: 12px; }
@@ -190,6 +202,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   input, select, textarea { font-size: 16px; }
   .modal-dialog-shell { place-items: end center; padding: 12px; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .modal-dialog--shared { max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px - env(safe-area-inset-bottom)); border-radius: 18px; }
+  .mobile-notification-center { max-width: 100%; overflow-x: hidden; }
   .modal-dialog--shared .modal-dialog__close { width: 44px; height: 44px; }
   .modal-dialog--shared .modal-dialog__actions .button { min-width: 44px; min-height: 44px; }
   .mobile-dashboard { display: grid; gap: 14px; }

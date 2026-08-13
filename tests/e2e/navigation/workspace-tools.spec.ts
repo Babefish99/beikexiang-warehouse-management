@@ -277,7 +277,7 @@ test("Escape closes workspace popovers and updates aria-expanded state", async (
   await expect(page.getByText("登录信息")).toHaveCount(0);
 });
 
-test("notification center shows unread items and clears the local unread indicator", async ({ page }) => {
+test("notification center shows the live task count without local read state", async ({ page }) => {
   await routeWorkspaceWarehouses(page);
   await routeItems(page);
   await page.route(apiUrl("/admin/notifications"), async (route) => {
@@ -303,12 +303,11 @@ test("notification center shows unread items and clears the local unread indicat
   await expect(page.getByText("Inventory Center", { exact: true })).toHaveCount(0);
 
   const notificationButton = page.getByRole("button", { name: "通知中心" });
-  await expect(notificationButton.locator(".workspace-icon-button__badge")).toHaveCount(1);
+  await expect(notificationButton).toContainText("1");
   await notificationButton.click();
   await expect(page.getByText("盘点差异待复核")).toBeVisible();
-  await expect(page.getByRole("button", { name: "全部已读" })).toBeVisible();
-  await page.getByRole("button", { name: "全部已读" }).click();
-  await expect(notificationButton.locator(".workspace-icon-button__badge")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "全部已读" })).toHaveCount(0);
+  await expect(notificationButton).toContainText("1");
 });
 
 test("saved warehouse selection restores from localStorage", async ({ page }) => {

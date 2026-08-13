@@ -18,6 +18,7 @@ import {
   type InboundDraft,
   type InboundFieldErrors,
 } from "../features/inbound/inbound-form";
+import { announceBusinessCompleted } from "../features/notifications/notification-tasks";
 import { useMobileViewport } from "../features/mobile/use-mobile-viewport";
 
 type SelectorWarehouse = { id: string; code: string; name: string };
@@ -145,7 +146,7 @@ export function InboundPage({ userId }: { userId: string }) {
       setStaleFields([]);
       setResult(`入库已登记：${data.inboundId}，批次 ${data.batchIds.join("、")}`);
       setConfirming(false);
-      window.dispatchEvent(new CustomEvent("warehouse:business-completed", { detail: { type: "inbound" } }));
+      announceBusinessCompleted();
     } catch {
       setError("网络异常，草稿已保留，请稍后重试");
       setResult(null);

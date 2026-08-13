@@ -3,6 +3,7 @@ import { ApprovalMark, InboundMark, InventoryMark, OutboundMark } from "../compo
 import { PageHeader } from "../components/PageHeader";
 import { useMobileViewport } from "../features/mobile/use-mobile-viewport";
 import type { WarehouseOption } from "../components/AppShell";
+import { useNotificationTaskSnapshot } from "../features/notifications/use-notification-tasks";
 
 export type DashboardCard = { label: string; value: string; hint: string; tone: "inventory" | "approval" | "inbound" | "outbound" | "low" | "notification" };
 
@@ -14,6 +15,7 @@ function cardValue(cards: DashboardCard[], label: string, loading: boolean): str
 
 export function DashboardPage({ cards, loading, role, warehouses = [], selectedWarehouseId = "all", onSelectWarehouse }: { cards: DashboardCard[]; loading: boolean; role: "ADMIN" | "FINANCE"; warehouses?: WarehouseOption[]; selectedWarehouseId?: string; onSelectWarehouse?(warehouseId: string): void }) {
   const isMobileViewport = useMobileViewport();
+  const notificationSnapshot = useNotificationTaskSnapshot();
 
   if (isMobileViewport) {
     return (
@@ -47,9 +49,9 @@ export function DashboardPage({ cards, loading, role, warehouses = [], selectedW
           <h2>今日概览</h2>
           <div>
             <article><span>待出库</span><strong>{cardValue(cards, "待出库", loading)}</strong></article>
-            <article><span>低库存</span><strong>{cardValue(cards, "低库存", loading)}</strong></article>
+            <article><span>低库存</span><strong>{loading ? "加载中" : notificationSnapshot.tasks.filter((task) => task.kind === "LOW_STOCK").length}</strong></article>
             <article><span>库存品类</span><strong>{cardValue(cards, "库存品类", loading)}</strong></article>
-            <article><span>通知</span><strong>{cardValue(cards, "通知", loading)}</strong></article>
+            <article><span>通知</span><strong>{loading ? "加载中" : notificationSnapshot.tasks.length}</strong></article>
           </div>
         </section> : null}
         <p className="mobile-dashboard__hint">复杂的盘点、调拨与结账操作请在电脑端完成。</p>

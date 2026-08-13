@@ -1,44 +1,15 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, BarChart3, Building2, ChevronDown, LayoutDashboard, PackageSearch, Search, Settings, ShieldCheck, UserCircle, Warehouse, X } from "lucide-react";
+import { BarChart3, Building2, ChevronDown, LayoutDashboard, PackageSearch, Search, Settings, ShieldCheck, UserCircle, Warehouse, X } from "lucide-react";
 import { MobileBottomNav } from "../features/mobile/MobileBottomNav";
 import { MobileMoreSheet } from "../features/mobile/MobileMoreSheet";
 import { useMobileViewport } from "../features/mobile/use-mobile-viewport";
 import { LogoMark } from "./LogoMark";
 import { searchInventory, type InventorySearchResult } from "../features/inventory/inventory-api";
+import { NotificationCenter } from "../features/notifications/NotificationCenter";
+export { loadInventoryNotifications } from "../features/notifications/notification-tasks";
 
 export type WarehouseOption = { id: string; code: string; name: string; isActive: boolean };
 export type WorkspaceUser = { name: string; roleLabel: string; role: "ADMIN" | "FINANCE" };
-
-export type InventoryNotification = {
-  id: string;
-  kind: string;
-  title: string;
-  description: string;
-  href: string;
-  priority: number;
-};
-
-let pendingNotifications: Promise<InventoryNotification[]> | null = null;
-let recentNotifications: { value: InventoryNotification[]; loadedAt: number } | null = null;
-
-export function loadInventoryNotifications(): Promise<InventoryNotification[]> {
-  if (recentNotifications && Date.now() - recentNotifications.loadedAt < 1_000) return Promise.resolve(recentNotifications.value);
-  if (!pendingNotifications) {
-    pendingNotifications = fetch(`${apiBaseUrl}/admin/notifications`, { credentials: "include" })
-      .then((response) => {
-        if (!response.ok) throw new Error("通知中心加载失败");
-        return response.json() as Promise<InventoryNotification[]>;
-      })
-      .then((value) => {
-        recentNotifications = { value, loadedAt: Date.now() };
-        return value;
-      })
-      .finally(() => {
-        pendingNotifications = null;
-      });
-  }
-  return pendingNotifications;
-}
 
 type NavigationItem = {
   label: string;
@@ -96,16 +67,12 @@ export function AppShell({
 
   const [moreSheetOpen, setMoreSheetOpen] = useState(false);
   const [warehouseMenuOpen, setWarehouseMenuOpen] = useState(false);
-  const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchPopoverOpen, setSearchPopoverOpen] = useState(false);
   const [searchResults, setSearchResults] = useState<InventorySearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [notifications, setNotifications] = useState<InventoryNotification[]>([]);
-  const [notificationError, setNotificationError] = useState<string | null>(null);
-  const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
   const searchRequestVersion = useRef(0);
 
   useEffect(() => {
@@ -154,10 +121,6 @@ export function AppShell({
         setSearchPopoverOpen(false);
         return;
       }
-      if (notificationMenuOpen) {
-        setNotificationMenuOpen(false);
-        return;
-      }
       if (userMenuOpen) {
         setUserMenuOpen(false);
       }
@@ -167,38 +130,7 @@ export function AppShell({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [notificationMenuOpen, searchPopoverOpen, userMenuOpen, warehouseMenuOpen]);
-
-  useEffect(() => {
-    if (user.role !== "ADMIN") {
-      setNotifications([]);
-      setNotificationError(null);
-      setHasUnreadNotifications(false);
-      return;
-    }
-
-    let active = true;
-    const loadNotifications = async () => {
-      try {
-        if (!active) return;
-        const payload = await loadInventoryNotifications();
-        if (!active) return;
-        setNotifications(payload);
-        setNotificationError(null);
-        setHasUnreadNotifications(payload.length > 0);
-      } catch (error) {
-        if (!active) return;
-        setNotifications([]);
-        setNotificationError(error instanceof Error ? error.message : "通知中心加载失败");
-        setHasUnreadNotifications(false);
-      }
-    };
-
-    void loadNotifications();
-    return () => {
-      active = false;
-    };
-  }, [user.role]);
+  }, [searchPopoverOpen, userMenuOpen, warehouseMenuOpen]);
 
   const showSearchPopover = searchPopoverOpen && searchQuery.trim().length > 0;
 
@@ -253,7 +185,6 @@ export function AppShell({
                 onClick={() => {
                   setWarehouseMenuOpen((open) => !open);
                   setSearchPopoverOpen(false);
-                  setNotificationMenuOpen(false);
                   setUserMenuOpen(false);
                 }}
               >
@@ -315,7 +246,6 @@ export function AppShell({
                 onFocus={() => {
                   if (searchQuery.trim()) setSearchPopoverOpen(true);
                   setWarehouseMenuOpen(false);
-                  setNotificationMenuOpen(false);
                   setUserMenuOpen(false);
                 }}
               />
@@ -358,45 +288,11 @@ export function AppShell({
           </div>
 
           <div className="topbar__actions">
-            {user.role === "ADMIN" ? (
-              <div className="topbar-panel">
-                <button
-                  className="topbar-icon-button"
-                  type="button"
-                  aria-label="通知中心"
-                  aria-expanded={notificationMenuOpen}
-                  onClick={() => {
-                    setNotificationMenuOpen((open) => !open);
-                    setWarehouseMenuOpen(false);
-                    setSearchPopoverOpen(false);
-                    setUserMenuOpen(false);
-                  }}
-                >
-                  <Bell size={18} />
-                  {hasUnreadNotifications ? <span className="workspace-icon-button__badge" /> : null}
-                </button>
-                {notificationMenuOpen ? (
-                  <div className="workspace-popover workspace-popover--notifications">
-                    <div className="workspace-popover__header">
-                      <strong>通知中心</strong>
-                      <button className="workspace-link-button" type="button" onClick={() => setHasUnreadNotifications(false)}>全部已读</button>
-                    </div>
-                    {notificationError ? <p className="workspace-popover__empty">{notificationError}</p> : null}
-                    {!notificationError && !notifications.length ? <p className="workspace-popover__empty">暂无待处理通知</p> : null}
-                    {!notificationError && notifications.length ? (
-                      <div className="workspace-notification-list">
-                        {notifications.map((notification) => (
-                          <a className="workspace-notification" key={notification.id} href={notification.href}>
-                            <strong>{notification.title}</strong>
-                            <p>{notification.description}</p>
-                          </a>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
+            <NotificationCenter role={user.role} mobile={false} onOpen={() => {
+              setWarehouseMenuOpen(false);
+              setSearchPopoverOpen(false);
+              setUserMenuOpen(false);
+            }} />
 
             <div className="topbar-panel">
               <button
@@ -408,7 +304,6 @@ export function AppShell({
                   setUserMenuOpen((open) => !open);
                   setWarehouseMenuOpen(false);
                   setSearchPopoverOpen(false);
-                  setNotificationMenuOpen(false);
                 }}
               >
                 <UserCircle size={22} />
@@ -442,6 +337,7 @@ export function AppShell({
         <>
           <MobileBottomNav role={user.role} pathname={pathname} onOpenMore={() => setMoreSheetOpen(true)} />
           <MobileMoreSheet open={moreSheetOpen} user={user} loginChannel={loginChannel} onClose={() => setMoreSheetOpen(false)} />
+          <NotificationCenter role={user.role} mobile renderTrigger={false} />
         </>
       ) : null}
     </div>
