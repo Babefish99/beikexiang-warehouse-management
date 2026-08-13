@@ -1,15 +1,33 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  addOutboundDraftIndexEntry,
+  isOutboundDraftIndex,
   isOutboundDraft,
   normalizeAllocations,
+  outboundDraftIndexKey,
   outboundDraftKey,
+  readIndexedOutboundDrafts,
+  removeOutboundDraftIndexEntry,
   reconcileBatchOptions,
   summarizeOutbound,
   validateAllocationStep,
   validateReviewStep,
   type OutboundDraft,
 } from "../../../apps/web/src/features/outbound/outbound-workflow";
+import { writeSessionDraft } from "../../../apps/web/src/features/drafts/session-draft";
+
+function createStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => { values.set(key, value); },
+    removeItem: (key) => { values.delete(key); },
+    clear: () => values.clear(),
+    key: (index) => [...values.keys()][index] ?? null,
+    get length() { return values.size; },
+  };
+}
 
 const approval = {
   id: "approval-1",
@@ -114,5 +132,47 @@ describe("outbound workflow", () => {
     expect(isOutboundDraft({ approvalId: "a", step: "allocate", reason: "", allocations: [] })).toBe(true);
     expect(isOutboundDraft({ approvalId: "a", step: "forged", reason: "", allocations: [] })).toBe(false);
     expect(isOutboundDraft({ approvalId: "a", step: "review", reason: "", allocations: [{ id: "x" }] })).toBe(false);
+  });
+
+  it("indexes multiple drafts per user and removes only the requested entry", () => {
+    const storage = createStorage();
+    expect(outboundDraftIndexKey("user/a")).toBe("warehouse.outbound.index.v1.user%2Fa");
+
+    addOutboundDraftIndexEntry(storage, "admin-1", { approvalId: "approval-1", weComSpNo: "202608130001" });
+    addOutboundDraftIndexEntry(storage, "admin-1", { approvalId: "approval-2", weComSpNo: "202608130002" });
+    addOutboundDraftIndexEntry(storage, "admin-1", { approvalId: "approval-1", weComSpNo: "202608130001" });
+
+    expect(JSON.parse(storage.getItem(outboundDraftIndexKey("admin-1")) ?? "null")).toEqual({
+      version: 1,
+      userId: "admin-1",
+      value: [
+        { approvalId: "approval-1", weComSpNo: "202608130001" },
+        { approvalId: "approval-2", weComSpNo: "202608130002" },
+      ],
+    });
+    removeOutboundDraftIndexEntry(storage, "admin-1", "approval-1");
+    expect(JSON.parse(storage.getItem(outboundDraftIndexKey("admin-1")) ?? "null").value).toEqual([
+      { approvalId: "approval-2", weComSpNo: "202608130002" },
+    ]);
+  });
+
+  it("rejects corrupt or cross-user indexes and prunes missing or malformed draft keys", () => {
+    const storage = createStorage();
+    expect(isOutboundDraftIndex([{ approvalId: "a", weComSpNo: "1" }])).toBe(true);
+    expect(isOutboundDraftIndex([{ approvalId: "a" }, null])).toBe(false);
+    storage.setItem(outboundDraftIndexKey("admin-1"), JSON.stringify({ version: 1, userId: "other-user", value: [{ approvalId: "foreign", weComSpNo: "9" }] }));
+    expect(readIndexedOutboundDrafts(storage, "admin-1")).toEqual([]);
+
+    addOutboundDraftIndexEntry(storage, "admin-1", { approvalId: "valid", weComSpNo: "1" });
+    addOutboundDraftIndexEntry(storage, "admin-1", { approvalId: "missing", weComSpNo: "2" });
+    addOutboundDraftIndexEntry(storage, "admin-1", { approvalId: "broken", weComSpNo: "3" });
+    writeSessionDraft(storage, outboundDraftKey("admin-1", "valid"), { version: 1, userId: "admin-1", value: { approvalId: "valid", step: "allocate", reason: "", allocations: [] } });
+    storage.setItem(outboundDraftKey("admin-1", "broken"), "not-json");
+
+    expect(readIndexedOutboundDrafts(storage, "admin-1")).toEqual([{
+      entry: { approvalId: "valid", weComSpNo: "1" },
+      draft: { approvalId: "valid", step: "allocate", reason: "", allocations: [] },
+    }]);
+    expect(JSON.parse(storage.getItem(outboundDraftIndexKey("admin-1")) ?? "null").value).toEqual([{ approvalId: "valid", weComSpNo: "1" }]);
   });
 });

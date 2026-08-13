@@ -1,4 +1,5 @@
 import Decimal from "decimal.js";
+import { readSessionDraft, writeSessionDraft } from "../drafts/session-draft";
 
 export type OutboundStep = "select" | "allocate" | "review" | "complete";
 
@@ -14,6 +15,10 @@ export type OutboundSummary = {
   lines: Array<{ approvalLineId: string; itemId: string; requestedQuantity: string; actualQuantity: string; difference: string }>;
 };
 export type ReconciledOutboundDraft = { draft: OutboundDraft; invalidAllocationIds: string[] };
+export type OutboundDraftIndexEntry = { approvalId: string; weComSpNo: string };
+export type IndexedOutboundDraft = { entry: OutboundDraftIndexEntry; draft: OutboundDraft };
+
+const outboundDraftVersion = 1;
 
 const steps = new Set<OutboundStep>(["select", "allocate", "review", "complete"]);
 const plainDecimalPattern = /^\d+(?:\.\d{1,4})?$/;
@@ -50,6 +55,45 @@ export function isOutboundDraft(value: unknown): value is OutboundDraft {
 
 export function outboundDraftKey(userId: string, approvalId: string): string {
   return `warehouse.outbound.v1.${encodeURIComponent(userId)}.${encodeURIComponent(approvalId)}`;
+}
+
+export function outboundDraftIndexKey(userId: string): string {
+  return `warehouse.outbound.index.v1.${encodeURIComponent(userId)}`;
+}
+
+export function isOutboundDraftIndex(value: unknown): value is OutboundDraftIndexEntry[] {
+  return Array.isArray(value) && value.every((entry) => entry !== null
+    && typeof entry === "object"
+    && !Array.isArray(entry)
+    && typeof (entry as Record<string, unknown>).approvalId === "string"
+    && typeof (entry as Record<string, unknown>).weComSpNo === "string");
+}
+
+function readOutboundDraftIndex(storage: Storage, userId: string): OutboundDraftIndexEntry[] {
+  return readSessionDraft(storage, outboundDraftIndexKey(userId), userId, outboundDraftVersion, isOutboundDraftIndex) ?? [];
+}
+
+function writeOutboundDraftIndex(storage: Storage, userId: string, entries: OutboundDraftIndexEntry[]): void {
+  writeSessionDraft(storage, outboundDraftIndexKey(userId), { version: outboundDraftVersion, userId, value: entries });
+}
+
+export function addOutboundDraftIndexEntry(storage: Storage, userId: string, entry: OutboundDraftIndexEntry): void {
+  const current = readOutboundDraftIndex(storage, userId);
+  writeOutboundDraftIndex(storage, userId, current.some((candidate) => candidate.approvalId === entry.approvalId) ? current : [...current, entry]);
+}
+
+export function removeOutboundDraftIndexEntry(storage: Storage, userId: string, approvalId: string): void {
+  writeOutboundDraftIndex(storage, userId, readOutboundDraftIndex(storage, userId).filter((entry) => entry.approvalId !== approvalId));
+}
+
+export function readIndexedOutboundDrafts(storage: Storage, userId: string): IndexedOutboundDraft[] {
+  const entries = readOutboundDraftIndex(storage, userId);
+  const indexed = entries.flatMap((entry) => {
+    const draft = readSessionDraft<OutboundDraft>(storage, outboundDraftKey(userId, entry.approvalId), userId, outboundDraftVersion, isOutboundDraft);
+    return draft?.approvalId === entry.approvalId && draft.step !== "complete" ? [{ entry, draft }] : [];
+  });
+  if (indexed.length !== entries.length) writeOutboundDraftIndex(storage, userId, indexed.map(({ entry }) => entry));
+  return indexed;
 }
 
 export function summarizeOutbound(approval: PendingApproval, allocations: readonly AllocationRow[], options: readonly BatchOption[]): OutboundSummary {

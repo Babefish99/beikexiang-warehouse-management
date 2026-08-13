@@ -172,6 +172,47 @@ test("exits a draft safely when its approval leaves pending without deleting it"
   await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage).filter((key) => key.includes("approval-1")).length)).toBe(0);
 });
 
+test("restores a stale draft notice after reload and lets the user discard it", async ({ page }) => {
+  let removeCurrentApproval = false;
+  await page.unroute(apiUrl("/admin/outbound/pending"));
+  await page.route(apiUrl("/admin/outbound/pending"), (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(removeCurrentApproval ? [secondApproval] : [...pending, secondApproval]) }));
+  await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ approvalId: "approval-1", batches }) }));
+  await loginAs(page, "/admin/outbound", "ADMIN");
+  await page.getByRole("button", { name: "办理出库" }).first().click();
+  removeCurrentApproval = true;
+  await page.getByRole("button", { name: "刷新" }).click();
+  await expect(page.getByText("待办状态已变化")).toBeVisible();
+  await page.reload();
+
+  const stale = page.getByTestId("stale-draft-approval-1");
+  await expect(stale).toContainText("202608130001");
+  await stale.getByRole("button", { name: "放弃该草稿" }).click();
+  await expect(stale).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage).filter((key) => key.includes("approval-1")).length)).toBe(0);
+});
+
+test("keeps multiple stale drafts independently discardable", async ({ page }) => {
+  let visibleApprovals = [...pending, secondApproval];
+  await page.unroute(apiUrl("/admin/outbound/pending"));
+  await page.route(apiUrl("/admin/outbound/pending"), (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(visibleApprovals) }));
+  await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ approvalId: "approval-1", batches }) }));
+  await page.route(apiUrl("/admin/outbound/approval-2/options"), (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ approvalId: "approval-2", batches: [{ batchId: "batch-4", warehouseId: "wh-2", itemId: "item-3", remainingQuantity: "1", unitCost: "8" }] }) }));
+  await loginAs(page, "/admin/outbound", "ADMIN");
+  await page.getByRole("button", { name: "办理出库" }).first().click();
+  visibleApprovals = [secondApproval];
+  await page.getByRole("button", { name: "刷新" }).click();
+  await page.locator("article", { hasText: "202608130002" }).getByRole("button", { name: "办理出库" }).click();
+  visibleApprovals = [];
+  await page.getByRole("button", { name: "刷新" }).click();
+
+  await expect(page.getByTestId("stale-draft-approval-1")).toBeVisible();
+  await expect(page.getByTestId("stale-draft-approval-2")).toBeVisible();
+  await page.getByTestId("stale-draft-approval-1").getByRole("button", { name: "放弃该草稿" }).click();
+  await expect(page.getByTestId("stale-draft-approval-1")).toHaveCount(0);
+  await expect(page.getByTestId("stale-draft-approval-2")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage).filter((key) => key.includes("approval-2")).length)).toBeGreaterThan(0);
+});
+
 test("requires a cancel reason and a dangerous second confirmation", async ({ page }) => {
   let cancelPosts = 0;
   await page.route(apiUrlPattern("/admin/outbound/approval-1/cancel$"), async (route) => {

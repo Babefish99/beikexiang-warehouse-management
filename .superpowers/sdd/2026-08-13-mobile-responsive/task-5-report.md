@@ -198,3 +198,77 @@ git diff --check
 - 本轮无产品 concern；成功 payload 与真实路由 stock-changed→409 留作已登记 Minor，未扩张。
 - 临时 Playwright config/启动脚本验证后删除，未提交。
 - 最终 3301/5474 释放；3001/5174 原监听未停止或修改；无生产 DB、Secret、部署或 push。
+
+---
+
+## Fix Round 2 / 5（base `80f5c53`）
+
+### Status
+
+DONE。仅修复唯一 open Important：stale 草稿从单一临时 state 改为用户隔离、版本化、可枚举的持久索引，支持刷新恢复与多份 stale 草稿逐份处理。
+
+### RED
+
+纯逻辑：
+
+```powershell
+corepack pnpm vitest run tests/unit/web/outbound-workflow.test.ts
+```
+
+退出码 1；`2 failed / 7 passed`。失败精确为 `outboundDraftIndexKey is not a function` 与 `isOutboundDraftIndex is not a function`，索引接口尚不存在。
+
+隔离移动目标组（API 3301 / Web 5474、memory/local-auth）：
+
+```powershell
+$env:API_BASE_URL='http://127.0.0.1:3301'
+$env:WEB_BASE_URL='http://127.0.0.1:5474'
+corepack pnpm playwright test tests/e2e/mobile/outbound.spec.ts --config playwright.task5-fix2.config.ts --grep "restores a stale|keeps multiple stale"
+```
+
+退出码 1；`2 failed`。刷新后找不到 `stale-draft-approval-1`；第二份 stale 出现后同样找不到 approval-1，证明单值 state 无法持久恢复且会覆盖。
+
+### 最小修复
+
+- 新增 `warehouse.outbound.index.v1.<encoded userId>` 索引，沿用 session draft envelope 的 version/userId 校验；条目只含 `approvalId + weComSpNo`。
+- 不扫描整个 sessionStorage；读取索引后仅验证每个固定 `outboundDraftKey(userId, approvalId)`，缺失、损坏、跨用户或 completed draft 安全修剪。
+- 保存草稿同步幂等加入索引；成功、取消、active 放弃与 stale 放弃同步移除对应索引项，不影响其他用户或其他审批草稿。
+- UI 从单一 `staleDraft` 改为紧凑列表；只展示已不在 pending 的索引条目，因此 active pending 恢复不被 stale 提示抢占；多个 stale 可逐份放弃。
+
+### GREEN / 回归
+
+纯逻辑：`9 passed`。
+
+目标 E2E：`2 passed (6.5s)`。
+
+移动全组：
+
+```powershell
+corepack pnpm playwright test tests/e2e/mobile/outbound.spec.ts --config playwright.task5-fix2.config.ts
+```
+
+退出码 0；`9 passed (11.2s)`。
+
+纯函数 / allocator / API：
+
+```powershell
+corepack pnpm vitest run tests/unit/web/outbound-workflow.test.ts tests/unit/inventory/outbound-allocator.test.ts tests/integration/inventory/outbound-service.test.ts
+```
+
+退出码 0；`3 passed` test files、`26 passed` tests。
+
+桌面回归：`3 passed (7.3s)`。
+
+```powershell
+corepack pnpm --filter @warehouse/web typecheck
+corepack pnpm --filter @warehouse/api typecheck
+git diff --check
+```
+
+均退出码 0；Web/API TypeScript 0 errors；无 whitespace error（仅 LF→CRLF 提示）。
+
+### Commit / Concerns / 清理
+
+- Fix commit：见本节所在提交。
+- 本轮无产品 concern；已登记 Minor 未处理。
+- 临时 Playwright config/启动脚本已删除，未提交。
+- 最终 3301/5474 释放；3001/5174 原监听未停止或修改；无生产 DB、Secret、部署或 push。

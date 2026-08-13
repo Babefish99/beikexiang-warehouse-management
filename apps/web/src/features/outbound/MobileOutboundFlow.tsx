@@ -3,15 +3,19 @@ import { CheckCircle2, Plus, Trash2 } from "lucide-react";
 import { ModalDialog } from "../../components/ModalDialog";
 import { clearSessionDraft, readSessionDraft, writeSessionDraft } from "../drafts/session-draft";
 import {
+  addOutboundDraftIndexEntry,
   isOutboundDraft,
   normalizeAllocations,
   outboundDraftKey,
+  readIndexedOutboundDrafts,
   reconcileBatchOptions,
+  removeOutboundDraftIndexEntry,
   summarizeOutbound,
   validateAllocationStep,
   validateReviewStep,
   type AllocationRow,
   type BatchOption,
+  type IndexedOutboundDraft,
   type OutboundDraft,
   type PendingApproval,
 } from "./outbound-workflow";
@@ -49,7 +53,7 @@ export function MobileOutboundFlow({ userId, pending, onReloadOptions, onConfirm
   const [cancelStage, setCancelStage] = useState<"reason" | "confirm">("reason");
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
-  const [staleDraft, setStaleDraft] = useState<OutboundDraft | null>(null);
+  const [staleDrafts, setStaleDrafts] = useState<IndexedOutboundDraft[]>(() => readIndexedOutboundDrafts(window.sessionStorage, userId));
   const submitLock = useRef(false);
   const cancelLock = useRef(false);
   const mounted = useRef(true);
@@ -78,7 +82,7 @@ export function MobileOutboundFlow({ userId, pending, onReloadOptions, onConfirm
     if (draft || result || !pending.length) return;
     for (const approval of pending) {
       const stored = readSessionDraft<OutboundDraft>(window.sessionStorage, outboundDraftKey(userId, approval.id), userId, draftVersion, isOutboundDraft);
-      if (stored?.approvalId === approval.id && stored.step !== "complete" && stored.approvalId !== staleDraft?.approvalId) {
+      if (stored?.approvalId === approval.id && stored.step !== "complete") {
         activeApprovalId.current = stored.approvalId;
         setDraft(stored);
         setLoadingOptions(true);
@@ -95,13 +99,13 @@ export function MobileOutboundFlow({ userId, pending, onReloadOptions, onConfirm
         break;
       }
     }
-  }, [draft, onReloadOptions, pending, result, staleDraft?.approvalId, userId]);
+  }, [draft, onReloadOptions, pending, result, userId]);
 
   useEffect(() => {
     if (!draft || result || pending.some((candidate) => candidate.id === draft.approvalId)) return;
     optionsRequestEpoch.current += 1;
     activeApprovalId.current = null;
-    setStaleDraft(draft);
+    setStaleDrafts(readIndexedOutboundDrafts(window.sessionStorage, userId));
     setDraft(null);
     setOptions([]);
     setLoadingOptions(false);
@@ -111,10 +115,13 @@ export function MobileOutboundFlow({ userId, pending, onReloadOptions, onConfirm
   const saveDraft = (next: OutboundDraft) => {
     activeApprovalId.current = next.approvalId;
     writeSessionDraft(window.sessionStorage, outboundDraftKey(userId, next.approvalId), { version: draftVersion, userId, value: next });
+    const selected = pending.find((candidate) => candidate.id === next.approvalId);
+    addOutboundDraftIndexEntry(window.sessionStorage, userId, { approvalId: next.approvalId, weComSpNo: selected?.weComSpNo ?? next.approvalId });
     setDraft(next);
   };
   const approval = draft ? pending.find((candidate) => candidate.id === draft.approvalId) : undefined;
   const summary = approval && draft ? summarizeOutbound(approval, draft.allocations, options) : null;
+  const visibleStaleDrafts = staleDrafts.filter(({ entry }) => !pending.some((candidate) => candidate.id === entry.approvalId));
 
   const start = async (selected: PendingApproval) => {
     const next = readSessionDraft<OutboundDraft>(window.sessionStorage, outboundDraftKey(userId, selected.id), userId, draftVersion, isOutboundDraft) ?? createDraft(selected);
@@ -185,6 +192,7 @@ export function MobileOutboundFlow({ userId, pending, onReloadOptions, onConfirm
       const completed = await onConfirm({ approvalId: draft.approvalId, allocations: normalizeAllocations(draft.allocations), reason: draft.reason.trim() });
       if (!mounted.current) return;
       clearSessionDraft(window.sessionStorage, outboundDraftKey(userId, draft.approvalId));
+      removeOutboundDraftIndexEntry(window.sessionStorage, userId, draft.approvalId);
       setResult(completed);
       setConfirming(false);
       setDraft({ ...draft, step: "complete" });
@@ -200,6 +208,7 @@ export function MobileOutboundFlow({ userId, pending, onReloadOptions, onConfirm
     optionsRequestEpoch.current += 1;
     activeApprovalId.current = null;
     if (draft) clearSessionDraft(window.sessionStorage, outboundDraftKey(userId, draft.approvalId));
+    if (draft) removeOutboundDraftIndexEntry(window.sessionStorage, userId, draft.approvalId);
     setDraft(null);
     setOptions([]);
     setResult(null);
@@ -207,10 +216,10 @@ export function MobileOutboundFlow({ userId, pending, onReloadOptions, onConfirm
     setAllocationErrors({});
     setInvalidAllocationIds([]);
   };
-  const discardStaleDraft = () => {
-    if (!staleDraft) return;
-    clearSessionDraft(window.sessionStorage, outboundDraftKey(userId, staleDraft.approvalId));
-    setStaleDraft(null);
+  const discardStaleDraft = (approvalId: string) => {
+    clearSessionDraft(window.sessionStorage, outboundDraftKey(userId, approvalId));
+    removeOutboundDraftIndexEntry(window.sessionStorage, userId, approvalId);
+    setStaleDrafts((current) => current.filter(({ entry }) => entry.approvalId !== approvalId));
   };
   const advanceCancel = () => {
     if (!cancelReason.trim()) {
@@ -229,6 +238,7 @@ export function MobileOutboundFlow({ userId, pending, onReloadOptions, onConfirm
       await onCancel(cancelApproval.id, cancelReason.trim());
       if (!mounted.current) return;
       clearSessionDraft(window.sessionStorage, outboundDraftKey(userId, cancelApproval.id));
+      removeOutboundDraftIndexEntry(window.sessionStorage, userId, cancelApproval.id);
       onCompleted(cancelApproval.id);
       setCancelApproval(null);
       setCancelStage("reason");
@@ -246,7 +256,7 @@ export function MobileOutboundFlow({ userId, pending, onReloadOptions, onConfirm
   if (result && draft?.step === "complete") return <section className="outbound-flow"><h2>出库完成</h2><div className="success-notice" role="status"><CheckCircle2 size={18} />出库已完成</div><dl className="outbound-review"><div><dt>服务端 ID</dt><dd>{result.id}</dd></div><div><dt>状态</dt><dd>{result.status}</dd></div><div><dt>实际数量</dt><dd>{result.actualQuantity}</dd></div><div><dt>金额</dt><dd>{result.amount}</dd></div></dl><button className="button button--primary" type="button" onClick={discard}>返回待办</button></section>;
 
   return <section className="outbound-flow">
-    {!draft ? <><h2>选择待办</h2>{staleDraft ? <div className="notice outbound-stale-draft" role="status"><strong>待办状态已变化</strong><p>当前办理已退出，草稿仍保留。你可以选择其他待办，或主动放弃该草稿。</p><button className="button button--secondary" type="button" onClick={discardStaleDraft}>放弃该草稿</button></div> : null}{reviewError ? <div className="success-notice" role="status">{reviewError}</div> : null}<div className="outbound-card-list">{pending.map((item) => <article className="outbound-card" key={item.id}><strong>{item.weComSpNo}</strong><span>{item.lines.length} 个物品 · {item.status}</span><div className="outbound-card__actions"><button className="button button--primary" type="button" onClick={() => void start(item)}>办理出库</button><button className="button button--danger" type="button" onClick={() => { setCancelApproval(item); setCancelReason(""); setCancelStage("reason"); setCancelError(null); }}>取消待办</button></div></article>)}</div></> : null}
+    {!draft ? <><h2>选择待办</h2>{visibleStaleDrafts.map(({ entry }) => <div className="notice outbound-stale-draft" role="status" data-testid={`stale-draft-${entry.approvalId}`} key={entry.approvalId}><strong>待办状态已变化 · {entry.weComSpNo}</strong><p>当前办理已退出，草稿仍保留。你可以选择其他待办，或主动放弃该草稿。</p><button className="button button--secondary" type="button" onClick={() => discardStaleDraft(entry.approvalId)}>放弃该草稿</button></div>)}{reviewError ? <div className="success-notice" role="status">{reviewError}</div> : null}<div className="outbound-card-list">{pending.map((item) => <article className="outbound-card" key={item.id}><strong>{item.weComSpNo}</strong><span>{item.lines.length} 个物品 · {item.status}</span><div className="outbound-card__actions"><button className="button button--primary" type="button" onClick={() => void start(item)}>办理出库</button><button className="button button--danger" type="button" onClick={() => { setCancelApproval(item); setCancelReason(""); setCancelStage("reason"); setCancelError(null); }}>取消待办</button></div></article>)}</div></> : null}
     {draft?.step === "allocate" && approval ? <><h2>分配库存</h2>{loadingOptions ? <div className="notice">正在读取可用批次…</div> : null}{reviewError ? <div className="form-error" role="alert">{reviewError}</div> : null}{approval.lines.map((line) => {
       const rows = draft.allocations.filter((row) => row.approvalLineId === line.id);
       const lineOptions = options.filter((option) => option.itemId === line.itemId);
