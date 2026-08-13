@@ -1,7 +1,8 @@
 import { test, expect } from "@playwright/test";
+import { apiUrl } from "../mobile/mobile-test-helpers";
 
 test("sidebar brand renders the company logo instead of the text placeholder", async ({ page }) => {
-  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2F");
+  await page.goto(apiUrl("/auth/local?returnTo=%2F"));
 
   const brand = page.locator(".sidebar__brand");
   const logo = brand.getByRole("img", { name: "贝壳祥集团" });
@@ -12,7 +13,7 @@ test("sidebar brand renders the company logo instead of the text placeholder", a
 });
 
 test("sidebar navigation opens the corresponding admin pages", async ({ page }) => {
-  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2F");
+  await page.goto(apiUrl("/auth/local?returnTo=%2F"));
   await expect(page.getByRole("heading", { name: "库存总览" })).toBeVisible();
 
   const destinations = [

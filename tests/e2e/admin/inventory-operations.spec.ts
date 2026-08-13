@@ -1,13 +1,14 @@
-import { test, expect } from "@playwright/test";
+﻿import { test, expect } from "@playwright/test";
+import { apiUrl } from "../mobile/mobile-test-helpers";
 
 test("transfer, return, and stocktake APIs remain administrator-only", async ({ request }) => {
   const [transferOptions, transferCreate, returnOptions, returnCreate, stocktakeOptions, stocktakeCreate] = await Promise.all([
-    request.get("http://127.0.0.1:3001/admin/transfers/options"),
-    request.post("http://127.0.0.1:3001/admin/transfers", { data: {} }),
-    request.get("http://127.0.0.1:3001/admin/returns/options"),
-    request.post("http://127.0.0.1:3001/admin/returns", { data: {} }),
-    request.get("http://127.0.0.1:3001/admin/stocktake/options"),
-    request.post("http://127.0.0.1:3001/admin/stocktake", { data: {} }),
+    request.get(apiUrl("/admin/transfers/options")),
+    request.post(apiUrl("/admin/transfers"), { data: {} }),
+    request.get(apiUrl("/admin/returns/options")),
+    request.post(apiUrl("/admin/returns"), { data: {} }),
+    request.get(apiUrl("/admin/stocktake/options")),
+    request.post(apiUrl("/admin/stocktake"), { data: {} }),
   ]);
 
   expect(transferOptions.status()).toBe(401);
@@ -19,7 +20,7 @@ test("transfer, return, and stocktake APIs remain administrator-only", async ({ 
 });
 
 test("transfer form shows server errors and preserves input", async ({ page }) => {
-  await page.route("http://127.0.0.1:3001/admin/transfers/options", async (route) => {
+  await page.route(apiUrl("/admin/transfers/options"), async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -31,11 +32,11 @@ test("transfer form shows server errors and preserves input", async ({ page }) =
       }),
     });
   });
-  await page.route("http://127.0.0.1:3001/admin/transfers", async (route) => {
+  await page.route(apiUrl("/admin/transfers"), async (route) => {
     await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "batch balance cannot become negative" }) });
   });
 
-  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Ftransfers");
+  await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Ftransfers"));
   const form = page.locator("form");
   await form.locator("select").nth(0).selectOption("item-1");
   await form.locator("select").nth(1).selectOption("wh-1");
@@ -51,7 +52,7 @@ test("transfer form shows server errors and preserves input", async ({ page }) =
 });
 
 test("return form submits selected allocation and shows the server result", async ({ page }) => {
-  await page.route("http://127.0.0.1:3001/admin/returns/options", async (route) => {
+  await page.route(apiUrl("/admin/returns/options"), async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -62,11 +63,11 @@ test("return form submits selected allocation and shows the server result", asyn
       }),
     });
   });
-  await page.route("http://127.0.0.1:3001/admin/returns", async (route) => {
+  await page.route(apiUrl("/admin/returns"), async (route) => {
     await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ returnId: "return-1", status: "COMPLETED", unitCost: "20" }) });
   });
 
-  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Freturns");
+  await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Freturns"));
   const form = page.locator("form");
   await form.locator("select").selectOption("allocation-1");
   await form.locator('input[type="number"]').fill("2");
@@ -77,7 +78,7 @@ test("return form submits selected allocation and shows the server result", asyn
 });
 
 test("return form shows server errors and preserves input", async ({ page }) => {
-  await page.route("http://127.0.0.1:3001/admin/returns/options", async (route) => {
+  await page.route(apiUrl("/admin/returns/options"), async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -88,11 +89,11 @@ test("return form shows server errors and preserves input", async ({ page }) => 
       }),
     });
   });
-  await page.route("http://127.0.0.1:3001/admin/returns", async (route) => {
+  await page.route(apiUrl("/admin/returns"), async (route) => {
     await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "return stock balance item mismatch" }) });
   });
 
-  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Freturns");
+  await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Freturns"));
   const form = page.locator("form");
   await form.locator("select").selectOption("allocation-1");
   await form.locator('input[type="number"]').fill("2");
@@ -106,21 +107,21 @@ test("return form shows server errors and preserves input", async ({ page }) => 
 });
 
 test("stocktake form allows zero difference without a reason", async ({ page }) => {
-  await page.route("http://127.0.0.1:3001/admin/stocktake/options", async (route) => {
+  await page.route(apiUrl("/admin/stocktake/options"), async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({ balances: [{ warehouseId: "wh-1", itemId: "item-1", batchId: "batch-1", bookQuantity: "10", unitCost: "20" }] }),
     });
   });
-  await page.route("http://127.0.0.1:3001/admin/stocktake", async (route) => {
+  await page.route(apiUrl("/admin/stocktake"), async (route) => {
     const payload = JSON.parse(route.request().postData() ?? "{}") as { actualQuantity?: string; reason?: string };
     expect(payload.actualQuantity).toBe("10");
     expect(payload.reason).toBe("");
     await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ stocktakeId: "stocktake-zero", difference: "0" }) });
   });
 
-  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Fstocktake");
+  await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Fstocktake"));
   const form = page.locator("form");
   await form.locator("select").nth(0).selectOption("wh-1");
   await form.locator("select").nth(1).selectOption("item-1");
@@ -132,18 +133,18 @@ test("stocktake form allows zero difference without a reason", async ({ page }) 
 });
 
 test("stocktake form shows server errors and preserves input", async ({ page }) => {
-  await page.route("http://127.0.0.1:3001/admin/stocktake/options", async (route) => {
+  await page.route(apiUrl("/admin/stocktake/options"), async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({ balances: [{ warehouseId: "wh-1", itemId: "item-1", batchId: "batch-1", bookQuantity: "10", unitCost: "20" }] }),
     });
   });
-  await page.route("http://127.0.0.1:3001/admin/stocktake", async (route) => {
+  await page.route(apiUrl("/admin/stocktake"), async (route) => {
     await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "closed period: 2026-08" }) });
   });
 
-  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Fstocktake");
+  await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Fstocktake"));
   const form = page.locator("form");
   await form.locator('input[type="month"]').fill("2026-08");
   await form.locator("select").nth(0).selectOption("wh-1");
@@ -163,7 +164,7 @@ test("stocktake form shows server errors and preserves input", async ({ page }) 
 });
 
 test("stocktake form submits the selected balance and shows the difference", async ({ page }) => {
-  await page.route("http://127.0.0.1:3001/admin/stocktake/options", async (route) => {
+  await page.route(apiUrl("/admin/stocktake/options"), async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -174,11 +175,11 @@ test("stocktake form submits the selected balance and shows the difference", asy
       }),
     });
   });
-  await page.route("http://127.0.0.1:3001/admin/stocktake", async (route) => {
+  await page.route(apiUrl("/admin/stocktake"), async (route) => {
     await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ stocktakeId: "stocktake-1", difference: "-2" }) });
   });
 
-  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Fstocktake");
+  await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Fstocktake"));
   const form = page.locator("form");
   await form.locator("select").nth(0).selectOption("wh-1");
   await form.locator("select").nth(1).selectOption("item-1");
