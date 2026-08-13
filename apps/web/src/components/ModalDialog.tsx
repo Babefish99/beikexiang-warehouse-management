@@ -13,16 +13,24 @@ const modalHistoryKey = "__warehouseModal";
 type ModalHistoryEntry = {
   active: boolean;
   id: string;
+  dialog: HTMLElement;
+  trigger: HTMLElement | null;
   canDismiss(): boolean;
+  focusDefault(): void;
   onBack(): void;
 };
 
 const historyOwners: ModalHistoryEntry[] = [];
+const mountedModalOwners: ModalHistoryEntry[] = [];
 let sentinelActive = false;
 let consumingSentinel = false;
 let pendingNavigation: { entry: ModalHistoryEntry; href: string } | null = null;
+let pendingLinkActivation: { entry: ModalHistoryEntry; link: HTMLAnchorElement } | null = null;
 let navigationInProgress = false;
+let replayingModalLink = false;
 let listeningForHistory = false;
+let bodyOverflowBeforeModals = "";
+let outermostTrigger: HTMLElement | null = null;
 
 function topHistoryOwner(): ModalHistoryEntry | null {
   return historyOwners.at(-1) ?? null;
@@ -49,10 +57,60 @@ function dismissHistoryOwner(entry: ModalHistoryEntry): boolean {
   return true;
 }
 
+function registerModalPresence(entry: ModalHistoryEntry): void {
+  if (!mountedModalOwners.length) {
+    bodyOverflowBeforeModals = document.body.style.overflow;
+    outermostTrigger = entry.trigger;
+    document.body.style.overflow = "hidden";
+  }
+  mountedModalOwners.push(entry);
+  entry.focusDefault();
+}
+
+function unregisterModalPresence(entry: ModalHistoryEntry): void {
+  const index = mountedModalOwners.lastIndexOf(entry);
+  const wasTop = index === mountedModalOwners.length - 1;
+  if (index >= 0) mountedModalOwners.splice(index, 1);
+
+  const nextTop = mountedModalOwners.at(-1);
+  if (nextTop) {
+    document.body.style.overflow = "hidden";
+    if (wasTop || !nextTop.dialog.contains(document.activeElement)) nextTop.focusDefault();
+    return;
+  }
+
+  document.body.style.overflow = bodyOverflowBeforeModals;
+  const restoreTarget = outermostTrigger;
+  outermostTrigger = null;
+  restoreTarget?.focus();
+}
+
+function replayPendingLinkActivation(): void {
+  const activation = pendingLinkActivation;
+  pendingLinkActivation = null;
+  if (!activation || !activation.entry.active) return;
+
+  replayingModalLink = true;
+  try {
+    const replay = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, detail: 1, view: window });
+    activation.link.dispatchEvent(replay);
+  } finally {
+    replayingModalLink = false;
+  }
+
+  dismissHistoryOwner(activation.entry);
+  ensureHistorySentinel();
+}
+
 function ensureHistoryListener(): void {
   if (listeningForHistory) return;
   window.addEventListener("popstate", () => {
     sentinelActive = false;
+    if (pendingLinkActivation) {
+      consumingSentinel = false;
+      replayPendingLinkActivation();
+      return;
+    }
     if (pendingNavigation) {
       const navigation = pendingNavigation;
       pendingNavigation = null;
@@ -180,12 +238,8 @@ export function ModalDialog({
     if (!open) return;
 
     const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
     const dialog = dialogRef.current;
-    const focusable = dialog ? getFocusableElements(dialog) : [];
-    (focusable[0] ?? dialog)?.focus();
+    if (!dialog) return;
     let temporaryFocusTarget: { element: HTMLElement; previousTabIndex: string | null } | null = null;
     const restoreTemporaryTabIndex = () => {
       if (!temporaryFocusTarget) return;
@@ -233,21 +287,27 @@ export function ModalDialog({
     const historyEntry: ModalHistoryEntry = {
       active: false,
       id: titleId,
+      dialog,
+      trigger,
       canDismiss: () => !busyRef.current,
+      focusDefault: () => {
+        const focusable = getFocusableElements(dialog);
+        (focusable[0] ?? dialog).focus();
+      },
       onBack: () => onCloseRef.current(),
     };
     historyEntryRef.current = historyEntry;
     requestCloseRef.current = () => requestModalHistoryClose(historyEntry);
+    registerModalPresence(historyEntry);
     registerModalHistory(historyEntry);
 
     return () => {
       observer?.disconnect();
       restoreTemporaryTabIndex();
       unregisterModalHistory(historyEntry);
+      unregisterModalPresence(historyEntry);
       if (historyEntryRef.current === historyEntry) historyEntryRef.current = null;
       requestCloseRef.current = onCloseRef.current;
-      document.body.style.overflow = previousOverflow;
-      trigger?.focus();
     };
   }, [open, titleId]);
 
@@ -298,6 +358,24 @@ export function ModalDialog({
     navigateFromModal(historyEntry, url.href);
   };
 
+  const prepareInternalLink = (event: ReactMouseEvent<HTMLElement>) => {
+    if (replayingModalLink || event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const target = event.target instanceof Element ? event.target.closest("a[href]") : null;
+    if (!(target instanceof HTMLAnchorElement)) return;
+    if (target.hasAttribute("download") || (target.target && target.target.toLowerCase() !== "_self")) return;
+
+    const url = new URL(target.href, window.location.href);
+    if (url.origin !== window.location.origin || !["http:", "https:"].includes(url.protocol)) return;
+    const historyEntry = historyEntryRef.current;
+    if (!historyEntry || pendingLinkActivation) return;
+    if (!consumingSentinel && (!sentinelActive || !history.state?.[modalHistoryKey])) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    pendingLinkActivation = { entry: historyEntry, link: target };
+    if (!consumingSentinel) history.back();
+  };
+
   return (
     <div
       className="modal-backdrop modal-dialog-shell"
@@ -314,6 +392,7 @@ export function ModalDialog({
         aria-busy={busy || undefined}
         tabIndex={-1}
         onKeyDown={trapFocus}
+        onClickCapture={prepareInternalLink}
         onClick={navigateInternalLink}
       >
         <header className="modal-dialog__header">

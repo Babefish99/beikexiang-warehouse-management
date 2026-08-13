@@ -74,6 +74,40 @@ test("an internal notification link consumes its sentinel before navigation", as
   await expect(page).toHaveURL(/\/admin\/inventory$/);
 });
 
+test("an application-handled internal link cannot leave a modal sentinel behind", async ({ page }) => {
+  await page.route(apiUrl("/admin/notifications"), (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(tasks) }));
+  await loginAs(page, "/admin/inventory", "ADMIN");
+  await page.getByRole("link", { name: "首页", exact: true }).click();
+  const dashboardUrl = page.url();
+  const sourceHistoryLength = await page.evaluate(() => history.length);
+  const center = await openMobileNotificationCenter(page);
+
+  await center.evaluate((dialog) => {
+    const link = document.createElement("a");
+    link.href = "/admin/outbound";
+    link.textContent = "应用路由待办";
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      history.pushState({ applicationRouter: true }, "", link.href);
+      (window as typeof window & { __task7ApplicationLinkHandled?: boolean }).__task7ApplicationLinkHandled = true;
+    });
+    dialog.querySelector(".mobile-notification-center")!.append(link);
+  });
+
+  await center.getByRole("link", { name: "应用路由待办" }).click();
+  expect(await page.evaluate(() => (
+    window as typeof window & { __task7ApplicationLinkHandled?: boolean }
+  ).__task7ApplicationLinkHandled)).toBe(true);
+  await expect(page).toHaveURL(/\/admin\/outbound$/);
+  expect(await page.evaluate(() => history.length)).toBe(sourceHistoryLength + 1);
+  await expect(center).toHaveCount(0);
+
+  await page.goBack();
+  await expect(page).toHaveURL(dashboardUrl);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/admin\/inventory$/);
+});
+
 test("modal link coordination leaves external and alternate navigation semantics intact", async ({ page }) => {
   await page.route(apiUrl("/admin/notifications"), (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(tasks) }));
   await loginAs(page, "/", "ADMIN");

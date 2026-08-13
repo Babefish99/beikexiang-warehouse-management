@@ -279,7 +279,8 @@ test("overlapping real modals close top to bottom before browser Back leaves the
   await page.getByLabel("采购日期 *").fill("2026-08-13");
   await page.getByLabel("入库数量 *").fill("1");
   await page.getByLabel("采购单价 *").fill("2");
-  await page.getByRole("button", { name: "保存入库" }).click();
+  const save = page.getByRole("button", { name: "保存入库" });
+  await save.click();
   const confirmDialog = page.getByRole("dialog", { name: "确认入库" });
   await expect(confirmDialog).toBeVisible();
 
@@ -292,13 +293,51 @@ test("overlapping real modals close top to bottom before browser Back leaves the
   await expect(moreDialog).toHaveCount(0);
   await expect(confirmDialog).toBeVisible();
   await expect(page).toHaveURL(inboundUrl);
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+  expect(await confirmDialog.evaluate((dialog) => dialog.contains(document.activeElement))).toBe(true);
 
   await page.goBack();
   await expect(confirmDialog).toHaveCount(0);
   await expect(page).toHaveURL(inboundUrl);
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("");
+  await expect(save).toBeFocused();
 
   await page.goBack();
   await expect(page).toHaveURL(dashboardUrl);
+});
+
+test("programmatic underlying close preserves top modal scroll and focus ownership", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockInboundOptions(page);
+  await loginAs(page, "/admin/inbound", "ADMIN");
+  await page.getByLabel("仓库 *").selectOption("warehouse-long");
+  await page.getByLabel("物品 *").selectOption("item-long");
+  await page.getByLabel("批次号 *").fill(longBatch);
+  await page.getByLabel("采购日期 *").fill("2026-08-13");
+  await page.getByLabel("入库数量 *").fill("1");
+  await page.getByLabel("采购单价 *").fill("2");
+  const save = page.getByRole("button", { name: "保存入库" });
+  await save.click();
+  const confirmDialog = page.getByRole("dialog", { name: "确认入库" });
+  await expect(confirmDialog).toBeVisible();
+
+  await page.getByRole("button", { name: "更多" }).evaluate((button: HTMLButtonElement) => button.click());
+  const moreDialog = page.getByRole("dialog", { name: "更多功能" });
+  await expect(moreDialog).toBeVisible();
+  expect(await moreDialog.evaluate((dialog) => dialog.contains(document.activeElement))).toBe(true);
+
+  await confirmDialog.evaluate((dialog) => {
+    dialog.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" }));
+  });
+  await expect(confirmDialog).toHaveCount(0);
+  await expect(moreDialog).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+  expect(await moreDialog.evaluate((dialog) => dialog.contains(document.activeElement))).toBe(true);
+
+  await moreDialog.press("Escape");
+  await expect(moreDialog).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("");
+  await expect(save).toBeFocused();
 });
 
 test("aria-invalid attribute changes focus errors and restore temporary tabindex state", async ({ page }) => {

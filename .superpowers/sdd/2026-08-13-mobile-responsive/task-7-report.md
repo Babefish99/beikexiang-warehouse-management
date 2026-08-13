@@ -243,3 +243,44 @@ These failures reproduced both review findings against the base implementation r
 
 - Browser Back is covered with Chromium's real History API. Android hardware Back ultimately maps to that web history signal, but a physical WeCom/Android device was not available for native-container verification.
 - Link interception intentionally applies only after an unmodified primary click bubbles from a same-origin, same-window anchor. It does not attempt to replace a client router or handle custom non-anchor navigation.
+
+---
+
+## FixRound3/5 — intercepted links and global Modal ownership
+
+### Base and scope
+
+- Base commit: `e2b2a6f498a5f77cde370f21ce825cfb5a28c406`.
+- Scope remained limited to Modal anchor/history coordination and overlapping Modal scroll/focus ownership.
+- No application routes, business operations, persistence, authentication, deployment, or port policy changed.
+
+### TDD RED evidence
+
+Two new real-browser cases failed against the base implementation:
+
+1. A same-origin anchor inside the notification Modal had its own target handler calling `preventDefault()` and `history.pushState()`. The Modal bubble handler exited after seeing `defaultPrevented`; the target URL appeared, but `history.length` was `5` rather than the expected `4`. Exact result: exit `1`, `1 failed`; assertion failed in `803ms`.
+2. With real inbound-confirm and More Modals overlapping, Escape was dispatched to the underlying confirm Modal. The underlying dialog closed and the top More dialog remained visible, but `document.body.style.overflow` became empty instead of remaining `hidden`. Exact result: exit `1`, `1 failed`; the ownership assertion timed out after `5s`.
+
+The existing top-to-bottom Back test was also strengthened to require body lock and focus inside the remaining underlying Modal after the first Back, followed by body/focus restoration only after the final close.
+
+### Minimal production fix
+
+- Eligible unmodified primary-click, same-origin, same-window anchors are registered during capture before target handlers run.
+- The initial activation is paused while the sentinel is popped, then one synthetic click is replayed on the same anchor. Application handlers therefore run once against sentinel-free history; their `preventDefault()` and `pushState()` behavior remains authoritative and no second navigation is added.
+- A replayed plain anchor continues to the existing Modal bubble navigation path, which closes the Modal and performs `location.assign`. External links, `_blank`, download links, modifier clicks, and non-primary clicks remain outside interception.
+- A separate mounted-owner stack now owns body scroll lock and focus. Transition `0 -> 1` captures the original body overflow and outer trigger; only `1 -> 0` restores them.
+- Removing a non-top owner cannot unlock body scroll or focus an external trigger. Removing the top while another owner remains focuses a reasonable default inside the new top. Cleanup remains idempotent alongside the history-owner stack.
+
+### GREEN and regression evidence
+
+- First focused GREEN: application-handled link `1/1`; overlapping Back plus programmatic underlying close `2/2`.
+- Notification suite: `8/8 passed` in `8.9s`.
+- Ten Modal/history/overlap scenarios repeated three times: `30/30 passed` in `26.2s`.
+- Complete mobile suite: `58/58 passed` in `34.1s`.
+- Key desktop and env-aware admin inbound suite: `11/11 passed` in `14.5s`.
+- Web build: exit `0`, `1612` modules transformed in `2.14s`; typecheck and `git diff --check`: exit `0`.
+
+### Boundaries and concerns
+
+- The application-handled-link fixture exercises a real DOM target listener with `preventDefault()` and synchronous `history.pushState()`. The app currently has no client-router library; this verifies the browser contract a future router link would rely on without adding a router dependency.
+- Synthetic replay preserves the core unmodified primary-click application-handler contract, but intentionally does not claim exact browser trusted-event identity (`isTrusted` is false). Components that require trusted events should use a dedicated navigation API rather than an anchor handler.
