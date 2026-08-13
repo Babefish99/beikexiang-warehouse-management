@@ -247,7 +247,7 @@ D:\桌面\仓库
 - `git diff --check 5f17963...HEAD`：无输出，exit 0。
 - Docker/deployment：环境阻塞。`DockerDesktopVM` 为 Off，未运行 image inspect、只读挂载、deployment tests、完整含部署测试或 Compose config。
 
-E2E 首次完整运行曾为 75 passed、29 failed；29 个失败全部来自旧 spec 硬编码 API 端口 3001。将 7 个 legacy spec 改为 env-aware 后，相关定向验证 30/30 通过，最终全量 104/104 通过。该 RED 记录保留为测试隔离修复证据，不是最终产品失败。
+E2E 首次完整运行曾为 75 passed、29 failed；29 个失败全部来自旧 spec 硬编码 API 端口 3001。将 7 个 legacy spec 改为 env-aware 后，相关定向验证 30/30 通过，最终全量 104/104 通过。该 failing run 是测试隔离缺陷证据，不是产品行为失败。财务零管理员请求、完整入库 payload/memory persistence、完整出库 payload/route 409 是在既有正确行为上新增且首次即过的表征覆盖，不记作 TDD RED。
 
 ### 10.2 通用发布门禁
 

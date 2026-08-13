@@ -102,12 +102,12 @@ test("keeps loading through debounce and ignores older query, warehouse, and err
   await search.fill("old");
   expect(await page.getByText("正在查询库存…").count()).toBe(1);
   await expect(page.getByText("未找到匹配的库存结果")).toHaveCount(0);
-  await page.waitForTimeout(300);
+  await expect.poll(() => releases.has("old:all")).toBe(true);
   await search.fill("new");
-  await page.waitForTimeout(300);
-  releases.get("new:all")?.();
+  await expect.poll(() => releases.has("new:all")).toBe(true);
+  releases.get("new:all")!();
   await expect(page.getByRole("article", { name: /new:all/ })).toBeVisible();
-  releases.get("old:all")?.();
+  releases.get("old:all")!();
   await expect(page.getByRole("article", { name: /new:all/ })).toBeVisible();
 
   await search.fill("switch");
@@ -116,17 +116,17 @@ test("keeps loading through debounce and ignores older query, warehouse, and err
   await page.getByRole("button", { name: /全部仓库/ }).click();
   await page.getByRole("menuitemradio", { name: /WH-02 · 上海二仓/ }).click();
   await expect.poll(() => releases.has("switch:wh-2")).toBe(true);
-  releases.get("switch:wh-2")?.();
+  releases.get("switch:wh-2")!();
   await expect(page.locator("tbody tr").filter({ hasText: "switch:wh-2" })).toBeVisible();
-  releases.get("switch:all")?.();
+  releases.get("switch:all")!();
   await expect(page.locator("tbody tr").filter({ hasText: "switch:wh-2" })).toBeVisible();
 
   await search.fill("broken");
-  await page.waitForTimeout(300);
+  await expect.poll(() => releases.has("broken:wh-2")).toBe(true);
   await search.fill("recovered");
-  await page.waitForTimeout(300);
-  releases.get("recovered:wh-2")?.();
+  await expect.poll(() => releases.has("recovered:wh-2")).toBe(true);
+  releases.get("recovered:wh-2")!();
   await expect(page.locator("tbody tr").filter({ hasText: "recovered:wh-2" })).toBeVisible();
-  releases.get("broken:wh-2")?.();
+  releases.get("broken:wh-2")!();
   await expect(page.getByText("旧请求失败")).toHaveCount(0);
 });

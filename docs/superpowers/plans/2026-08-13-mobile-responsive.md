@@ -991,13 +991,15 @@ Expected: deployment 测试 PASS；随后真正的完整 `corepack pnpm test` �
 
 2026-08-13 前置结果：`DockerDesktopVM State=Off, Status=Operating normally`。已按规则停止，Step 3 保持未勾选；未进行 image inspect、挂载、deployment tests 或 Compose config。
 
-- [ ] **Step 4: 使用 requesting-code-review 做规格与代码评审**
+- [x] **Step 4: 使用 requesting-code-review 做规格与代码评审**
 
 评审固定比较点：`5f17963...HEAD`。评审清单：手机/桌面权限；单一交互树；Decimal；草稿隔离；入库保留；出库重校验与取消；任务刷新；企业微信视口；无 Secret/部署变更。收到意见后必须先使用 `superpowers:receiving-code-review`，逐条验证后再修改。
 
-- [x] **Step 5: 修复 deferred 审计问题并重新运行受影响验证**
+2026-08-14：主任务已完成 review_task8 并返回 2 个 Important、1 个 Minor；本轮使用 receiving-code-review 技术核验后处理，结果记录于 Task 8 报告 Review Fix Round 1。
 
-每个修复先增加/确认回归测试 RED，再最小修复至 GREEN。最后重新运行 Step 2 的完整命令；若触及部署文件，再运行 Step 3。
+- [x] **Step 5: 修复 deferred 审计问题、补充表征覆盖并重新运行受影响验证**
+
+实际行为或测试隔离缺陷先增加/确认回归测试 RED，再最小修复至 GREEN；对既有正确行为补充的 characterization coverage 如实记录首次运行结果，不人为制造 RED。Task 8 的实际修复与补证分类见报告。最后重新运行 Step 2 的完整命令；若触及部署文件，再运行 Step 3。
 
 - [x] **Step 6: 提交状态文档并确认 clean**
 

@@ -1,7 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildServer } from "../../../apps/api/src/server.js";
 import type { WeComApprovalPayload } from "../../../apps/api/src/infrastructure/wecom/approval-parser.js";
+
+const inheritedPersistenceDriver = process.env.PERSISTENCE_DRIVER;
 
 async function createAdminSessionCookie(app: ReturnType<typeof buildServer>): Promise<string> {
   const response = await app.inject({
@@ -74,6 +76,7 @@ function approvalDetail(): WeComApprovalPayload {
 describe("shared inventory memory state", () => {
   beforeEach(() => {
     vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("PERSISTENCE_DRIVER", "memory");
     vi.stubEnv("LOCAL_AUTH_BYPASS", "true");
     vi.stubEnv("API_BASE_URL", "http://localhost:3001");
     vi.stubEnv("WEB_BASE_URL", "http://localhost:5174");
@@ -89,6 +92,10 @@ describe("shared inventory memory state", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+  });
+
+  afterAll(() => {
+    expect(process.env.PERSISTENCE_DRIVER).toBe(inheritedPersistenceDriver);
   });
 
   it("persists a complete authenticated inbound payload into shared memory inventory", async () => {
