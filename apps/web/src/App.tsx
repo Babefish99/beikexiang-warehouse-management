@@ -220,7 +220,7 @@ export default function App() {
 
   if (pathname === "/admin/items") return renderAdminLayout(workspaceUser, <ItemsPage />);
   if (pathname === "/admin/warehouses") return renderAdminLayout(workspaceUser, <WarehousesPage />);
-  if (pathname === "/admin/inbound") return renderAdminLayout(workspaceUser, <InboundPage />);
+  if (pathname === "/admin/inbound") return renderAdminLayout(workspaceUser, <InboundPage userId={user.id} />);
   if (pathname === "/admin/opening-stock") return renderAdminLayout(workspaceUser, <OpeningStockPage />);
   if (pathname === "/admin/outbound") return renderAdminLayout(workspaceUser, <OutboundPage />);
   if (pathname === "/admin/transfers") return renderAdminLayout(workspaceUser, <TransfersPage />);
