@@ -6,14 +6,14 @@
 
 ## 1. 当前结论
 
-项目已经具备轻量仓库系统的主要业务代码、PostgreSQL 持久化和阿里云部署能力，公网域名为 `https://warehouse.beikexiang.cn`。手机响应式范围已本地合并到 `codex/production-deployment` 并重新完成非 Docker 验证；本机验收环境正在运行，但**未 Push、未部署，等待用户验收**。系统整体仍属于“部署并联调阶段”，尚不能判定为正式生产验收完成，主要原因是：
+项目已经具备轻量仓库系统的主要业务代码、PostgreSQL 持久化和阿里云部署能力，公网域名为 `https://warehouse.beikexiang.cn`。手机响应式范围已本地合并到 `codex/production-deployment` 并重新完成非 Docker 验证；**本地/手机验收已通过，仍未 Push、未部署，等待用户决定下一步**。系统整体仍属于“部署并联调阶段”，尚不能判定为正式生产验收完成，主要原因是：
 
 - 企业微信可信域名、可信 IP 和审批回调仍受 ICP 备案审核进度影响。
 - 企业微信真实登录及“审批通过 → 自动生成待出库单 → 实际出库 → 报表”的全链路尚未验收。
 - 三个仓库的正式名称和生产期初库存尚未完成最终核对与导入验收。
 - 原开发分支与本地生产部署分支仍有独立历史；后续发布应以本地生产部署分支为唯一基线继续整合。
 - 本轮手机响应式实现没有连接生产数据库、修改生产 Secret、推送或部署；Docker Desktop VM 当前为 Off，部署门禁未运行。
-- 正常登记入库已改为由服务端按采购日期生成全局日序批次号；本轮手机端把采购日期放在批次号之前，并显示只读的 `YYYYMMDD-001` 格式预览，最终号码仍由服务端确认。出库空态已把状态图标与文字成组对齐，并移除无审批时孤立的“选择待办”标题。本地验收仍在等待用户确认，不能据此视为上线或生产验收。
+- 正常登记入库已改为由服务端按采购日期生成全局日序批次号；本轮手机端把采购日期放在批次号之前，并显示只读的 `YYYYMMDD-001` 格式预览，最终号码仍由服务端确认。出库空态已把状态图标与文字成组对齐，并移除无审批时孤立的“选择待办”标题。用户已完成本地/手机验收；这仍不能据此视为上线或生产验收。
 
 ## 2. 产品范围与已确认规则
 
@@ -264,7 +264,7 @@ Task 8 首轮完整 E2E 曾为 75 passed、29 failed；29 个失败全部来自�
 - TDD GREEN：`tests/unit/web/inbound-form.test.ts` 为 14 passed；隔离 memory/local-auth 的入库、出库、手机壳层、首页导航及管理员入库 E2E 共 35 passed、0 failed（API `3301` / Web `5474`）；日期与批次预览字段顺序、左对齐、44px 高度、无 `batchNo` POST、出库图文分组、失效草稿保留及 320/390/430/820px 无溢出均有自动断言。
 - `corepack pnpm --filter @warehouse/web typecheck`：exit 0；`corepack pnpm --filter @warehouse/web build`：1613 modules transformed、exit 0；`git diff --check`：无输出。
 - Node `v24.19.0` 下执行 `corepack pnpm exec vitest run --exclude 'tests/deployment/**'`：46 passed、3 skipped；243 passed、17 skipped、0 failed。跳过项均为需要外部 PostgreSQL 的 Prisma 集成套件。
-- 内置浏览器对局域网验收地址 `192.168.3.21:5482` 的自动访问被客户端策略拒绝（`ERR_BLOCKED_BY_CLIENT`）；这不影响本机 API/Vite、隔离 E2E 或用户手机实际访问。验收服务 `3307` / `5481` / `5482` 保持运行且未重启，最终视觉验收继续由用户在手机端完成。
+- 内置浏览器对局域网验收地址 `192.168.3.21:5482` 的自动访问被客户端策略拒绝（`ERR_BLOCKED_BY_CLIENT`）；这不影响本机 API/Vite、隔离 E2E 或用户手机实际访问。验收服务 `3307` / `5481` / `5482` 保持运行且未重启；用户已于 2026-08-14 完成本地/手机视觉验收并确认通过。
 - DockerDesktopVM 仍为 Off，本轮未运行 Docker、deployment 或 Compose 门禁；未连接生产数据库、未部署、未 Push。
 
 ### 10.3 最终分支评审修复（2026-08-14）
@@ -291,7 +291,7 @@ Task 8 首轮完整 E2E 曾为 75 passed、29 failed；29 个失败全部来自�
 - 隔离 E2E：以 `PERSISTENCE_DRIVER=memory`、`LOCAL_AUTH_BYPASS=true` 启动在 API `127.0.0.1:3103`、Web `127.0.0.1:5180`；`corepack pnpm exec playwright test --config playwright.config.ts` 为 121 passed、0 failed（31.4s）。默认 3001/5174 已被其他进程占用，未复用或停止；本轮自有 3103/5180 已在测试后释放。
 - 差异检查：`git diff --check 1deb803..HEAD` 无输出、exit 0。
 - Docker/deployment：`DockerDesktopVM State=Off, Status=Operating normally`；未运行 Docker/部署测试、Compose 检查，也未重启 Docker。
-- 本地验收边界：未停止或修改用户验收监听的 5481/5482；未运行 Push、部署、服务器操作或生产 Secret/数据库操作。当前仅供本地/手机验收，用户验收仍待完成。
+- 本地验收边界：未停止或修改用户验收监听的 5481/5482；未运行 Push、部署、服务器操作或生产 Secret/数据库操作。用户已确认本地/手机验收通过；当前继续保持本地状态，等待用户决定是否进入后续发布流程。
 
 ## 11. 文档维护规则
 
