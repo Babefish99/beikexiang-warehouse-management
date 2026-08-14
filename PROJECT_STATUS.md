@@ -263,6 +263,7 @@ Task 8 首轮完整 E2E 曾为 75 passed、29 failed；29 个失败全部来自�
 - TDD RED：`previewInboundBatchNo` 尚不存在；手机入库页没有“批次号（系统生成）”只读控件。出库空态仍显示孤立“选择待办”。
 - TDD GREEN：`tests/unit/web/inbound-form.test.ts` 为 14 passed；隔离 memory/local-auth 的入库、出库、手机壳层、首页导航及管理员入库 E2E 共 35 passed、0 failed（API `3301` / Web `5474`）；日期与批次预览字段顺序、左对齐、44px 高度、无 `batchNo` POST、出库图文分组、失效草稿保留及 320/390/430/820px 无溢出均有自动断言。
 - `corepack pnpm --filter @warehouse/web typecheck`：exit 0；`corepack pnpm --filter @warehouse/web build`：1613 modules transformed、exit 0；`git diff --check`：无输出。
+- Node `v24.19.0` 下执行 `corepack pnpm exec vitest run --exclude 'tests/deployment/**'`：46 passed、3 skipped；243 passed、17 skipped、0 failed。跳过项均为需要外部 PostgreSQL 的 Prisma 集成套件。
 - 内置浏览器对局域网验收地址 `192.168.3.21:5482` 的自动访问被客户端策略拒绝（`ERR_BLOCKED_BY_CLIENT`）；这不影响本机 API/Vite、隔离 E2E 或用户手机实际访问。验收服务 `3307` / `5481` / `5482` 保持运行且未重启，最终视觉验收继续由用户在手机端完成。
 - DockerDesktopVM 仍为 Off，本轮未运行 Docker、deployment 或 Compose 门禁；未连接生产数据库、未部署、未 Push。
 
