@@ -13,6 +13,7 @@
 - 三个仓库的正式名称和生产期初库存尚未完成最终核对与导入验收。
 - 原开发分支与本地生产部署分支仍有独立历史；后续发布应以本地生产部署分支为唯一基线继续整合。
 - 本轮手机响应式实现没有连接生产数据库、修改生产 Secret、推送或部署；Docker Desktop VM 当前为 Off，部署门禁未运行。
+- 正常登记入库已改为由服务端按采购日期生成全局日序批次号；本地验收仍在等待用户确认，不能据此视为上线或生产验收。
 
 ## 2. 产品范围与已确认规则
 
@@ -41,6 +42,7 @@
 ### 2.3 成本、入库、调拨、退库和盘点
 
 - 管理员直接登记入库，第一阶段不走企业微信审批；入库必须选择仓库。
+- 正常登记入库不再手填批次号：服务端按采购日期生成全局 `YYYYMMDD-001` 日序号（例如 `20260814-001`），客户端仅说明规则并在成功后显示服务端实际分配的号码。期初库存和历史批次继续保留手工批次号，不适用该规则。
 - 出库金额严格使用管理员选择的采购批次单价；允许一个物品拆分多个批次。
 - 生产日期和到期日期保留但不强制填写；赠送物品允许单价为 0，并通过备注说明。
 - 调拨无需审批，默认一键完成；同时记录调出、调入、数量、金额、批次和原因。
@@ -75,6 +77,8 @@
 - 本地手机响应式分支提供角色化移动导航、查询、通知、单页入库、四步出库与取消；复杂业务仍使用电脑端。
 
 视觉目标继续以固定资产系统 `D:\桌面\固定资产` 为参考，统一公司 Logo、字号、间距、卡片、侧边栏、顶部栏和按钮风格。首页指标图标和部分响应式排版仍属于视觉验收项，不视为最终定稿。
+
+本轮移动端视觉收敛值（`max-width: 820px`）：一级、二级、三级标题分别为 `25px`、`18px`、`15px`；首页仓库选择和快捷操作均为 `14px` 且保持至少 `44px` 触控高度；日期输入及 WebKit 日期编辑文本左对齐。该设计沿用现有电脑端的企业界面语言，仍以用户手机验收为最终依据。
 
 ## 4. 技术结构
 
@@ -122,6 +126,7 @@ D:\桌面\仓库
 - 分支：`codex/production-deployment`
 - 原基线提交：`5f17963 fix: harden WeCom template deployment guard`
 - 当前本地合并提交：`de6c69d merge: mobile responsive adaptation`，随后本地验收记录提交将仅更新状态文档。
+- 本轮入库批次与移动视觉实现链路：`1deb803` → `ab03e9e`/`b6d95d0`（规格与计划）→ `cbffdf7` → `9a49b3a` → `ad6dada` → `f0f0ee0` → `c015088` → `5c44967`（移除陈旧桌面入库批次字段测试）。本状态记录随后作为同一集成分支的验证提交；原开发工作区保持未修改。
 - 该分支包含生产 Prisma 接线、部署脚本、备份/恢复、Caddy 和企业微信生产配置保护。
 
 ### 5.3 手机响应式来源分支
@@ -267,6 +272,17 @@ Task 8 首轮完整 E2E 曾为 75 passed、29 failed；29 个失败全部来自�
 - 合并后新鲜验证：Prisma Client 生成成功；非部署 Vitest 45 个文件通过、3 个 PostgreSQL 条件跳过，238 passed/16 skipped；API/Web typecheck 与 build 通过；隔离 E2E 119/119 通过；`git diff --check 5f17963..HEAD` 通过。
 - Docker/deployment：`DockerDesktopVM State=Off, Status=Operating normally`，按门禁未运行 Docker image、只读挂载、deployment tests 或 Compose config。
 - 本机验收：Web `http://127.0.0.1:5480`，API `http://127.0.0.1:3307/health`；仅使用 memory persistence 与 local-auth，数据只在本机进程内有效，关闭服务后会清空，不连接任何真实或生产数据库。
+
+### 10.5 入库自动批次与移动视觉调整的新鲜验证（2026-08-14）
+
+- 基线：`codex/production-deployment` 在 `5c44967 test: remove stale admin inbound batch selector` 上开始本轮验证；原开发工作区 `D:\桌面\仓库` 仍保留其用户已有未提交修改且未被本轮改写、清理或提交。
+- Prisma：`corepack pnpm exec prisma generate` 使用仅指向本机虚构数据库的 `DATABASE_URL`，exit 0；没有连接真实或生产数据库。
+- 非部署 Vitest：`corepack pnpm exec vitest run --exclude tests/deployment/**`，46 个文件 passed、3 个文件 skipped；242 个测试 passed、17 个测试 skipped、0 failed，exit 0。跳过项是需要外部 Prisma 数据库的条件测试。
+- 类型与构建：`@warehouse/api` typecheck、`@warehouse/web` typecheck、`@warehouse/web` build 均 exit 0；Web 构建转换 1613 个模块。
+- 隔离 E2E：以 `PERSISTENCE_DRIVER=memory`、`LOCAL_AUTH_BYPASS=true` 启动在 API `127.0.0.1:3103`、Web `127.0.0.1:5180`；`corepack pnpm exec playwright test --config playwright.config.ts` 为 121 passed、0 failed（31.4s）。默认 3001/5174 已被其他进程占用，未复用或停止；本轮自有 3103/5180 已在测试后释放。
+- 差异检查：`git diff --check 1deb803..HEAD` 无输出、exit 0。
+- Docker/deployment：`DockerDesktopVM State=Off, Status=Operating normally`；未运行 Docker/部署测试、Compose 检查，也未重启 Docker。
+- 本地验收边界：未停止或修改用户验收监听的 5481/5482；未运行 Push、部署、服务器操作或生产 Secret/数据库操作。当前仅供本地/手机验收，用户验收仍待完成。
 
 ## 11. 文档维护规则
 
