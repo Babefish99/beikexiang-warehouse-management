@@ -18,6 +18,34 @@ test("admin gets task navigation with balanced icon and label sizes", async ({ p
   expect(sizing.label).toBe("12px");
 });
 
+test("mobile dashboard keeps warehouse controls and heading levels aligned with desktop", async ({ page }) => {
+  await loginAs(page, "/", "ADMIN");
+
+  const typography = await page.locator(".mobile-dashboard").evaluate((dashboard) => {
+    const style = (selector: string) => getComputedStyle(dashboard.querySelector<HTMLElement>(selector)!).fontSize;
+    const warehouse = dashboard.querySelector<HTMLElement>(".mobile-dashboard__warehouse select")!;
+    const action = dashboard.querySelector<HTMLElement>(".mobile-dashboard__actions a")!;
+
+    return {
+      warehouse: style(".mobile-dashboard__warehouse select"),
+      action: style(".mobile-dashboard__actions a"),
+      h1: style(".mobile-dashboard__greeting h1"),
+      h2: style(".mobile-dashboard__overview h2"),
+      warehouseHeight: warehouse.getBoundingClientRect().height,
+      actionHeight: action.getBoundingClientRect().height,
+    };
+  });
+
+  expect(typography).toEqual({
+    warehouse: "14px",
+    action: "14px",
+    h1: "25px",
+    h2: "18px",
+    warehouseHeight: 44,
+    actionHeight: 72,
+  });
+});
+
 test("more sheet explains desktop-only work without horizontal overflow", async ({ page }) => {
   await loginAs(page, "/", "ADMIN");
   await page.getByRole("button", { name: "更多" }).click();

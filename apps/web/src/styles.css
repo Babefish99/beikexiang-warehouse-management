@@ -256,6 +256,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .inbound-form__wide { grid-column: auto; }
   .inbound-form input, .inbound-form select, .inbound-form textarea { width: 100%; min-width: 0; min-height: 44px; box-sizing: border-box; }
   .inbound-form textarea { min-height: 88px; }
+  .page-header h1, .mobile-dashboard__greeting h1 { font-size: 25px; }
+  .mobile-dashboard__warehouse select, .mobile-dashboard__actions a { font-size: 14px; }
+  .mobile-dashboard__overview h2 { font-size: 18px; }
+  .inbound-form__group legend { font-size: 15px; }
+  input[type="date"], input[type="date"]::-webkit-datetime-edit { text-align: left; }
   .inbound-amount { grid-column: auto; min-height: 52px; justify-content: space-between; }
   .inbound-hint, .inbound-stale { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
   .inbound-actions { gap: 10px; }

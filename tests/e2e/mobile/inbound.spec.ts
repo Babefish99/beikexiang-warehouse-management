@@ -36,6 +36,25 @@ test("inbound and opening-stock APIs remain administrator-only on the isolated s
   expect(opening.status()).toBe(401);
 });
 
+test("mobile inbound keeps tertiary group headings and purchase date content left aligned", async ({ page }) => {
+  await openInbound(page);
+
+  const legend = page.locator(".inbound-form__group legend").first();
+  const purchasedAt = page.locator('input[type="date"]');
+  const styles = await purchasedAt.evaluate((input) => ({
+    field: getComputedStyle(input).textAlign,
+    webkitDateEdit: CSS.supports("selector(input::-webkit-datetime-edit)")
+      ? getComputedStyle(input, "::-webkit-datetime-edit").textAlign
+      : null,
+    fontSize: getComputedStyle(input).fontSize,
+  }));
+
+  await expect(legend).toHaveCSS("font-size", "15px");
+  expect(styles.field).toBe("left");
+  expect(styles.fontSize).toBe("16px");
+  if (styles.webkitDateEdit !== null) expect(styles.webkitDateEdit).toBe("left");
+});
+
 test("mobile inbound is grouped, confirms an exact amount, and restores a failed draft", async ({ page }) => {
   await page.route(apiUrl("/admin/inbound"), (route) => route.fulfill({
     status: 500,
