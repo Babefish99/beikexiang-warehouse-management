@@ -18,7 +18,6 @@ async function openInbound(page: Page): Promise<void> {
 async function fillInbound(page: Page): Promise<void> {
   await page.getByLabel("仓库 *").selectOption("warehouse-1");
   await page.getByLabel("物品 *").selectOption("item-1");
-  await page.getByLabel("批次号 *").fill("B-001");
   await page.getByLabel("采购日期 *").fill("2026-08-13");
   await page.getByLabel("采购人").fill("仓库管理员");
   await page.getByLabel("入库数量 *").fill("0.1");
@@ -47,6 +46,8 @@ test("mobile inbound is grouped, confirms an exact amount, and restores a failed
   await expect(page.getByRole("group", { name: "仓库与物品" })).toBeVisible();
   await expect(page.getByRole("group", { name: "批次与采购信息" })).toBeVisible();
   await expect(page.getByRole("group", { name: "数量与预计金额" })).toBeVisible();
+  await expect(page.getByLabel("批次号 *")).toHaveCount(0);
+  await expect(page.getByText("按采购日期自动生成，例如 20260814-001")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
   await fillInbound(page);
@@ -58,7 +59,7 @@ test("mobile inbound is grouped, confirms an exact amount, and restores a failed
   const dialog = page.getByRole("dialog", { name: "确认入库" });
   await expect(dialog).toContainText("总部仓");
   await expect(dialog).toContainText("打印纸");
-  await expect(dialog).toContainText("B-001");
+  await expect(dialog).toContainText("按采购日期自动生成");
   await expect(dialog).toContainText("¥0.25");
   const failedRequest = page.waitForRequest(apiUrl("/admin/inbound"));
   await dialog.getByRole("button", { name: "确认入库", exact: true }).click();
@@ -66,7 +67,6 @@ test("mobile inbound is grouped, confirms an exact amount, and restores a failed
   expect(payload).toEqual({
     warehouseId: "warehouse-1",
     itemId: "item-1",
-    batchNo: "B-001",
     quantity: "1.23",
     unitCost: "0.2",
     purchasedAt: "2026-08-13",
@@ -80,16 +80,15 @@ test("mobile inbound is grouped, confirms an exact amount, and restores a failed
   await expect(dialog.getByRole("button", { name: "确认入库", exact: true })).toBeEnabled();
 
   await page.reload();
-  await expect(page.getByLabel("批次号 *")).toHaveValue("B-001");
+  await expect(page.getByLabel("批次号 *")).toHaveCount(0);
   await expect(page.getByLabel("入库数量 *")).toHaveValue("01.2300");
   await expect(page.getByText("预计金额 ¥0.25")).toBeVisible();
 
   await page.getByRole("button", { name: "放弃草稿" }).click();
-  await expect(page.getByLabel("批次号 *")).toHaveValue("");
   expect(await page.evaluate(() => sessionStorage.getItem("warehouse.inbound.v1.local-admin"))).toBeNull();
 });
 
-test("duplicate batch errors mark batch number invalid without discarding the dialog or input", async ({ page }) => {
+test("automatic batch conflicts stay in the dialog without discarding the other inputs", async ({ page }) => {
   await page.route(apiUrl("/admin/inbound"), (route) => route.fulfill({
     status: 409,
     json: { error: "batch number already exists" },
@@ -101,24 +100,32 @@ test("duplicate batch errors mark batch number invalid without discarding the di
   const dialog = page.getByRole("dialog", { name: "确认入库" });
   await dialog.getByRole("button", { name: "确认入库", exact: true }).click();
 
-  await expect(dialog.getByRole("alert")).toHaveText("批次号已存在，请更换批次号");
-  await expect(page.getByLabel("批次号 *")).toHaveAttribute("aria-invalid", "true");
-  await expect(page.getByLabel("批次号 *")).toHaveValue("B-001");
-  await expect(page.getByText("批次号已存在，请更换批次号", { exact: true })).toHaveCount(2);
+  await expect(dialog.getByRole("alert")).toHaveText("批次号自动生成冲突，请稍后重试");
+  await expect(page.getByLabel("批次号 *")).toHaveCount(0);
+  await expect(page.getByLabel("采购人")).toHaveValue("仓库管理员");
+  await expect(page.getByLabel("入库数量 *")).toHaveValue("0.1");
   await expect(dialog).toBeVisible();
 });
 
-test("invalid runtime draft values are ignored and leave the page usable", async ({ page }) => {
+test("old manual-batch drafts are ignored and leave the page usable", async ({ page }) => {
   await page.addInitScript(() => {
     sessionStorage.setItem("warehouse.inbound.v1.local-admin", JSON.stringify({
       version: 1,
       userId: "local-admin",
-      value: { quantity: 2 },
+      value: {
+        warehouseId: "warehouse-1",
+        itemId: "item-1",
+        batchNo: "B-001",
+        quantity: "2",
+        unitCost: "20",
+        purchasedAt: "2026-08-13",
+        purchaser: "仓库管理员",
+        remark: "",
+      },
     }));
   });
   await openInbound(page);
 
-  await expect(page.getByLabel("批次号 *")).toHaveValue("");
   await expect(page.getByLabel("入库数量 *")).toHaveValue("");
   await expect(page.getByRole("button", { name: "保存入库" })).toBeEnabled();
 });
@@ -130,7 +137,7 @@ test("successful inbound disables duplicate confirmation and enters a reset comp
   await page.route(apiUrl("/admin/inbound"), async (route) => {
     submitCount += 1;
     await submitGate;
-    await route.fulfill({ status: 201, json: { inboundId: "inbound-1", batchIds: ["batch-1"] } });
+    await route.fulfill({ status: 201, json: { inboundId: "inbound-1", batchIds: ["batch-1"], batchNo: "20260813-001" } });
   });
   await openInbound(page);
   await fillInbound(page);
@@ -142,13 +149,12 @@ test("successful inbound disables duplicate confirmation and enters a reset comp
   await expect(dialog.getByRole("button", { name: "提交中…", exact: true })).toBeDisabled();
   releaseSubmit();
 
-  await expect(page.getByText("入库已登记：inbound-1，批次 batch-1")).toBeVisible();
+  await expect(page.getByText("入库已登记：inbound-1，批次 20260813-001")).toBeVisible();
   expect(submitCount).toBe(1);
   await expect(page.getByLabel("仓库 *")).toHaveValue("warehouse-1");
   await expect(page.getByLabel("采购日期 *")).toHaveValue("2026-08-13");
   await expect(page.getByLabel("采购人")).toHaveValue("仓库管理员");
   await expect(page.getByLabel("物品 *")).toHaveValue("");
-  await expect(page.getByLabel("批次号 *")).toHaveValue("");
   await expect(page.getByLabel("入库数量 *")).toHaveValue("");
   expect(await page.evaluate(() => sessionStorage.getItem("warehouse.inbound.v1.local-admin"))).toBeNull();
 });
@@ -175,6 +181,6 @@ test("desktop inbound retains the two-column form and full confirmation semantic
   const dialog = page.getByRole("dialog", { name: "确认入库" });
   await expect(dialog).toContainText("总部仓");
   await expect(dialog).toContainText("打印纸");
-  await expect(dialog).toContainText("B-001");
+  await expect(dialog).toContainText("按采购日期自动生成");
   await expect(dialog).toContainText("¥0.02");
 });

@@ -14,7 +14,6 @@ import {
 const validInbound: InboundDraft = {
   warehouseId: "wh-1",
   itemId: "item-1",
-  batchNo: "B-001",
   quantity: "2",
   unitCost: "20",
   purchasedAt: "2026-08-13",
@@ -27,7 +26,6 @@ describe("inbound form", () => {
     expect(createInboundDraft("2026-08-13")).toEqual({
       warehouseId: "",
       itemId: "",
-      batchNo: "",
       quantity: "",
       unitCost: "",
       purchasedAt: "2026-08-13",
@@ -42,12 +40,13 @@ describe("inbound form", () => {
     expect(calculateInboundAmount("not-a-number", "20")).toBeNull();
   });
 
-  it("accepts only complete inbound drafts with string fields", () => {
+  it("accepts only current inbound drafts without a client batch number", () => {
     expect(isInboundDraft(validInbound)).toBe(true);
     for (const value of [
       null,
       [],
       {},
+      { ...validInbound, batchNo: "B-001" },
       { ...validInbound, remark: undefined },
       { ...validInbound, quantity: 2 },
     ]) {
@@ -66,10 +65,9 @@ describe("inbound form", () => {
     }
   });
 
-  it("normalizes Decimal fields and trimmed business fields for submission", () => {
+  it("normalizes Decimal fields without sending a client batch number", () => {
     expect(createInboundPayload({
       ...validInbound,
-      batchNo: " B-001 ",
       quantity: "01.2300",
       unitCost: "0002.5000",
       purchasedAt: "2026-08-13",
@@ -77,7 +75,6 @@ describe("inbound form", () => {
       remark: " 采购入库 ",
     })).toEqual({
       ...validInbound,
-      batchNo: "B-001",
       quantity: "1.23",
       unitCost: "2.5",
       purchasedAt: "2026-08-13",
@@ -95,7 +92,6 @@ describe("inbound form", () => {
     expect(validateInboundDraft(createInboundDraft(""))).toEqual({
       warehouseId: "请选择仓库",
       itemId: "请选择物品",
-      batchNo: "请输入批次号",
       quantity: "数量必须为正数",
       unitCost: "单价必须为非负数",
       purchasedAt: "请选择采购日期",
@@ -129,7 +125,6 @@ describe("inbound form", () => {
     expect(resetInboundAfterSuccess(validInbound)).toEqual({
       warehouseId: validInbound.warehouseId,
       itemId: "",
-      batchNo: "",
       quantity: "",
       unitCost: "",
       purchasedAt: validInbound.purchasedAt,
@@ -138,10 +133,10 @@ describe("inbound form", () => {
     });
   });
 
-  it("maps the stable duplicate-batch server code to the batch number field", () => {
+  it("keeps automatic batch conflicts as dialog-only errors", () => {
     expect(mapInboundServerError("batch number already exists")).toEqual({
-      message: "批次号已存在，请更换批次号",
-      fieldErrors: { batchNo: "批次号已存在，请更换批次号" },
+      message: "批次号自动生成冲突，请稍后重试",
+      fieldErrors: {},
     });
   });
 

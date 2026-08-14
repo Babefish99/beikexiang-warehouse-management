@@ -83,7 +83,6 @@ test("inbound draft and long values survive the 820 to 821 presentation boundary
   await openInbound(page);
   await page.getByLabel("仓库 *").selectOption("warehouse-long");
   await page.getByLabel("物品 *").selectOption("item-long");
-  await page.getByLabel("批次号 *").fill(longBatch);
   const longPurchaser = "企业微信移动端超长中文采购负责人姓名";
   await page.getByLabel("采购人").fill(longPurchaser);
   await page.evaluate(() => sessionStorage.removeItem("warehouse.inbound.v1.local-admin"));
@@ -94,7 +93,6 @@ test("inbound draft and long values survive the 820 to 821 presentation boundary
   await expect(page.locator(".sidebar")).toBeVisible();
   await expect(page.getByLabel("仓库 *")).toHaveValue("warehouse-long");
   await expect(page.getByLabel("物品 *")).toHaveValue("item-long");
-  await expect(page.getByLabel("批次号 *")).toHaveValue(longBatch);
   await expect(page.getByLabel("采购人")).toHaveValue(longPurchaser);
   expect(await page.evaluate(() => sessionStorage.getItem("warehouse.inbound.v1.local-admin"))).toBeNull();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);

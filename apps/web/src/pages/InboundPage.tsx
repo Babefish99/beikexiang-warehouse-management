@@ -26,7 +26,7 @@ type SelectorWarehouse = { id: string; code: string; name: string };
 type SelectorItem = { id: string; code: string; name: string };
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
-const draftVersion = 1;
+const draftVersion = 2;
 
 async function readError(response: Response): Promise<string> {
   const payload = await response.json().catch(() => null) as { message?: string; error?: string } | null;
@@ -146,12 +146,12 @@ export function InboundPage({ userId }: { userId: string }) {
         setResult(null);
         return;
       }
-      const data = await response.json() as { inboundId: string; batchIds: string[] };
+      const data = await response.json() as { inboundId: string; batchIds: string[]; batchNo: string };
       clearSessionDraft(window.sessionStorage, draftKey);
       setForm((current) => resetInboundAfterSuccess(current));
       setErrors({});
       setStaleFields([]);
-      setResult(`入库已登记：${data.inboundId}，批次 ${data.batchIds.join("、")}`);
+      setResult(`入库已登记：${data.inboundId}，批次 ${data.batchNo}`);
       setConfirming(false);
       announceBusinessCompleted();
     } catch {
@@ -198,7 +198,7 @@ export function InboundPage({ userId }: { userId: string }) {
 
           <fieldset className="inbound-form__group inbound-form__group--purchase">
             <legend>批次与采购信息</legend>
-            <label><span>批次号 *</span><input aria-invalid={Boolean(errors.batchNo)} value={form.batchNo} onChange={(event) => updateField("batchNo", event.target.value)} />{errors.batchNo ? <small className="field-error">{errors.batchNo}</small> : null}</label>
+            <p>按采购日期自动生成，例如 20260814-001</p>
             <label><span>采购日期 *</span><input aria-invalid={Boolean(errors.purchasedAt)} type="date" value={form.purchasedAt} onChange={(event) => updateField("purchasedAt", event.target.value)} />{errors.purchasedAt ? <small className="field-error">{errors.purchasedAt}</small> : null}</label>
             <label><span>采购人</span><input value={form.purchaser} onChange={(event) => updateField("purchaser", event.target.value)} /></label>
             <label className="inbound-form__wide"><span>备注（单价为 0 时必填）</span><textarea aria-invalid={Boolean(errors.remark)} value={form.remark} onChange={(event) => updateField("remark", event.target.value)} />{errors.remark ? <small className="field-error">{errors.remark}</small> : null}</label>
@@ -233,7 +233,7 @@ export function InboundPage({ userId }: { userId: string }) {
         <dl className="inbound-summary">
           <div><dt>仓库</dt><dd>{selectedWarehouse?.name}</dd></div>
           <div><dt>物品</dt><dd>{selectedItem?.name}</dd></div>
-          <div><dt>批次</dt><dd>{form.batchNo.trim()}</dd></div>
+          <div><dt>批次</dt><dd>按采购日期自动生成</dd></div>
           <div><dt>数量</dt><dd>{form.quantity}</dd></div>
           <div><dt>预计金额</dt><dd>{expectedAmount === null ? "—" : `¥${expectedAmount}`}</dd></div>
         </dl>
