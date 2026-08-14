@@ -6,12 +6,12 @@
 
 ## 1. 当前结论
 
-项目已经具备轻量仓库系统的主要业务代码、PostgreSQL 持久化和阿里云部署能力，公网域名为 `https://warehouse.beikexiang.cn`。手机响应式范围已在本地分支实现并完成非 Docker 验证，但**尚未部署，等待用户验收**。系统整体仍属于“部署并联调阶段”，尚不能判定为正式生产验收完成，主要原因是：
+项目已经具备轻量仓库系统的主要业务代码、PostgreSQL 持久化和阿里云部署能力，公网域名为 `https://warehouse.beikexiang.cn`。手机响应式范围已本地合并到 `codex/production-deployment` 并重新完成非 Docker 验证；本机验收环境正在运行，但**未 Push、未部署，等待用户验收**。系统整体仍属于“部署并联调阶段”，尚不能判定为正式生产验收完成，主要原因是：
 
 - 企业微信可信域名、可信 IP 和审批回调仍受 ICP 备案审核进度影响。
 - 企业微信真实登录及“审批通过 → 自动生成待出库单 → 实际出库 → 报表”的全链路尚未验收。
 - 三个仓库的正式名称和生产期初库存尚未完成最终核对与导入验收。
-- 本地开发分支与线上部署分支已经分叉，下一轮开发和发布前必须先整合分支。
+- 原开发分支与本地生产部署分支仍有独立历史；后续发布应以本地生产部署分支为唯一基线继续整合。
 - 本轮手机响应式实现没有连接生产数据库、修改生产 Secret、推送或部署；Docker Desktop VM 当前为 Off，部署门禁未运行。
 
 ## 2. 产品范围与已确认规则
@@ -116,21 +116,21 @@ D:\桌面\仓库
 - 基线提交：`270d7f8 fix: use company logo in warehouse sidebar`
 - 当前存在用户已有未提交修改和未跟踪计划文档；本轮未读取后改写、未清理、未提交。
 
-### 5.2 生产部署工作区（未触碰）
+### 5.2 生产部署工作区（本地已合并，未部署）
 
 - 路径：`D:\桌面\仓库\.worktrees\production-deployment`
 - 分支：`codex/production-deployment`
-- 基线提交：`5f17963 fix: harden WeCom template deployment guard`
+- 原基线提交：`5f17963 fix: harden WeCom template deployment guard`
+- 当前本地合并提交：`de6c69d merge: mobile responsive adaptation`，随后本地验收记录提交将仅更新状态文档。
 - 该分支包含生产 Prisma 接线、部署脚本、备份/恢复、Caddy 和企业微信生产配置保护。
 
-### 5.3 手机响应式工作区
+### 5.3 手机响应式来源分支
 
-- 路径：`D:\桌面\仓库\.worktrees\mobile-responsive`
 - 分支：`codex/mobile-responsive`
 - 创建基线：`codex/production-deployment@5f17963`
 - 实现规格：`docs/superpowers/specs/2026-08-13-mobile-responsive-design.md`
 - 本轮实现提交：`3837dfe fix: close mobile verification gaps`、`8c8f8a7 test: isolate legacy end-to-end specs`。
-- 状态：仅本地实现和验证；未合并、未推送、未部署，等待用户验收。
+- 状态：已通过 `de6c69d` 合并到本地生产部署分支；不推送、不部署。来源工作区和本地分支可在合并后验证完成时清理，不影响原开发工作区。
 
 ### 5.4 关键分支风险
 
@@ -260,6 +260,13 @@ Task 8 首轮完整 E2E 曾为 75 passed、29 failed；29 个失败全部来自�
 - 前端在收到稳定的 `batch number already exists` 业务错误时，会同时保留确认弹窗/输入值，并在批次号字段显示错误与 `aria-invalid`；未知及网络错误仍使用通用错误处理。生产 Prisma 唯一约束的 `P2002` 尚未在服务端统一转换为该稳定业务错误，作为非阻塞后端契约 Minor 留待后续补齐。
 - 最终整分支评审的规格级 Important（手机直达电脑端专属可写页面）已经关闭；scoped re-review 为 0 Critical、0 Important，剩余上述 1 个后端错误契约 Minor 已明确停放。
 - 主流程最终新鲜验证：非部署 Vitest 238 passed/16 skipped、隔离 E2E 119/119、API/Web typecheck、API/Web build 和 diff-check 均通过；Docker 门禁仍因 VM Off 未运行。
+
+### 10.4 本地合并验证与验收环境（2026-08-14）
+
+- 合并：`codex/mobile-responsive` 已无冲突合并至本地 `codex/production-deployment`，合并提交为 `de6c69d`；未执行 Push、部署、服务器操作或生产 Secret 修改。
+- 合并后新鲜验证：Prisma Client 生成成功；非部署 Vitest 45 个文件通过、3 个 PostgreSQL 条件跳过，238 passed/16 skipped；API/Web typecheck 与 build 通过；隔离 E2E 119/119 通过；`git diff --check 5f17963..HEAD` 通过。
+- Docker/deployment：`DockerDesktopVM State=Off, Status=Operating normally`，按门禁未运行 Docker image、只读挂载、deployment tests 或 Compose config。
+- 本机验收：Web `http://127.0.0.1:5480`，API `http://127.0.0.1:3307/health`；仅使用 memory persistence 与 local-auth，数据只在本机进程内有效，关闭服务后会清空，不连接任何真实或生产数据库。
 
 ## 11. 文档维护规则
 
