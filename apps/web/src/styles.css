@@ -260,7 +260,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .mobile-dashboard__warehouse select, .mobile-dashboard__actions a { font-size: 14px; }
   .mobile-dashboard__overview h2 { font-size: 18px; }
   .inbound-form__group legend { font-size: 15px; }
-  input[type="date"], input[type="date"]::-webkit-datetime-edit { text-align: left; }
+  .inbound-form__batch-preview { color: var(--navy); background: #fff; }
+  .inbound-form input[type="date"], .inbound-form input[type="date"]::-webkit-datetime-edit, .inbound-form input[type="date"]::-webkit-date-and-time-value { text-align: left; }
   .inbound-amount { grid-column: auto; min-height: 52px; justify-content: space-between; }
   .inbound-hint, .inbound-stale { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
   .inbound-actions { gap: 10px; }

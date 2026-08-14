@@ -70,6 +70,11 @@ export function calculateInboundAmount(quantity: string, unitCost: string): stri
   return parsedQuantity.mul(parsedUnitCost).toFixed(2);
 }
 
+export function previewInboundBatchNo(purchasedAt: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(purchasedAt.trim());
+  return match ? `${match[1]}${match[2]}${match[3]}-001` : "";
+}
+
 export function validateInboundDraft(draft: InboundDraft): InboundFieldErrors {
   const errors: InboundFieldErrors = {};
   const quantity = parseDecimal(draft.quantity);

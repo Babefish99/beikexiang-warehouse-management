@@ -36,23 +36,49 @@ test("inbound and opening-stock APIs remain administrator-only on the isolated s
   expect(opening.status()).toBe(401);
 });
 
-test("mobile inbound keeps tertiary group headings and purchase date content left aligned", async ({ page }) => {
+test("mobile inbound keeps tertiary group headings and aligns a generated batch preview with the purchase date", async ({ page }) => {
   await openInbound(page);
 
   const legend = page.locator(".inbound-form__group legend").first();
   const purchasedAt = page.locator('input[type="date"]');
+  const batchPreview = page.getByLabel("批次号（系统生成）");
   const styles = await purchasedAt.evaluate((input) => ({
     field: getComputedStyle(input).textAlign,
     webkitDateEdit: CSS.supports("selector(input::-webkit-datetime-edit)")
       ? getComputedStyle(input, "::-webkit-datetime-edit").textAlign
       : null,
+    webkitDateAndTimeValue: CSS.supports("selector(input::-webkit-date-and-time-value)")
+      ? getComputedStyle(input, "::-webkit-date-and-time-value").textAlign
+      : null,
     fontSize: getComputedStyle(input).fontSize,
   }));
 
   await expect(legend).toHaveCSS("font-size", "15px");
+  await expect(batchPreview).toHaveAttribute("readonly", "");
+  await purchasedAt.fill("");
+  await expect(batchPreview).toHaveValue("");
+  await expect(batchPreview).toHaveAttribute("placeholder", "选择采购日期后自动生成");
+  await purchasedAt.fill("2026-08-14");
+  await expect(batchPreview).toHaveValue("20260814-001");
+  const controls = await purchasedAt.evaluate((date) => {
+    const fieldset = date.closest("fieldset")!;
+    const batch = fieldset.querySelector<HTMLInputElement>('input[aria-label="批次号（系统生成）"]')!;
+    return {
+      date: date.getBoundingClientRect(),
+      batch: batch.getBoundingClientRect(),
+    };
+  });
+  const labelOrder = await page.locator(".inbound-form__group--purchase > label").evaluateAll((labels) => labels.map((label) => label.querySelector("span")?.textContent?.trim()));
+  const purchaserWidth = await page.getByLabel("采购人").evaluate((input) => input.getBoundingClientRect().width);
   expect(styles.field).toBe("left");
   expect(styles.fontSize).toBe("16px");
   if (styles.webkitDateEdit !== null) expect(styles.webkitDateEdit).toBe("left");
+  if (styles.webkitDateAndTimeValue !== null) expect(styles.webkitDateAndTimeValue).toBe("left");
+  expect(labelOrder.slice(0, 3)).toEqual(["采购日期 *", "批次号（系统生成）", "采购人"]);
+  expect(controls.date.height).toBeGreaterThanOrEqual(44);
+  expect(controls.batch.height).toBeGreaterThanOrEqual(44);
+  expect(controls.date.width).toBeCloseTo(purchaserWidth, 0);
+  expect(controls.batch.width).toBeCloseTo(purchaserWidth, 0);
 });
 
 test("mobile inbound is grouped, confirms an exact amount, and restores a failed draft", async ({ page }) => {
@@ -65,8 +91,8 @@ test("mobile inbound is grouped, confirms an exact amount, and restores a failed
   await expect(page.getByRole("group", { name: "仓库与物品" })).toBeVisible();
   await expect(page.getByRole("group", { name: "批次与采购信息" })).toBeVisible();
   await expect(page.getByRole("group", { name: "数量与预计金额" })).toBeVisible();
-  await expect(page.getByLabel("批次号 *")).toHaveCount(0);
-  await expect(page.getByText("按采购日期自动生成，例如 20260814-001")).toBeVisible();
+  const initialPurchaseDate = await page.getByLabel("采购日期 *").inputValue();
+  await expect(page.getByLabel("批次号（系统生成）")).toHaveValue(`${initialPurchaseDate.replaceAll("-", "")}-001`);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
   await fillInbound(page);
@@ -99,7 +125,7 @@ test("mobile inbound is grouped, confirms an exact amount, and restores a failed
   await expect(dialog.getByRole("button", { name: "确认入库", exact: true })).toBeEnabled();
 
   await page.reload();
-  await expect(page.getByLabel("批次号 *")).toHaveCount(0);
+  await expect(page.getByLabel("批次号（系统生成）")).toHaveValue("20260813-001");
   await expect(page.getByLabel("入库数量 *")).toHaveValue("01.2300");
   await expect(page.getByText("预计金额 ¥0.25")).toBeVisible();
 
@@ -120,7 +146,7 @@ test("automatic batch conflicts stay in the dialog without discarding the other 
   await dialog.getByRole("button", { name: "确认入库", exact: true }).click();
 
   await expect(dialog.getByRole("alert")).toHaveText("批次号自动生成冲突，请稍后重试");
-  await expect(page.getByLabel("批次号 *")).toHaveCount(0);
+  await expect(page.getByLabel("批次号（系统生成）")).toHaveValue("20260813-001");
   await expect(page.getByLabel("采购人")).toHaveValue("仓库管理员");
   await expect(page.getByLabel("入库数量 *")).toHaveValue("0.1");
   await expect(dialog).toBeVisible();

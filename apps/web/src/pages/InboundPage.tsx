@@ -13,6 +13,7 @@ import {
   createInboundDraft,
   isInboundDraft,
   mapInboundServerError,
+  previewInboundBatchNo,
   reconcileInboundDraft,
   resetInboundAfterSuccess,
   validateInboundDraft,
@@ -106,6 +107,7 @@ export function InboundPage({ userId }: { userId: string }) {
   }, [draftKey, userId]);
 
   const expectedAmount = calculateInboundAmount(form.quantity, form.unitCost);
+  const batchPreview = previewInboundBatchNo(form.purchasedAt);
   const selectedWarehouse = useMemo(
     () => warehouses.find((warehouse) => warehouse.id === form.warehouseId),
     [form.warehouseId, warehouses],
@@ -198,8 +200,8 @@ export function InboundPage({ userId }: { userId: string }) {
 
           <fieldset className="inbound-form__group inbound-form__group--purchase">
             <legend>批次与采购信息</legend>
-            <p>按采购日期自动生成，例如 20260814-001</p>
             <label><span>采购日期 *</span><input aria-invalid={Boolean(errors.purchasedAt)} type="date" value={form.purchasedAt} onChange={(event) => updateField("purchasedAt", event.target.value)} />{errors.purchasedAt ? <small className="field-error">{errors.purchasedAt}</small> : null}</label>
+            <label><span>批次号（系统生成）</span><input aria-label="批次号（系统生成）" className="inbound-form__batch-preview" readOnly placeholder="选择采购日期后自动生成" value={batchPreview} /></label>
             <label><span>采购人</span><input value={form.purchaser} onChange={(event) => updateField("purchaser", event.target.value)} /></label>
             <label className="inbound-form__wide"><span>备注（单价为 0 时必填）</span><textarea aria-invalid={Boolean(errors.remark)} value={form.remark} onChange={(event) => updateField("remark", event.target.value)} />{errors.remark ? <small className="field-error">{errors.remark}</small> : null}</label>
           </fieldset>

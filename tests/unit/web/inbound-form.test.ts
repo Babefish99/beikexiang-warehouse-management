@@ -5,6 +5,7 @@ import {
   createInboundPayload,
   isInboundDraft,
   mapInboundServerError,
+  previewInboundBatchNo,
   reconcileInboundDraft,
   resetInboundAfterSuccess,
   validateInboundDraft,
@@ -138,6 +139,12 @@ describe("inbound form", () => {
       message: "批次号自动生成冲突，请稍后重试",
       fieldErrors: {},
     });
+  });
+
+  it("previews the first server-style batch number from the selected purchase date", () => {
+    expect(previewInboundBatchNo("2026-08-14")).toBe("20260814-001");
+    expect(previewInboundBatchNo("")).toBe("");
+    expect(previewInboundBatchNo("2026/08/14")).toBe("");
   });
 
   it("keeps unknown server errors as dialog-only messages", () => {
