@@ -1,5 +1,5 @@
 import Fastify from "fastify";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { OutboundService, InMemoryOutboundStore } from "../../../apps/api/src/application/inventory/outbound-service.js";
 import { registerOutboundRoutes } from "../../../apps/api/src/routes/admin/outbound.js";
@@ -11,6 +11,21 @@ function makeService() {
   store.seedBatch({ id: "batch-1", warehouseId: "wh-1", itemId: "item-1", remainingQuantity: "10", unitCost: "20" });
   return { store, service: new OutboundService(store) };
 }
+
+async function createSessionCookie(app: ReturnType<typeof buildServer>, role: "ADMIN" | "FINANCE"): Promise<string> {
+  const response = await app.inject({ method: "GET", url: `/auth/local?returnTo=/admin/outbound&role=${role}`, remoteAddress: "127.0.0.1", headers: { host: "localhost:3001" } });
+  return response.headers["set-cookie"] as string;
+}
+
+beforeEach(() => {
+  vi.stubEnv("NODE_ENV", "test");
+  vi.stubEnv("LOCAL_AUTH_BYPASS", "true");
+  vi.stubEnv("API_BASE_URL", "http://localhost:3001");
+  vi.stubEnv("WEB_BASE_URL", "http://localhost:5174");
+  vi.stubEnv("SESSION_SECRET", "local-development-session-secret");
+});
+
+afterEach(() => vi.unstubAllEnvs());
 
 describe("outbound service", () => {
   it("lists available batches for a pending approval", async () => {
@@ -114,5 +129,83 @@ describe("outbound options route", () => {
     } finally {
       await app.close();
     }
+  });
+});
+
+describe("outbound mutation routes", () => {
+  it("cancels only a pending approval with a reason", async () => {
+    const app = Fastify();
+    const { service } = makeService();
+    registerOutboundRoutes(app, { outboundService: service });
+    try {
+      const response = await app.inject({ method: "POST", url: "/admin/outbound/approval-1/cancel", payload: { reason: "申请人撤回" } });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ approvalId: "approval-1", status: "VOIDED" });
+    } finally { await app.close(); }
+  });
+
+  it("rejects an empty cancel reason without closing the approval", async () => {
+    const app = Fastify();
+    const { service } = makeService();
+    registerOutboundRoutes(app, { outboundService: service });
+    try {
+      const response = await app.inject({ method: "POST", url: "/admin/outbound/approval-1/cancel", payload: { reason: "   " } });
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ error: "reason is required" });
+      await expect(service.listOptions("approval-1")).resolves.toMatchObject({ approvalId: "approval-1" });
+    } finally { await app.close(); }
+  });
+
+  it("keeps duplicate confirmation and changed stock as conflicts", async () => {
+    const app = Fastify();
+    const { service } = makeService();
+    registerOutboundRoutes(app, { outboundService: service });
+    try {
+      const payload = { approvalId: "approval-1", allocations: [{ approvalLineId: "line-1", warehouseId: "wh-1", batchId: "batch-1", quantity: "10" }] };
+      expect((await app.inject({ method: "POST", url: "/admin/outbound/confirm", payload })).statusCode).toBe(200);
+      expect((await app.inject({ method: "POST", url: "/admin/outbound/confirm", payload })).statusCode).toBe(409);
+    } finally { await app.close(); }
+  });
+
+  it("returns 409 when stock changes between route validation and commit", async () => {
+    const app = Fastify();
+    const { store } = makeService();
+    const service = new OutboundService({
+      getApproval: (approvalId) => store.getApproval(approvalId),
+      listPending: () => store.listPending(),
+      listBatches: (itemIds) => store.listBatches(itemIds),
+      cancelApproval: (approvalId, reason) => store.cancelApproval(approvalId, reason),
+      commitOutbound: (approval, validation, reason) => {
+        store.seedBatch({ id: "batch-1", warehouseId: "wh-1", itemId: "item-1", remainingQuantity: "9", unitCost: "20" });
+        return store.commitOutbound(approval, validation, reason);
+      },
+    });
+    registerOutboundRoutes(app, { outboundService: service });
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/admin/outbound/confirm",
+        payload: {
+          approvalId: "approval-1",
+          allocations: [{ approvalLineId: "line-1", warehouseId: "wh-1", batchId: "batch-1", quantity: "10" }],
+        },
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({ error: "stock balance changed; retry transaction" });
+      expect(store.batch("batch-1")?.remainingQuantity).toBe("9");
+      expect(store.ledger()).toHaveLength(0);
+    } finally { await app.close(); }
+  });
+
+  it("keeps mutation routes administrator-only", async () => {
+    const app = buildServer();
+    try {
+      expect((await app.inject({ method: "POST", url: "/admin/outbound/approval-1/cancel", payload: { reason: "申请人撤回" } })).statusCode).toBe(401);
+      expect((await app.inject({ method: "POST", url: "/admin/outbound/confirm", payload: {} })).statusCode).toBe(401);
+      const financeCookie = await createSessionCookie(app, "FINANCE");
+      expect((await app.inject({ method: "POST", url: "/admin/outbound/approval-1/cancel", headers: { cookie: financeCookie }, payload: { reason: "申请人撤回" } })).statusCode).toBe(403);
+      expect((await app.inject({ method: "POST", url: "/admin/outbound/confirm", headers: { cookie: financeCookie }, payload: {} })).statusCode).toBe(403);
+    } finally { await app.close(); }
   });
 });

@@ -6,7 +6,7 @@ describe("inventory notification service", () => {
   it("aggregates the administrator's actionable inventory notices", async () => {
     const service = new NotificationService({
       getPendingOutboundCount: async () => 2,
-      listLowStock: async () => [{ itemId: "item-1", itemName: "Tea", totalQuantity: "1", minimumStock: "3" }],
+      listLowStock: async () => [{ itemId: "item-1", itemCode: "TEA-001", itemName: "Tea", totalQuantity: "1", minimumStock: "3" }],
       getPeriodStatus: async () => ({ code: "2026-08", status: "OPEN" }),
       getStocktakeNotice: async () => ({ count: 1, href: "/admin/stocktake" }),
       getAnomalyCount: async () => 1,
@@ -18,7 +18,7 @@ describe("inventory notification service", () => {
         kind: "PENDING_OUTBOUND",
         title: "待出库审批",
         description: "2 条已通过的领用审批待管理员确认出库。",
-        href: "/admin/outbound/pending",
+        href: "/admin/outbound",
         priority: 1,
       },
       {
@@ -26,7 +26,7 @@ describe("inventory notification service", () => {
         kind: "LOW_STOCK",
         title: "库存预警：Tea",
         description: "Tea 当前库存 1，低于最低库存 3。",
-        href: "/admin/items",
+        href: "/admin/inventory?query=TEA-001",
         priority: 1,
       },
       {
@@ -71,7 +71,7 @@ describe("inventory notification service", () => {
   it("keeps low-stock descriptions explicit about the current and minimum values", async () => {
     const service = new NotificationService({
       getPendingOutboundCount: async () => 0,
-      listLowStock: async () => [{ itemId: "item-1", itemName: "Tea", totalQuantity: "1", minimumStock: "3" }],
+      listLowStock: async () => [{ itemId: "item-1", itemCode: "TEA & 001", itemName: "Tea", totalQuantity: "1", minimumStock: "3" }],
       getPeriodStatus: async () => ({ code: "2026-08", status: "CLOSED" }),
       getStocktakeNotice: async () => ({ count: 0, href: "/admin/stocktake" }),
       getAnomalyCount: async () => 0,
@@ -81,7 +81,23 @@ describe("inventory notification service", () => {
       expect.objectContaining({
         kind: "LOW_STOCK",
         description: expect.stringMatching(/1.*3/),
+        href: "/admin/inventory?query=TEA%20%26%20001",
       }),
     ]);
+  });
+
+  it("removes tasks when their source state is resolved", async () => {
+    let pending = 1;
+    const service = new NotificationService({
+      getPendingOutboundCount: async () => pending,
+      listLowStock: async () => [],
+      getPeriodStatus: async () => ({ code: "2026-08", status: "CLOSED" }),
+      getStocktakeNotice: async () => ({ count: 0, href: "/admin/stocktake" }),
+      getAnomalyCount: async () => 0,
+    });
+
+    await expect(service.list()).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ kind: "PENDING_OUTBOUND" })]));
+    pending = 0;
+    await expect(service.list()).resolves.not.toEqual(expect.arrayContaining([expect.objectContaining({ kind: "PENDING_OUTBOUND" })]));
   });
 });

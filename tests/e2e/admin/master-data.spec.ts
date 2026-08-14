@@ -1,15 +1,16 @@
-import { expect, test } from "@playwright/test";
+﻿import { expect, test } from "@playwright/test";
+import { apiUrl } from "../mobile/mobile-test-helpers";
 
 test.describe("master data administration", () => {
   test("item and warehouse APIs remain administrator-only", async ({ request }) => {
     const [itemList, itemCreate, itemUpdate, itemDeactivate, itemActivate, warehouseList, warehouseUpdate] = await Promise.all([
-      request.get("http://127.0.0.1:3001/admin/items"),
-      request.post("http://127.0.0.1:3001/admin/items", { data: {} }),
-      request.patch("http://127.0.0.1:3001/admin/items/item-1", { data: {} }),
-      request.post("http://127.0.0.1:3001/admin/items/item-1/deactivate"),
-      request.post("http://127.0.0.1:3001/admin/items/item-1/activate"),
-      request.get("http://127.0.0.1:3001/admin/warehouses"),
-      request.patch("http://127.0.0.1:3001/admin/warehouses/warehouse-1", { data: {} }),
+      request.get(apiUrl("/admin/items")),
+      request.post(apiUrl("/admin/items"), { data: {} }),
+      request.patch(apiUrl("/admin/items/item-1"), { data: {} }),
+      request.post(apiUrl("/admin/items/item-1/deactivate")),
+      request.post(apiUrl("/admin/items/item-1/activate")),
+      request.get(apiUrl("/admin/warehouses")),
+      request.patch(apiUrl("/admin/warehouses/warehouse-1"), { data: {} }),
     ]);
 
     expect(itemList.status()).toBe(401);
@@ -26,15 +27,15 @@ test.describe("master data administration", () => {
       { id: "item-1", code: "TEA-0001", name: "Tea leaves", specification: "Iron Goddess", unit: "box", categoryId: "cat-tea", isActive: false },
     ];
 
-    await page.route("http://127.0.0.1:3001/admin/items?includeInactive=true", async (route) => {
+    await page.route(apiUrl("/admin/items?includeInactive=true"), async (route) => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(items) });
     });
-    await page.route("http://127.0.0.1:3001/admin/items/item-1/activate", async (route) => {
+    await page.route(apiUrl("/admin/items/item-1/activate"), async (route) => {
       items = items.map((item) => ({ ...item, isActive: true }));
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(items[0]) });
     });
 
-    await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Fitems");
+    await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Fitems"));
 
     const row = page.locator("tbody tr").first();
     await expect(row.getByRole("button", { name: "编辑", exact: true })).toBeVisible();
@@ -50,16 +51,16 @@ test.describe("master data administration", () => {
       { id: "item-1", code: "TEA-0001", name: "Tea leaves", specification: "Iron Goddess", unit: "box", categoryId: "cat-tea", weComOptionKey: "opt-tea", minimumStock: "3", isActive: true },
     ];
 
-    await page.route("http://127.0.0.1:3001/admin/items?includeInactive=true", async (route) => {
+    await page.route(apiUrl("/admin/items?includeInactive=true"), async (route) => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(items) });
     });
-    await page.route("http://127.0.0.1:3001/admin/items", async (route) => {
+    await page.route(apiUrl("/admin/items"), async (route) => {
       const payload = JSON.parse(route.request().postData() ?? "{}") as Record<string, string>;
       const created = { id: "item-2", isActive: true, ...payload };
       items = [...items, created as (typeof items)[number]];
       await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(created) });
     });
-    await page.route("http://127.0.0.1:3001/admin/items/item-1", async (route) => {
+    await page.route(apiUrl("/admin/items/item-1"), async (route) => {
       await route.fulfill({
         status: 400,
         contentType: "application/json",
@@ -67,7 +68,7 @@ test.describe("master data administration", () => {
       });
     });
 
-    await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Fitems");
+    await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Fitems"));
 
     const initialRow = page.locator("tbody tr").first();
     await expect(initialRow.getByText("Tea leaves", { exact: true })).toBeVisible();
@@ -111,14 +112,14 @@ test.describe("master data administration", () => {
   });
 
   test("item create modal manages focus and preserves input when the API rejects the request", async ({ page }) => {
-    await page.route("http://127.0.0.1:3001/admin/items?includeInactive=true", async (route) => {
+    await page.route(apiUrl("/admin/items?includeInactive=true"), async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify([{ id: "item-1", code: "TEA-0001", name: "Tea leaves", specification: "Iron Goddess", unit: "box", categoryId: "cat-tea", isActive: true }]),
       });
     });
-    await page.route("http://127.0.0.1:3001/admin/items", async (route) => {
+    await page.route(apiUrl("/admin/items"), async (route) => {
       if (route.request().method() !== "POST") {
         await route.fallback();
         return;
@@ -130,7 +131,7 @@ test.describe("master data administration", () => {
       });
     });
 
-    await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Fitems");
+    await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Fitems"));
     const trigger = page.getByRole("button", { name: "新增物品", exact: true });
     await trigger.click();
     const dialog = page.getByRole("dialog", { name: "新增物品" });
@@ -166,16 +167,16 @@ test.describe("master data administration", () => {
       { id: "warehouse-3", code: "WH-03", name: "Warehouse three", isActive: false, isPlaceholder: false },
     ];
 
-    await page.route("http://127.0.0.1:3001/admin/warehouses?includeInactive=true", async (route) => {
+    await page.route(apiUrl("/admin/warehouses?includeInactive=true"), async (route) => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(warehouses) });
     });
-    await page.route("http://127.0.0.1:3001/admin/warehouses/warehouse-1", async (route) => {
+    await page.route(apiUrl("/admin/warehouses/warehouse-1"), async (route) => {
       const payload = JSON.parse(route.request().postData() ?? "{}") as { name: string; isActive: boolean };
       warehouses = warehouses.map((warehouse) => warehouse.id === "warehouse-1" ? { ...warehouse, ...payload, isPlaceholder: false } : warehouse);
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(warehouses[0]) });
     });
 
-    await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Fwarehouses");
+    await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Fwarehouses"));
 
     await page.getByRole("button", { name: "编辑 WH-01" }).click();
     const form = page.locator("form").first();
@@ -188,25 +189,25 @@ test.describe("master data administration", () => {
   });
 
   test("inbound form loads warehouse and item selectors from standard data and preserves input on API errors", async ({ page }) => {
-    await page.route("http://127.0.0.1:3001/admin/warehouses", async (route) => {
+    await page.route(apiUrl("/admin/warehouses"), async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify([{ id: "warehouse-1", code: "WH-01", name: "Main warehouse", isActive: true }]),
       });
     });
-    await page.route("http://127.0.0.1:3001/admin/items", async (route) => {
+    await page.route(apiUrl("/admin/items"), async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify([{ id: "item-1", code: "TEA-0001", name: "Tea leaves", specification: "Iron Goddess", unit: "box", categoryId: "cat-tea", isActive: true }]),
       });
     });
-    await page.route("http://127.0.0.1:3001/admin/inbound", async (route) => {
-      await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "remark is required when unit cost is zero" }) });
+    await page.route(apiUrl("/admin/inbound"), async (route) => {
+      await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "inbound rejected by server" }) });
     });
 
-    await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Finbound");
+    await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Finbound"));
 
     const form = page.locator("form");
     await expect(form.locator("select").nth(0)).toContainText("WH-01 · Main warehouse");
@@ -217,9 +218,11 @@ test.describe("master data administration", () => {
     await form.getByLabel("入库数量 *").fill("5");
     await form.getByLabel("采购单价 *").fill("0");
     await form.getByLabel("采购人").fill("Alex");
+    await form.getByLabel("备注").fill("赠品入库");
     await form.getByRole("button", { name: "保存入库" }).click();
+    await page.getByRole("dialog", { name: "确认入库" }).getByRole("button", { name: "确认入库", exact: true }).click();
 
-    await expect(page.getByText("remark is required when unit cost is zero")).toBeVisible();
+    await expect(page.getByText("inbound rejected by server")).toBeVisible();
     await expect(form.locator("select").nth(0)).toHaveValue("warehouse-1");
     await expect(form.locator("select").nth(1)).toHaveValue("item-1");
     await expect(form.getByLabel("批次号 *")).toHaveValue("BATCH-01");
@@ -228,25 +231,25 @@ test.describe("master data administration", () => {
   });
 
   test("opening stock form loads warehouse and item selectors from standard data and preserves input on API errors", async ({ page }) => {
-    await page.route("http://127.0.0.1:3001/admin/warehouses", async (route) => {
+    await page.route(apiUrl("/admin/warehouses"), async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify([{ id: "warehouse-2", code: "WH-02", name: "Warehouse two", isActive: true }]),
       });
     });
-    await page.route("http://127.0.0.1:3001/admin/items", async (route) => {
+    await page.route(apiUrl("/admin/items"), async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify([{ id: "item-2", code: "MAT-0001", name: "Packing tape", specification: "Wide", unit: "roll", categoryId: "cat-pack", isActive: true }]),
       });
     });
-    await page.route("http://127.0.0.1:3001/admin/opening-stock", async (route) => {
+    await page.route(apiUrl("/admin/opening-stock"), async (route) => {
       await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "remark is required when unit cost is zero" }) });
     });
 
-    await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Fopening-stock");
+    await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Fopening-stock"));
 
     const form = page.locator("form");
     await expect(form.locator("select").nth(0)).toContainText("WH-02 · Warehouse two");

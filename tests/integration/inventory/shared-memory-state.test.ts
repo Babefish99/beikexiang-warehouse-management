@@ -1,7 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildServer } from "../../../apps/api/src/server.js";
 import type { WeComApprovalPayload } from "../../../apps/api/src/infrastructure/wecom/approval-parser.js";
+
+const inheritedPersistenceDriver = process.env.PERSISTENCE_DRIVER;
 
 async function createAdminSessionCookie(app: ReturnType<typeof buildServer>): Promise<string> {
   const response = await app.inject({
@@ -74,6 +76,7 @@ function approvalDetail(): WeComApprovalPayload {
 describe("shared inventory memory state", () => {
   beforeEach(() => {
     vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("PERSISTENCE_DRIVER", "memory");
     vi.stubEnv("LOCAL_AUTH_BYPASS", "true");
     vi.stubEnv("API_BASE_URL", "http://localhost:3001");
     vi.stubEnv("WEB_BASE_URL", "http://localhost:5174");
@@ -89,6 +92,49 @@ describe("shared inventory memory state", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+  });
+
+  afterAll(() => {
+    expect(process.env.PERSISTENCE_DRIVER).toBe(inheritedPersistenceDriver);
+  });
+
+  it("persists a complete authenticated inbound payload into shared memory inventory", async () => {
+    const app = buildServer();
+    try {
+      const cookie = await createAdminSessionCookie(app);
+      const item = await createItem(app, cookie, {
+        code: "PAPER-0001",
+        name: "Printing paper",
+        unit: "box",
+        categoryId: "cat-office",
+      });
+      const response = await app.inject({
+        method: "POST",
+        url: "/admin/inbound",
+        headers: { cookie },
+        payload: {
+          warehouseId: "warehouse-1",
+          itemId: item.id,
+          batchNo: "IN-20260813",
+          quantity: "1.23",
+          unitCost: "0.2",
+          purchasedAt: "2026-08-13",
+          purchaser: "Warehouse administrator",
+          remark: "Mobile inbound acceptance",
+        },
+      });
+
+      expect(response.statusCode).toBe(201);
+      const options = await app.inject({ method: "GET", url: "/admin/transfers/options", headers: { cookie } });
+      expect(options.statusCode).toBe(200);
+      expect(options.json()).toEqual({ balances: [{
+        warehouseId: "warehouse-1",
+        itemId: item.id,
+        batchId: response.json<{ batchIds: string[] }>().batchIds[0],
+        remainingQuantity: "1.23",
+        unitCost: "0.2",
+      }] });
+    } finally { await app.close(); }
   });
 
   it("shows a synchronized approved approval in outbound pending and reuses opening stock in transfer, stocktake, and outbound options", async () => {
