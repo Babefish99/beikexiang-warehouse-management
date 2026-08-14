@@ -234,6 +234,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .outbound-desktop-row { display: grid; grid-template-columns: 1.25fr 1fr 1fr 1fr auto; gap: 10px; align-items: end; }
 .outbound-flow { min-width: 0; display: grid; gap: 14px; }
 .outbound-flow h2 { margin: 0; font-size: 18px; }
+.outbound-status-notice { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 10px; }
+.outbound-status-notice__icon { color: var(--orange); }
+.outbound-status-notice__content { min-width: 0; display: grid; gap: 4px; text-align: left; }
+.outbound-status-notice__content p { margin: 0; line-height: 1.65; }
 .outbound-card-list { display: grid; gap: 12px; }
 .outbound-card { min-width: 0; padding: 16px; display: grid; gap: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow-wrap: anywhere; }
 .outbound-card > span { color: var(--muted); font-size: 13px; }

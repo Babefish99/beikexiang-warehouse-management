@@ -29,6 +29,30 @@ test.beforeEach(async ({ page }) => {
   await page.route(apiUrl("/admin/outbound/pending"), (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(pending) }));
 });
 
+test("groups the mobile outbound empty-state icon and text without a stray selection heading", async ({ page }) => {
+  await page.unroute(apiUrl("/admin/outbound/pending"));
+  await page.route(apiUrl("/admin/outbound/pending"), (route) => route.fulfill({ status: 200, contentType: "application/json", body: "[]" }));
+
+  await loginAs(page, "/admin/outbound", "ADMIN");
+
+  await expect(page.getByText("当前没有待出库审批")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "选择待办" })).toHaveCount(0);
+  const layout = await page.locator(".outbound-status-notice").evaluate((notice) => {
+    const icon = notice.querySelector<SVGElement>("svg")!;
+    const content = notice.querySelector<HTMLElement>(".outbound-status-notice__content")!;
+    const noticeRect = notice.getBoundingClientRect();
+    const iconRect = icon.getBoundingClientRect();
+    const contentRect = content.getBoundingClientRect();
+    return {
+      iconWithinNotice: iconRect.left >= noticeRect.left && iconRect.top >= noticeRect.top,
+      contentAfterIcon: contentRect.left > iconRect.right,
+      sameTopAlignment: Math.abs(iconRect.top - contentRect.top) <= 2,
+      noOverflow: notice.scrollWidth <= notice.clientWidth,
+    };
+  });
+  expect(layout).toEqual({ iconWithinNotice: true, contentAfterIcon: true, sameTopAlignment: true, noOverflow: true });
+});
+
 test("guides allocation across batches, restores a draft, revalidates, and submits once", async ({ page }) => {
   let optionReads = 0;
   let confirmPosts = 0;
