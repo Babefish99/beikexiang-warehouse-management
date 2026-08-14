@@ -1,26 +1,37 @@
 import type { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
 
+import { nextInboundBatchNo } from "../../application/inventory/batch-number.js";
 import type { InventoryEntryStore } from "../../application/inventory/inbound-service.js";
 import { assertPrismaPeriodOpen, runInventoryTransaction } from "./prisma-inventory-transaction.js";
 
 export class PrismaInventoryEntryStore implements InventoryEntryStore {
   constructor(private readonly prisma: PrismaClient) {}
 
-  async recordStockEntry(input: Parameters<InventoryEntryStore["recordStockEntry"]>[0]): Promise<{ orderId: string; batchId: string }> {
-    const orderId = crypto.randomUUID();
-    const batchId = crypto.randomUUID();
-    const lineId = crypto.randomUUID();
-    const ledgerId = crypto.randomUUID();
+  async recordStockEntry(input: Parameters<InventoryEntryStore["recordStockEntry"]>[0]): Promise<{ orderId: string; batchId: string; batchNo: string }> {
     const orderPrefix = input.referenceType === "OPENING_STOCK" ? "OPEN" : "IN";
     const source = input.referenceType === "OPENING_STOCK" ? "OPENING_STOCK" : "INBOUND";
     const receivedAt = new Date(input.occurredAt);
     const quantity = new Decimal(input.quantity);
     const unitCost = new Decimal(input.unitCost);
 
-    await runInventoryTransaction(this.prisma, async (transaction) => {
-      await assertPrismaPeriodOpen(transaction, receivedAt);
-      await transaction.inboundOrder.create({
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const orderId = crypto.randomUUID();
+      const batchId = crypto.randomUUID();
+      const lineId = crypto.randomUUID();
+      const ledgerId = crypto.randomUUID();
+      try {
+        const batchNo = await runInventoryTransaction(this.prisma, async (transaction) => {
+          await assertPrismaPeriodOpen(transaction, receivedAt);
+          const prefix = new Date(input.purchasedAt).toISOString().slice(0, 10).replaceAll("-", "");
+          const existingBatchNos = input.autoGenerateBatchNo
+            ? await transaction.procurementBatch.findMany({ where: { batchNo: { startsWith: `${prefix}-` } }, select: { batchNo: true } })
+            : [];
+          const batchNo = input.autoGenerateBatchNo
+            ? nextInboundBatchNo(input.purchasedAt, existingBatchNos.map((batch) => batch.batchNo))
+            : input.batchNo;
+          if (!batchNo) throw new Error("batch number is required");
+          await transaction.inboundOrder.create({
         data: {
           id: orderId,
           warehouseId: input.warehouseId,
@@ -30,13 +41,13 @@ export class PrismaInventoryEntryStore implements InventoryEntryStore {
           operatorId: input.operatorId?.trim() || "system",
           remark: input.remark,
         },
-      });
-      await transaction.procurementBatch.create({
+          });
+          await transaction.procurementBatch.create({
         data: {
           id: batchId,
           warehouseId: input.warehouseId,
           itemId: input.itemId,
-          batchNo: input.batchNo,
+          batchNo,
           quantity: quantity.toString(),
           remainingQuantity: quantity.toString(),
           unitCost: unitCost.toString(),
@@ -45,8 +56,8 @@ export class PrismaInventoryEntryStore implements InventoryEntryStore {
           expiryDate: input.expiryDate ? new Date(input.expiryDate) : undefined,
           purchaser: input.purchaser,
         },
-      });
-      await transaction.stockBalance.create({
+          });
+          await transaction.stockBalance.create({
         data: {
           warehouseId: input.warehouseId,
           itemId: input.itemId,
@@ -54,8 +65,8 @@ export class PrismaInventoryEntryStore implements InventoryEntryStore {
           remainingQuantity: quantity.toString(),
           unitCost: unitCost.toString(),
         },
-      });
-      await transaction.inboundLine.create({
+          });
+          await transaction.inboundLine.create({
         data: {
           id: lineId,
           inboundOrderId: orderId,
@@ -65,8 +76,8 @@ export class PrismaInventoryEntryStore implements InventoryEntryStore {
           unitCost: unitCost.toString(),
           amount: quantity.mul(unitCost).toFixed(2),
         },
-      });
-      await transaction.inventoryLedgerEntry.create({
+          });
+          await transaction.inventoryLedgerEntry.create({
         data: {
           id: ledgerId,
           warehouseId: input.warehouseId,
@@ -80,10 +91,16 @@ export class PrismaInventoryEntryStore implements InventoryEntryStore {
           referenceId: orderId,
           occurredAt: receivedAt,
         },
-      });
-    });
+          });
+          return batchNo;
+        });
+        return { orderId, batchId, batchNo };
+      } catch (error) {
+        if (!input.autoGenerateBatchNo || !isPrismaUniqueConstraintError(error) || attempt === 2) throw error;
+      }
+    }
 
-    return { orderId, batchId };
+    throw new Error("unreachable");
   }
 
   async recordOpeningStock(input: Parameters<InventoryEntryStore["recordOpeningStock"]>[0]): Promise<{ orderIds: string[]; batchIds: string[] }> {
@@ -143,4 +160,8 @@ export class PrismaInventoryEntryStore implements InventoryEntryStore {
 
     return { orderIds: [...orderIdsByWarehouse.values()], batchIds: rows.map(({ batchId }) => batchId) };
   }
+}
+
+function isPrismaUniqueConstraintError(error: unknown): error is { code: string } {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "P2002";
 }

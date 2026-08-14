@@ -98,7 +98,7 @@ describe("shared inventory memory state", () => {
     expect(process.env.PERSISTENCE_DRIVER).toBe(inheritedPersistenceDriver);
   });
 
-  it("persists a complete authenticated inbound payload into shared memory inventory", async () => {
+  it("assigns daily sequence batch numbers to authenticated inbound entries in shared memory", async () => {
     const app = buildServer();
     try {
       const cookie = await createAdminSessionCookie(app);
@@ -108,29 +108,52 @@ describe("shared inventory memory state", () => {
         unit: "box",
         categoryId: "cat-office",
       });
-      const response = await app.inject({
+      const first = await app.inject({
         method: "POST",
         url: "/admin/inbound",
         headers: { cookie },
         payload: {
           warehouseId: "warehouse-1",
           itemId: item.id,
-          batchNo: "IN-20260813",
           quantity: "1.23",
           unitCost: "0.2",
-          purchasedAt: "2026-08-13",
+          purchasedAt: "2026-08-14",
           purchaser: "Warehouse administrator",
           remark: "Mobile inbound acceptance",
         },
       });
 
-      expect(response.statusCode).toBe(201);
+      const second = await app.inject({
+        method: "POST",
+        url: "/admin/inbound",
+        headers: { cookie },
+        payload: {
+          warehouseId: "warehouse-1",
+          itemId: item.id,
+          quantity: "1.23",
+          unitCost: "0.2",
+          purchasedAt: "2026-08-14",
+          purchaser: "Warehouse administrator",
+          remark: "Mobile inbound acceptance",
+        },
+      });
+
+      expect(first.statusCode).toBe(201);
+      expect(second.statusCode).toBe(201);
+      expect(first.json()).toMatchObject({ batchNo: "20260814-001" });
+      expect(second.json()).toMatchObject({ batchNo: "20260814-002" });
       const options = await app.inject({ method: "GET", url: "/admin/transfers/options", headers: { cookie } });
       expect(options.statusCode).toBe(200);
       expect(options.json()).toEqual({ balances: [{
         warehouseId: "warehouse-1",
         itemId: item.id,
-        batchId: response.json<{ batchIds: string[] }>().batchIds[0],
+        batchId: first.json<{ batchIds: string[] }>().batchIds[0],
+        remainingQuantity: "1.23",
+        unitCost: "0.2",
+      }, {
+        warehouseId: "warehouse-1",
+        itemId: item.id,
+        batchId: second.json<{ batchIds: string[] }>().batchIds[0],
         remainingQuantity: "1.23",
         unitCost: "0.2",
       }] });
