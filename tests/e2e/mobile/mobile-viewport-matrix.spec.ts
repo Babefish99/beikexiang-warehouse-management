@@ -161,7 +161,6 @@ test("dismiss and confirm modals trap focus, lock scroll, close with Escape, and
 
   await page.getByLabel("仓库 *").selectOption("warehouse-long");
   await page.getByLabel("物品 *").selectOption("item-long");
-  await page.getByLabel("批次号 *").fill(longBatch);
   await page.getByLabel("采购日期 *").fill("2026-08-13");
   await page.getByLabel("入库数量 *").fill("1");
   await page.getByLabel("采购单价 *").fill("2");
@@ -199,7 +198,6 @@ test("browser Back closes dismiss and confirm modals before leaving the current 
 
   await page.getByLabel("仓库 *").selectOption("warehouse-long");
   await page.getByLabel("物品 *").selectOption("item-long");
-  await page.getByLabel("批次号 *").fill(longBatch);
   await page.getByLabel("采购日期 *").fill("2026-08-13");
   await page.getByLabel("入库数量 *").fill("1");
   await page.getByLabel("采购单价 *").fill("2");
@@ -243,7 +241,6 @@ test("a busy confirm modal rearms Back protection when its close callback refuse
   const inboundUrl = page.url();
   await page.getByLabel("仓库 *").selectOption("warehouse-long");
   await page.getByLabel("物品 *").selectOption("item-long");
-  await page.getByLabel("批次号 *").fill(longBatch);
   await page.getByLabel("采购日期 *").fill("2026-08-13");
   await page.getByLabel("入库数量 *").fill("1");
   await page.getByLabel("采购单价 *").fill("2");
@@ -273,7 +270,6 @@ test("overlapping real modals close top to bottom before browser Back leaves the
   const inboundUrl = page.url();
   await page.getByLabel("仓库 *").selectOption("warehouse-long");
   await page.getByLabel("物品 *").selectOption("item-long");
-  await page.getByLabel("批次号 *").fill(longBatch);
   await page.getByLabel("采购日期 *").fill("2026-08-13");
   await page.getByLabel("入库数量 *").fill("1");
   await page.getByLabel("采购单价 *").fill("2");
@@ -310,7 +306,6 @@ test("programmatic underlying close preserves top modal scroll and focus ownersh
   await loginAs(page, "/admin/inbound", "ADMIN");
   await page.getByLabel("仓库 *").selectOption("warehouse-long");
   await page.getByLabel("物品 *").selectOption("item-long");
-  await page.getByLabel("批次号 *").fill(longBatch);
   await page.getByLabel("采购日期 *").fill("2026-08-13");
   await page.getByLabel("入库数量 *").fill("1");
   await page.getByLabel("采购单价 *").fill("2");
@@ -402,7 +397,6 @@ test("a failed modal confirmation scrolls to and focuses the first error", async
   await openInbound(page);
   await page.getByLabel("仓库 *").selectOption("warehouse-long");
   await page.getByLabel("物品 *").selectOption("item-long");
-  await page.getByLabel("批次号 *").fill(longBatch);
   await page.getByLabel("采购日期 *").fill("2026-08-13");
   await page.getByLabel("入库数量 *").fill("1");
   await page.getByLabel("采购单价 *").fill("2");
