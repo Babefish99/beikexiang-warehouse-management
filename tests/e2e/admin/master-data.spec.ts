@@ -212,20 +212,23 @@ test.describe("master data administration", () => {
     const form = page.locator("form");
     await expect(form.locator("select").nth(0)).toContainText("WH-01 · Main warehouse");
     await expect(form.locator("select").nth(1)).toContainText("TEA-0001 · Tea leaves");
+    await expect(form.getByLabel("批次号 *")).toHaveCount(0);
+    await expect(form.getByText("按采购日期自动生成，例如 20260814-001")).toBeVisible();
     await form.locator("select").nth(0).selectOption("warehouse-1");
     await form.locator("select").nth(1).selectOption("item-1");
-    await form.getByLabel("批次号 *").fill("BATCH-01");
     await form.getByLabel("入库数量 *").fill("5");
     await form.getByLabel("采购单价 *").fill("0");
     await form.getByLabel("采购人").fill("Alex");
     await form.getByLabel("备注").fill("赠品入库");
     await form.getByRole("button", { name: "保存入库" }).click();
+    const inboundRequest = page.waitForRequest(apiUrl("/admin/inbound"));
     await page.getByRole("dialog", { name: "确认入库" }).getByRole("button", { name: "确认入库", exact: true }).click();
+    expect((await inboundRequest).postDataJSON()).not.toHaveProperty("batchNo");
 
     await expect(page.getByText("inbound rejected by server")).toBeVisible();
     await expect(form.locator("select").nth(0)).toHaveValue("warehouse-1");
     await expect(form.locator("select").nth(1)).toHaveValue("item-1");
-    await expect(form.getByLabel("批次号 *")).toHaveValue("BATCH-01");
+    await expect(form.getByLabel("批次号 *")).toHaveCount(0);
     await expect(form.getByLabel("采购单价 *")).toHaveValue("0");
     await expect(form.getByLabel("采购人")).toHaveValue("Alex");
   });
