@@ -6,13 +6,13 @@
 
 ## 1. 当前结论
 
-项目已经具备轻量仓库系统的主要业务代码、PostgreSQL 持久化和阿里云部署能力，公网域名为 `https://warehouse.beikexiang.cn`。手机响应式范围已本地合并到 `codex/production-deployment` 并重新完成非 Docker 验证；**本地/手机验收已通过，仍未 Push、未部署，等待用户决定下一步**。系统整体仍属于“部署并联调阶段”，尚不能判定为正式生产验收完成，主要原因是：
+项目已经具备轻量仓库系统的主要业务代码、PostgreSQL 持久化和阿里云部署能力，公网域名为 `https://warehouse.beikexiang.cn`。手机响应式范围已本地合并到 `codex/production-deployment`、完成本地/手机验收，并已在 2026-08-14 发布到服务器；**当前未 Push**。服务器内部的数据库备份、迁移、API、Caddy 与发布记录均已核验，但系统整体仍属于“部署并联调阶段”，尚不能判定为正式生产验收完成，主要原因是：
 
 - 企业微信可信域名、可信 IP 和审批回调仍受 ICP 备案审核进度影响。
 - 企业微信真实登录及“审批通过 → 自动生成待出库单 → 实际出库 → 报表”的全链路尚未验收。
 - 三个仓库的正式名称和生产期初库存尚未完成最终核对与导入验收。
 - 原开发分支与本地生产部署分支仍有独立历史；后续发布应以本地生产部署分支为唯一基线继续整合。
-- 本轮手机响应式实现没有连接生产数据库、修改生产 Secret、推送或部署；Docker Desktop VM 当前为 Off，部署门禁未运行。
+- 本轮手机响应式实现未修改生产 Secret；本地 Docker Desktop VM 仍为 Off，但服务器按生产发布脚本完成了备份、构建、迁移和服务健康验证。当前电脑访问公网 HTTPS 仍被连接重置，不能把该客户端的公网探测结果误记为通过。
 - 正常登记入库已改为由服务端按采购日期生成全局日序批次号；本轮手机端把采购日期放在批次号之前，并显示只读的 `YYYYMMDD-001` 格式预览，最终号码仍由服务端确认。出库空态已把状态图标与文字成组对齐，并移除无审批时孤立的“选择待办”标题。用户已完成本地/手机验收；这仍不能据此视为上线或生产验收。
 
 ## 2. 产品范围与已确认规则
@@ -120,12 +120,12 @@ D:\桌面\仓库
 - 基线提交：`270d7f8 fix: use company logo in warehouse sidebar`
 - 当前存在用户已有未提交修改和未跟踪计划文档；本轮未读取后改写、未清理、未提交。
 
-### 5.2 生产部署工作区（本地已合并，未部署）
+### 5.2 生产部署工作区（已发布，未 Push）
 
 - 路径：`D:\桌面\仓库\.worktrees\production-deployment`
 - 分支：`codex/production-deployment`
 - 原基线提交：`5f17963 fix: harden WeCom template deployment guard`
-- 当前本地合并提交：`de6c69d merge: mobile responsive adaptation`。后续本地视觉收敛提交：`a305f6d`、`f856ad0`、`7a97ca0`、`22b8592`（日期与批次预览）和 `1706971`（出库状态对齐）；均仅在本地分支，未 Push、未部署。
+- 当前发布源提交：`fada1d6738d6ddd30db7eefb3de60e06771f7fc7`（手机验收记录所在提交）。合并提交为 `de6c69d`；后续本地视觉收敛提交包括 `a305f6d`、`f856ad0`、`7a97ca0`、`22b8592`（日期与批次预览）和 `1706971`（出库状态对齐）。发布源未 Push。
 - 本轮入库批次与移动视觉实现链路：`1deb803` → `ab03e9e`/`b6d95d0`（规格与计划）→ `cbffdf7` → `9a49b3a` → `ad6dada` → `f0f0ee0` → `c015088` → `5c44967`（移除陈旧桌面入库批次字段测试）。本状态记录随后作为同一集成分支的验证提交；原开发工作区保持未修改。
 - 该分支包含生产 Prisma 接线、部署脚本、备份/恢复、Caddy 和企业微信生产配置保护。
 
@@ -135,7 +135,7 @@ D:\桌面\仓库
 - 创建基线：`codex/production-deployment@5f17963`
 - 实现规格：`docs/superpowers/specs/2026-08-13-mobile-responsive-design.md`
 - 本轮实现提交：`3837dfe fix: close mobile verification gaps`、`8c8f8a7 test: isolate legacy end-to-end specs`。
-- 状态：已通过 `de6c69d` 合并到本地生产部署分支；不推送、不部署。来源工作区和本地分支可在合并后验证完成时清理，不影响原开发工作区。
+- 状态：已通过 `de6c69d` 合并到生产部署分支，并随发布源 `fada1d6` 发布；仍未 Push。来源工作区和本地分支可在后续确认后清理，不影响原开发工作区。
 
 ### 5.4 关键分支风险
 
@@ -153,7 +153,7 @@ D:\桌面\仓库
 - 服务器目录：`/opt/beikexiang-warehouse`
 - Compose 项目：`warehouse-prod`
 - 生产 Compose 文件：`docker-compose.prod.yml`
-- 当前已知镜像版本：`20260812T032442Z-5f17963-436675`
+- 当前发布版本：`20260814T093837Z-fada1d6738d6-8012`（来源 `fada1d6738d6`，本机构建镜像）。上一版本：`20260812T032442Z-5f17963-436675`。
 - 运行服务：Web/Caddy、API、PostgreSQL；数据库和 API 不直接暴露公网端口。
 - PostgreSQL 使用 Docker 持久卷；应用容器升级不应删除数据卷。
 
@@ -163,12 +163,15 @@ D:\桌面\仓库
 
 - 运行配置保存在服务器受限文件中，权限应保持 `600`；敏感值不得复制到 Git 或本状态文档。
 - 正式环境必须关闭本地开发登录。
-- 临时 SSH 密钥已经移除；VPN/SSH 不稳定时优先通过阿里云 Workbench 或云助手执行服务器命令。
+- 本次发布曾短暂使用受限 SSH 公钥传输发布包；发布后已从服务器授权文件和本机临时目录移除私钥。VPN/SSH 不稳定时优先通过阿里云 Workbench 或云助手执行服务器命令。
 - 部署脚本支持发布前 PostgreSQL 备份、镜像回滚和数据库恢复；备份脚本默认保留 14 天。
 - 是否已配置每日自动备份任务仍需在正式投产前核验，不能仅依赖“发布前备份”。
 
 ### 6.3 最近核验
 
+- 2026-08-14 已发布 `20260814T093837Z-fada1d6738d6-8012`：发布脚本先生成可读备份清单的 PostgreSQL 备份，再依次构建 migrate、API、Web 镜像，执行迁移/seed 并启动服务。发布前备份文件和 manifest 已存在；未删除数据卷，未触碰 `/opt/yuemuhui/deploy`。
+- 发布后独立核验：`warehouse-prod` 的 API、PostgreSQL、Web 均为 `running healthy`；Compose 配置校验通过；容器内 API 与经 Caddy、生产主机名解析的 `/health` 都返回 200，响应含 `persistenceDriver: prisma` 与数据库 `ok`；当前 release 记录来源为 `fada1d6738d6`。
+- 当前电脑对 `https://warehouse.beikexiang.cn/health` 的请求仍在 TLS 阶段被重置（发布前后均复现），因此公网外部客户端探测未通过，需在后续网络/入口检查中单独确认，不能与服务器内部健康核验混写。
 - 上一次部署记录显示 API、PostgreSQL、Web 均健康，公网首页和 `/health` 返回 200，公网仅暴露 22/80/443。
 - 2026-08-13 本地再次查询时，DNS 仍正确解析到 `106.14.224.213`，但当前电脑到 HTTPS 的请求被重置，因此线上实时健康状态需要在下一次服务器操作前重新核验。
 - 生产分支上一次完整验证记录：208 个测试通过、16 个跳过，类型检查、构建和 Compose 校验通过。该结果只对应提交 `5f17963`。
@@ -292,6 +295,14 @@ Task 8 首轮完整 E2E 曾为 75 passed、29 failed；29 个失败全部来自�
 - 差异检查：`git diff --check 1deb803..HEAD` 无输出、exit 0。
 - Docker/deployment：`DockerDesktopVM State=Off, Status=Operating normally`；未运行 Docker/部署测试、Compose 检查，也未重启 Docker。
 - 本地验收边界：未停止或修改用户验收监听的 5481/5482；未运行 Push、部署、服务器操作或生产 Secret/数据库操作。用户已确认本地/手机验收通过；当前继续保持本地状态，等待用户决定是否进入后续发布流程。
+
+### 10.6 服务器发布与交付核验（2026-08-14）
+
+- 发布源：`fada1d6738d6ddd30db7eefb3de60e06771f7fc7`；服务器 release：`20260814T093837Z-fada1d6738d6-8012`。上传前发布包 SHA-256 为 `8964f7470f02e36a9d4ba0af904e35c0e512db5fc93f11227125dc517653d9cd`，服务器校验值一致。
+- 发布前置：目标目录存在、生产环境文件权限为 `600`、API/PostgreSQL/Web 初始均健康、当前与上一 release 记录可读；隔离 staging 配置校验成功。发布脚本的预升级 PostgreSQL 备份及 manifest 均通过存在性核验。
+- 新鲜服务器验证：`docker compose ... config --quiet` exit 0；`warehouse-prod` 的 API、PostgreSQL、Web 均为 `running healthy`；API 健康端点与强制解析至 `127.0.0.1` 的 Caddy HTTPS `/health` 均为 HTTP 200，报告 `prisma` 持久化和数据库 `ok`；release metadata 的 `source_revision=fada1d6738d6`。
+- 安全与清理：未 Push、未改生产 Secret、未删除数据卷、未触碰 `/opt/yuemuhui/deploy`。临时 SSH 公钥、服务器临时发布包与隔离 staging 目录均已移除；本机临时私钥已移除。代码归档副本仍留在受 Git 忽略的本机临时目录，未含生产配置或 Secret，也不会提交或上传。
+- 外部入口边界：本机 `curl` 对公网 HTTPS 在发布前后均被连接重置，故未把它记为公网通过；服务器内部经 Caddy 的生产主机名健康验证已通过。企业微信真实全链路、ICP 相关配置与生产主数据验收仍待完成。
 
 ## 11. 文档维护规则
 
