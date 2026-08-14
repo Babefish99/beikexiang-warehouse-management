@@ -80,6 +80,7 @@ describe.skipIf(!databaseUrl)("Prisma application restart persistence", () => {
         "prisma/migrations/00000000000000_init/migration.sql",
         "prisma/migrations/20260811163000_production_persistence/migration.sql",
         "prisma/migrations/20260811171500_stocktake_quantity_snapshots/migration.sql",
+        "prisma/migrations/20260814110000_inbound_batch_sequences/migration.sql",
       ]) {
         await migrationClient.query(readFileSync(resolve(process.cwd(), migration), "utf8"));
       }

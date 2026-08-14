@@ -3,7 +3,7 @@ import { Decimal } from "decimal.js";
 
 import { nextInboundBatchNo } from "../../application/inventory/batch-number.js";
 import type { InventoryEntryStore } from "../../application/inventory/inbound-service.js";
-import { assertPrismaPeriodOpen, runInventoryTransaction } from "./prisma-inventory-transaction.js";
+import { assertPrismaPeriodOpen, RetryableInventoryTransactionError, runInventoryTransaction, type InventoryTransactionClient } from "./prisma-inventory-transaction.js";
 
 export class PrismaInventoryEntryStore implements InventoryEntryStore {
   constructor(private readonly prisma: PrismaClient) {}
@@ -23,12 +23,8 @@ export class PrismaInventoryEntryStore implements InventoryEntryStore {
       try {
         const batchNo = await runInventoryTransaction(this.prisma, async (transaction) => {
           await assertPrismaPeriodOpen(transaction, receivedAt);
-          const prefix = new Date(input.purchasedAt).toISOString().slice(0, 10).replaceAll("-", "");
-          const existingBatchNos = input.autoGenerateBatchNo
-            ? await transaction.procurementBatch.findMany({ where: { batchNo: { startsWith: `${prefix}-` } }, select: { batchNo: true } })
-            : [];
           const batchNo = input.autoGenerateBatchNo
-            ? nextInboundBatchNo(input.purchasedAt, existingBatchNos.map((batch) => batch.batchNo))
+            ? await claimInboundBatchNo(transaction, input.purchasedAt)
             : input.batchNo;
           if (!batchNo) throw new Error("batch number is required");
           await transaction.inboundOrder.create({
@@ -96,7 +92,7 @@ export class PrismaInventoryEntryStore implements InventoryEntryStore {
         });
         return { orderId, batchId, batchNo };
       } catch (error) {
-        if (!input.autoGenerateBatchNo || !isPrismaUniqueConstraintError(error) || attempt === 2) throw error;
+        if (!input.autoGenerateBatchNo || !isRetryableBatchNumberError(error) || attempt === 2) throw error;
       }
     }
 
@@ -162,6 +158,31 @@ export class PrismaInventoryEntryStore implements InventoryEntryStore {
   }
 }
 
-function isPrismaUniqueConstraintError(error: unknown): error is { code: string } {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "P2002";
+async function claimInboundBatchNo(transaction: InventoryTransactionClient, purchasedAt: string): Promise<string> {
+  const date = new Date(purchasedAt);
+  const prefix = date.toISOString().slice(0, 10).replaceAll("-", "");
+  const sequence = await transaction.inboundBatchSequence.findUnique({ where: { purchasedDate: prefix } });
+
+  if (sequence) {
+    const next = await transaction.inboundBatchSequence.update({
+      where: { purchasedDate: prefix },
+      data: { lastSequence: { increment: 1 } },
+      select: { lastSequence: true },
+    });
+    return `${prefix}-${String(next.lastSequence).padStart(3, "0")}`;
+  }
+
+  const existingBatchNos = await transaction.procurementBatch.findMany({
+    where: { batchNo: { startsWith: `${prefix}-` } },
+    select: { batchNo: true },
+  });
+  const batchNo = nextInboundBatchNo(purchasedAt, existingBatchNos.map((batch) => batch.batchNo));
+  const lastSequence = Number(batchNo.slice(prefix.length + 1));
+  await transaction.inboundBatchSequence.create({ data: { purchasedDate: prefix, lastSequence } });
+  return batchNo;
+}
+
+function isRetryableBatchNumberError(error: unknown): boolean {
+  return error instanceof RetryableInventoryTransactionError
+    || (typeof error === "object" && error !== null && "code" in error && error.code === "P2002");
 }

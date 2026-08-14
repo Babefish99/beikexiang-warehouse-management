@@ -11,6 +11,10 @@ describe("nextInboundBatchNo", () => {
     expect(nextInboundBatchNo("2026-08-14T00:00:00.000Z", ["20260814-001", "20260814-009"])).toBe("20260814-010");
   });
 
+  it("continues beyond sequence 999", () => {
+    expect(nextInboundBatchNo("2026-08-14T00:00:00.000Z", ["20260814-1000"])).toBe("20260814-1001");
+  });
+
   it("rejects an invalid purchase date", () => {
     expect(() => nextInboundBatchNo("invalid", [])).toThrow("purchasedAt is invalid");
   });

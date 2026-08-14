@@ -4,7 +4,7 @@ export function nextInboundBatchNo(purchasedAt: string, existingBatchNos: Iterab
 
   const prefix = date.toISOString().slice(0, 10).replaceAll("-", "");
   const highest = [...existingBatchNos]
-    .map((value) => new RegExp(`^${prefix}-(\\d{3})$`).exec(value)?.[1])
+    .map((value) => new RegExp(`^${prefix}-(\\d+)$`).exec(value)?.[1])
     .filter((value): value is string => Boolean(value))
     .reduce((max, value) => Math.max(max, Number(value)), 0);
 

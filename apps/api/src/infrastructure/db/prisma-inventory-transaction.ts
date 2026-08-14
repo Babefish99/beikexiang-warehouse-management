@@ -2,6 +2,14 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 export type InventoryTransactionClient = Prisma.TransactionClient;
 
+export class RetryableInventoryTransactionError extends Error {
+  readonly code = "P2034";
+
+  constructor(cause: unknown) {
+    super("stock balance changed; retry transaction", { cause });
+  }
+}
+
 export function accountingPeriodCode(date: Date): string {
   return date.toISOString().slice(0, 7);
 }
@@ -25,7 +33,7 @@ export async function runInventoryTransaction<T>(prisma: PrismaClient, operation
     return await prisma.$transaction(operation, { isolationLevel: "Serializable" });
   } catch (error) {
     if ((error as { code?: string }).code === "P2034") {
-      throw new Error("stock balance changed; retry transaction");
+      throw new RetryableInventoryTransactionError(error);
     }
     throw error;
   }

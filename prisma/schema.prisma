@@ -160,6 +160,11 @@ model ProcurementBatch {
   @@unique([warehouseId, itemId, batchNo])
 }
 
+model InboundBatchSequence {
+  purchasedDate String @id
+  lastSequence  Int
+}
+
 model StockBalance {
   id                String           @id @default(cuid())
   warehouseId       String

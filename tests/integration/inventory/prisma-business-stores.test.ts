@@ -26,6 +26,7 @@ import { seedStructuralData } from "../../../prisma/seed.js";
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const schemaName = `warehouse_task3_${process.pid}_${Date.now()}`;
 const itemId = "task3-item";
+const secondItemId = "task3-item-2";
 
 function schemaUrl(connectionString: string): string {
   const url = new URL(connectionString);
@@ -54,6 +55,7 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
       await migrationClient.query(readFileSync(resolve(process.cwd(), "prisma/migrations/00000000000000_init/migration.sql"), "utf8"));
       await migrationClient.query(readFileSync(resolve(process.cwd(), "prisma/migrations/20260811163000_production_persistence/migration.sql"), "utf8"));
       await migrationClient.query(readFileSync(resolve(process.cwd(), "prisma/migrations/20260811171500_stocktake_quantity_snapshots/migration.sql"), "utf8"));
+      await migrationClient.query(readFileSync(resolve(process.cwd(), "prisma/migrations/20260814110000_inbound_batch_sequences/migration.sql"), "utf8"));
     } finally {
       migrationClient.release();
       await migrationPool.end();
@@ -68,6 +70,16 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
         unit: "box",
         categoryId: "category-bj",
         weComOptionKey: "task3-option",
+      },
+    });
+    await prisma.item.create({
+      data: {
+        id: secondItemId,
+        code: "BJ-TASK3-2",
+        name: "Task 3 second test item",
+        unit: "box",
+        categoryId: "category-bj",
+        weComOptionKey: "task3-option-2",
       },
     });
   });
@@ -86,6 +98,7 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     await prisma.inboundOrder.deleteMany();
     await prisma.stockBalance.deleteMany();
     await prisma.procurementBatch.deleteMany();
+    await prisma.inboundBatchSequence.deleteMany();
     await prisma.approvalLine.deleteMany();
     await prisma.approvalRequest.deleteMany();
     await prisma.syncAttempt.deleteMany();
@@ -101,12 +114,13 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     }
   });
 
-  async function recordStock(options: { warehouseId?: string; batchNo?: string; quantity?: string; source?: "INBOUND" | "OPENING_STOCK" } = {}) {
+  async function recordStock(options: { warehouseId?: string; itemId?: string; batchNo?: string; autoGenerateBatchNo?: boolean; quantity?: string; source?: "INBOUND" | "OPENING_STOCK" } = {}) {
     const source = options.source ?? "INBOUND";
     return new PrismaInventoryEntryStore(prisma).recordStockEntry({
       warehouseId: options.warehouseId ?? "warehouse-1",
-      itemId,
-      batchNo: options.batchNo ?? `batch-${crypto.randomUUID()}`,
+      itemId: options.itemId ?? itemId,
+      batchNo: options.autoGenerateBatchNo ? undefined : options.batchNo ?? `batch-${crypto.randomUUID()}`,
+      autoGenerateBatchNo: options.autoGenerateBatchNo ?? false,
       quantity: options.quantity ?? "10",
       unitCost: "12.5",
       purchasedAt: "2026-08-11T01:00:00.000Z",
@@ -117,6 +131,29 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
       operatorId: "task3-operator",
     });
   }
+
+  it("assigns globally unique daily batch numbers across concurrent warehouses and items", async () => {
+    const first = await recordStock({ autoGenerateBatchNo: true });
+    const [second, third] = await Promise.all([
+      recordStock({ autoGenerateBatchNo: true, warehouseId: "warehouse-1", itemId: secondItemId }),
+      recordStock({ autoGenerateBatchNo: true, warehouseId: "warehouse-2", itemId }),
+    ]);
+
+    expect([first.batchNo, second.batchNo, third.batchNo].sort()).toEqual([
+      "20260811-001",
+      "20260811-002",
+      "20260811-003",
+    ]);
+    await expect(prisma.procurementBatch.findMany({
+      where: { batchNo: { startsWith: "20260811-" } },
+      select: { batchNo: true },
+      orderBy: { batchNo: "asc" },
+    })).resolves.toEqual([
+      { batchNo: "20260811-001" },
+      { batchNo: "20260811-002" },
+      { batchNo: "20260811-003" },
+    ]);
+  });
 
   async function createApproval(quantity = "5") {
     await prisma.role.upsert({

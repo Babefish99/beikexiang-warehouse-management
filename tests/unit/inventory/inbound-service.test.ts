@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { InMemoryInventoryEntryStore, InboundService } from "../../../apps/api/src/application/inventory/inbound-service.js";
 
-const validInput = { warehouseId: "wh-1", itemId: "item-1", batchNo: "B-2026-01", quantity: "12", unitCost: "35.50", purchasedAt: "2026-08-01", purchaser: "purchasing" };
+const validInput = { warehouseId: "wh-1", itemId: "item-1", quantity: "12", unitCost: "35.50", purchasedAt: "2026-08-01", purchaser: "purchasing" };
 
 const masterData = {
   warehouseService: {
@@ -20,8 +20,9 @@ describe("inbound service", () => {
 
     const result = await service.create(validInput);
 
+    expect(result).toMatchObject({ batchNo: "20260801-001" });
     expect(result.batchIds).toHaveLength(1);
-    expect(store.batches()).toMatchObject([{ batchNo: "B-2026-01", quantity: "12", remainingQuantity: "12", unitCost: "35.5" }]);
+    expect(store.batches()).toMatchObject([{ batchNo: "20260801-001", quantity: "12", remainingQuantity: "12", unitCost: "35.5" }]);
     expect(store.ledger()).toMatchObject([{ type: "INBOUND", quantity: "12", amount: "426.00" }]);
   });
 
