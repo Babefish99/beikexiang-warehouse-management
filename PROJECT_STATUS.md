@@ -336,6 +336,7 @@ Task 8 首轮完整 E2E 曾为 75 passed、29 failed；29 个失败全部来自�
 - TDD 证据：新增覆盖文件断言后，`corepack pnpm exec vitest run tests/deployment/production-config.test.ts` 首次为 11 项中 1 项失败，错误为 `expected '' to contain 'web:'`；新增最小覆盖文件后同一命令为 11/11 通过。
 - 新鲜本地门禁：Docker Engine 客户端/服务端均为 27.2.0；以 `deploy/.env.production.example` 和临时 `FRONTDOOR_IMAGE=beikexiang/frontdoor:local` 执行 `docker compose ... config --quiet` exit 0，未启动、构建、拉取容器或连接服务器。随后部署配置 Vitest 11/11、`corepack pnpm typecheck`、`corepack pnpm build`（Web 转换 1613 个模块）及 `git diff --check HEAD~1..HEAD` 均 exit 0。
 - 提交：设计规格为 `1deb36b docs: specify shared frontdoor isolation`，本地配置为 `77619dc fix(deploy): preserve fixed assets frontdoor`。本次没有 Push、部署、服务器命令、生产数据库、生产 Secret 或企业微信操作；服务器仍运行 `20260814T093837Z-fada1d6738d6-8012`。授权发布前仍须重新核验服务器容器/共享网络，并经 Caddy 对两个主机名分别执行健康检查。
+- 分支收口复验：默认文件并行的完整 Vitest 首次在既有 `tests/deployment/deployment-scripts.test.ts` 中出现一次 `spawnSync docker ETIMEDOUT`，失败点是本机 Docker 运行缓存的 `node:24-alpine` 进行 Linux `/bin/sh` 打包验证。该单文件随后为 4/4 通过（14.14s）；Docker Engine 27.2.0 与本地镜像均可用，且最近提交未修改该测试或打包脚本。关闭文件并行后完整套件为 48 个文件通过、3 个文件跳过，258 个测试通过、17 个跳过、0 个失败（43.86s）。这是本机 Docker 调度的时序风险，非本次共享前门产品行为回归；后续应在 Docker 空闲时复验默认并行套件后再决定是否调整测试并行策略。
 
 ## 11. 文档维护规则
 
