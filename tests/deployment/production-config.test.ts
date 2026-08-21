@@ -119,6 +119,26 @@ describe("production deployment configuration", () => {
     expect(webService).not.toContain("http://127.0.0.1/health");
   });
 
+  it("keeps warehouse and fixed-assets hosts on separate upstreams", async () => {
+    const caddyfile = await readText("deploy/Caddyfile");
+    const [warehouseSite, assetsSite] = caddyfile.split(
+      /^assets\.beikexiang\.cn\s*\{$/m,
+    );
+
+    expect(warehouseSite).toContain("reverse_proxy api:3001");
+    expect(assetsSite).toContain("reverse_proxy beikexiang-assets:8088");
+    expect(assetsSite).not.toContain("reverse_proxy api:3001");
+  });
+
+  it("keeps the fixed-assets front-door override limited to the Caddy web service", async () => {
+    const override = await readText("deploy/frontdoor-assets.override.yml");
+
+    expect(override).toContain("web:");
+    expect(override).toContain("FRONTDOOR_IMAGE");
+    expect(override).toContain("build: null");
+    expect(override).not.toMatch(/^\s+(?:api|migrate|postgres):/m);
+  });
+
   it("keeps the local smoke deployment on an isolated loopback port", async () => {
     const smokeCompose = await readText("tests/deployment/docker-compose.smoke.yml");
 

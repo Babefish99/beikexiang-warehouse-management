@@ -1,0 +1,4 @@
+services:
+  web:
+    image: ${FRONTDOOR_IMAGE:?FRONTDOOR_IMAGE is required}
+    build: null

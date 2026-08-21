@@ -40,3 +40,17 @@
 		file_server
 	}
 }
+
+assets.beikexiang.cn {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(self), microphone=(), geolocation=()"
+		-Server
+	}
+
+	reverse_proxy beikexiang-assets:8088
+}
