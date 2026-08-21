@@ -13,8 +13,8 @@
 - 企业微信可信域名、可信 IP 和审批回调仍受 ICP 备案审核进度影响。
 - 企业微信真实登录及“审批通过 → 自动生成待出库单 → 实际出库 → 报表”的全链路尚未验收。
 - 三个仓库的正式名称和生产期初库存尚未完成最终核对与导入验收。
-- 原开发分支与生产部署分支的代码历史已经通过本地正常合并收敛；`a03e87e` 是该历史合并提交，当前集成头为 `feat/warehouse-system@77619dc`。服务器仍运行 2026-08-14 的 `fada1d6` 发布版本。
-- 2026-08-14 的手机响应式验收环境中本地 Docker Desktop VM 曾为 Off；2026-08-21 本机 Docker Engine 27.2.0 已可用，并仅用于共享前门的 Compose 配置解析，未构建或启动容器。两轮本地工作均未修改生产 Secret。当前电脑访问公网 HTTPS 仍被连接重置，不能把该客户端的公网探测结果误记为通过。
+- 原开发分支与生产部署分支的代码历史已经通过本地正常合并收敛；`a03e87e` 是该历史合并提交。共享前门实现为 `77619dc`，Docker 测试时序记录为 `77e722b`；服务器仍运行 2026-08-14 的 `fada1d6` 发布版本。
+- 2026-08-14 的手机响应式验收环境中本地 Docker Desktop VM 曾为 Off；2026-08-21 本机 Docker Engine 27.2.0 已可用，并仅用于共享前门的 Compose 配置解析，未构建或启动容器。两轮本地工作均未修改生产 Secret。同日后续公网复验已确认当前电脑上两个域名的受信 HTTPS 与健康端点可用；此前的本机 TLS 连接重置作为历史现象保留，手机公网复验仍待完成。
 - 正常登记入库已改为由服务端按采购日期生成全局日序批次号；本轮手机端把采购日期放在批次号之前，并显示只读的 `YYYYMMDD-001` 格式预览，最终号码仍由服务端确认。出库空态已把状态图标与文字成组对齐，并移除无审批时孤立的“选择待办”标题。用户已完成本地/手机验收；这仍不能据此视为上线或生产验收。
 
 ## 2. 产品范围与已确认规则
@@ -119,7 +119,7 @@ D:\桌面\仓库
 
 - 路径：`D:\桌面\仓库`
 - 分支：`feat/warehouse-system`
-- 当前 HEAD：`77619dc fix(deploy): preserve fixed assets frontdoor`；它在 `a03e87e merge: integrate mobile responsive release branch` 的已合并集成基线上新增了共享 Caddy 前门本地配置。
+- 已交付的共享前门代码提交：`77619dc fix(deploy): preserve fixed assets frontdoor`；它在 `a03e87e merge: integrate mobile responsive release branch` 的已合并集成基线上新增了共享 Caddy 前门本地配置。其后的 `77e722b` 只补充 Docker 测试时序交接记录。
 - 合并前与生产分支重叠的未提交内容已保存在 `stash@{0}`（`codex pre-mobile-merge backup 2026-08-21`）作为安全备份；未自动恢复或删除。
 - 用户原有的未跟踪计划文档、演示文稿检查文件和临时演示目录仍保留在工作区，未改写、未清理、未提交。
 
@@ -142,7 +142,7 @@ D:\桌面\仓库
 
 ### 5.4 合并后的基线规则
 
-开发与生产部署代码已在 `feat/warehouse-system@a03e87e` 完成本地正常合并，生产持久化、部署能力和手机响应式改动均已进入当前分支。其后的当前 HEAD `77619dc` 还包含共享 Caddy 前门的固定资产站点隔离。服务器仍对应旧发布源 `fada1d6`；下一次发布前必须从包含 `77619dc` 的集成基线运行完整门禁、备份生产数据库并生成新发布版本，不能再用未同步的新旧分支相互覆盖。
+开发与生产部署代码已在 `feat/warehouse-system@a03e87e` 完成本地正常合并，生产持久化、部署能力和手机响应式改动均已进入当前分支。其后的 `77619dc` 还包含共享 Caddy 前门的固定资产站点隔离，`77e722b` 记录了 Docker 测试时序风险。服务器仍对应旧发布源 `fada1d6`；下一次发布前必须从包含 `77619dc` 的集成基线运行完整门禁、备份生产数据库并生成新发布版本，不能再用未同步的新旧分支相互覆盖。
 
 ## 6. 阿里云部署状态
 
@@ -174,7 +174,7 @@ D:\桌面\仓库
 
 - 2026-08-14 已发布 `20260814T093837Z-fada1d6738d6-8012`：发布脚本先生成可读备份清单的 PostgreSQL 备份，再依次构建 migrate、API、Web 镜像，执行迁移/seed 并启动服务。发布前备份文件和 manifest 已存在；未删除数据卷，未触碰 `/opt/yuemuhui/deploy`。
 - 发布后独立核验：`warehouse-prod` 的 API、PostgreSQL、Web 均为 `running healthy`；Compose 配置校验通过；容器内 API 与经 Caddy、生产主机名解析的 `/health` 都返回 200，响应含 `persistenceDriver: prisma` 与数据库 `ok`；当前 release 记录来源为 `fada1d6738d6`。
-- 当前电脑对 `https://warehouse.beikexiang.cn/health` 的请求仍在 TLS 阶段被重置（发布前后均复现），因此公网外部客户端探测未通过，需在后续网络/入口检查中单独确认，不能与服务器内部健康核验混写。
+- 历史上当前电脑对 `https://warehouse.beikexiang.cn/health` 的请求曾在 TLS 阶段被重置（发布前后均复现），因此当时未把公网外部客户端探测记为通过。2026-08-21 后续同机复验已得到受信 TLS 的 HTTP 200；详见 10.11。该新证据不替代服务器容器/共享网络的发布前复核。
 - 上一次部署记录显示 API、PostgreSQL、Web 均健康，公网首页和 `/health` 返回 200，公网仅暴露 22/80/443。
 - 2026-08-13 本地再次查询时，DNS 仍正确解析到 `106.14.224.213`，但当前电脑到 HTTPS 的请求被重置，因此线上实时健康状态需要在下一次服务器操作前重新核验。
 - 生产分支上一次完整验证记录：208 个测试通过、16 个跳过，类型检查、构建和 Compose 校验通过。该结果只对应提交 `5f17963`。
@@ -335,8 +335,14 @@ Task 8 首轮完整 E2E 曾为 75 passed、29 failed；29 个失败全部来自�
 - 新增 `deploy/frontdoor-assets.override.yml`，它只将 Compose 的 `web` 服务替换为 `${FRONTDOOR_IMAGE}` 并设置 `build: null`，与固定资产系统现有共享前门切换脚本兼容；它不涉及 API、migrate、PostgreSQL、8088 宿主机端口或 `backend` 内部网络。
 - TDD 证据：新增覆盖文件断言后，`corepack pnpm exec vitest run tests/deployment/production-config.test.ts` 首次为 11 项中 1 项失败，错误为 `expected '' to contain 'web:'`；新增最小覆盖文件后同一命令为 11/11 通过。
 - 新鲜本地门禁：Docker Engine 客户端/服务端均为 27.2.0；以 `deploy/.env.production.example` 和临时 `FRONTDOOR_IMAGE=beikexiang/frontdoor:local` 执行 `docker compose ... config --quiet` exit 0，未启动、构建、拉取容器或连接服务器。随后部署配置 Vitest 11/11、`corepack pnpm typecheck`、`corepack pnpm build`（Web 转换 1613 个模块）及 `git diff --check HEAD~1..HEAD` 均 exit 0。
-- 提交：设计规格为 `1deb36b docs: specify shared frontdoor isolation`，本地配置为 `77619dc fix(deploy): preserve fixed assets frontdoor`。本次没有 Push、部署、服务器命令、生产数据库、生产 Secret 或企业微信操作；服务器仍运行 `20260814T093837Z-fada1d6738d6-8012`。授权发布前仍须重新核验服务器容器/共享网络，并经 Caddy 对两个主机名分别执行健康检查。
+- 提交：设计规格为 `1deb36b docs: specify shared frontdoor isolation`，本地配置为 `77619dc fix(deploy): preserve fixed assets frontdoor`。该实现阶段没有 Push、部署、服务器 Shell 命令、生产数据库、生产 Secret 或企业微信操作；服务器仍运行 `20260814T093837Z-fada1d6738d6-8012`。授权发布前仍须重新核验服务器容器/共享网络，并经 Caddy 对两个主机名分别执行健康检查。
 - 分支收口复验：默认文件并行的完整 Vitest 首次在既有 `tests/deployment/deployment-scripts.test.ts` 中出现一次 `spawnSync docker ETIMEDOUT`，失败点是本机 Docker 运行缓存的 `node:24-alpine` 进行 Linux `/bin/sh` 打包验证。该单文件随后为 4/4 通过（14.14s）；Docker Engine 27.2.0 与本地镜像均可用，且最近提交未修改该测试或打包脚本。关闭文件并行后完整套件为 48 个文件通过、3 个文件跳过，258 个测试通过、17 个跳过、0 个失败（43.86s）。这是本机 Docker 调度的时序风险，非本次共享前门产品行为回归；后续应在 Docker 空闲时复验默认并行套件后再决定是否调整测试并行策略。
+
+### 10.11 公网 HTTPS 与共享入口复验（2026-08-21）
+
+- 从本机只读复验：`warehouse.beikexiang.cn` 与 `assets.beikexiang.cn` 的 A 记录均为 `106.14.224.213`，四个 TCP 探测（两个域名的 80/443）均成功。`http://warehouse.beikexiang.cn/health` 返回 Caddy 的 308 HTTPS 跳转；两个域名的 HTTPS 健康端点均为证书校验成功的 HTTP 200，固定资产首页同样为 200。
+- 两站点 HTTPS 响应的 `Permissions-Policy` 分别为仓库的 `camera=()` 与固定资产的 `camera=(self)`，与按精确主机名隔离的前门策略一致。此为外部入口行为证据；未通过服务器 Shell 读取容器、网络或 Caddy 运行时配置，故它们仍是授权发布前的复核项。
+- 同次阿里云控制台只读核验显示实例 `i-uf6ig2xdl67rqerk67l1` 为运行中且健康状态正常，公网 IP 为 `106.14.224.213`。未执行重启、发布、安全组修改、数据库或 Secret 操作。此前“本机 TLS 重置”已在当前电脑上排除；手机公网复验尚未执行，故 HTTPS 的正式验收项仍保持待办。正式生产验收还受企业微信真实链路、主数据及下一次授权发布的容器复核约束。
 
 ## 11. 文档维护规则
 
