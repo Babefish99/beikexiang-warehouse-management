@@ -53,6 +53,13 @@ export class ItemService {
 
   constructor(private readonly repository: ItemRepository) {}
 
+  async loadPersistedOptionIndex(): Promise<void> {
+    this.optionIndex.clear();
+    for (const item of await this.repository.list(true)) {
+      if (item.weComOptionKey) this.optionIndex.set(item.weComOptionKey, item.id);
+    }
+  }
+
   async create(input: ItemInput): Promise<ItemDefinition> {
     const existing = await this.repository.list(true);
     const code = normalizeItemCode(input.code ?? generateItemCode(input.categoryPrefix ?? "IT", existing.map((item) => item.code)));
@@ -96,6 +103,15 @@ export class ItemService {
     const item = await this.repository.get(itemId);
     if (!item) throw new Error(`item not found: ${itemId}`);
     await this.repository.save({ ...item, isActive: false });
+  }
+
+  async activate(itemId: string): Promise<ItemDefinition> {
+    const item = await this.repository.get(itemId);
+    if (!item) throw new Error(`item not found: ${itemId}`);
+    const activated = { ...item, isActive: true };
+    await this.repository.save(activated);
+    if (activated.weComOptionKey) this.optionIndex.set(activated.weComOptionKey, activated.id);
+    return activated;
   }
 
   list(includeInactive = false): Promise<ItemDefinition[]> {

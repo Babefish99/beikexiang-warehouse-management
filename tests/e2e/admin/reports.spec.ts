@@ -1,20 +1,21 @@
-import { test, expect } from "@playwright/test";
+﻿import { test, expect } from "@playwright/test";
+import { apiUrl, apiUrlPattern } from "../mobile/mobile-test-helpers";
 
 test("report APIs require a finance or administrator session", async ({ request }) => {
-  const response = await request.get("http://localhost:3001/admin/reports/summary?period=2026-08");
+  const response = await request.get(apiUrl("/admin/reports/summary?period=2026-08"));
 
   expect(response.status()).toBe(401);
 });
 
 test("reports page filters transaction details and keeps filters after a server error", async ({ page }) => {
-  await page.route("http://127.0.0.1:3001/admin/reports/warehouses", async (route) => {
+  await page.route(apiUrl("/admin/reports/warehouses"), async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify([{ id: "warehouse-1", code: "WH-01", name: "Warehouse 1", isActive: true }]),
     });
   });
-  await page.route(/http:\/\/127\.0\.0\.1:3001\/admin\/reports\/summary.*/, async (route) => {
+  await page.route(apiUrlPattern("/admin/reports/summary.*"), async (route) => {
     const url = new URL(route.request().url());
     expect(url.searchParams.get("period")).toBe("2026-08");
     expect(url.searchParams.get("warehouseId")).toBe("all");
@@ -24,7 +25,7 @@ test("reports page filters transaction details and keeps filters after a server 
       body: JSON.stringify([{ itemId: "item-1", quantity: "11", amount: "230.00" }]),
     });
   });
-  await page.route(/http:\/\/127\.0\.0\.1:3001\/admin\/reports\/transactions.*/, async (route) => {
+  await page.route(apiUrlPattern("/admin/reports/transactions.*"), async (route) => {
     const url = new URL(route.request().url());
     expect(url.searchParams.get("period")).toBe("2026-08");
     expect(url.searchParams.get("warehouseId")).toBe("all");
@@ -52,7 +53,7 @@ test("reports page filters transaction details and keeps filters after a server 
     await route.fallback();
   });
 
-  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Freports");
+  await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Freports"));
   const form = page.locator(".report-toolbar");
   await expect(page.locator(".report-filter-panel .panel__header h2")).toBeVisible();
   await expect(page.locator(".report-section .panel__header h2")).toHaveCount(2);
@@ -70,7 +71,7 @@ test("reports page filters transaction details and keeps filters after a server 
   expect(Math.abs(periodBox.y - typeBox.y)).toBeLessThan(4);
 
   await expect(page.getByText("230.00")).toBeVisible();
-  await expect(page.getByText("TRANSFER_OUT")).toBeVisible();
+  await expect(page.getByText("调拨出库")).toBeVisible();
 
   await form.locator("select").selectOption("transfers");
 
@@ -79,15 +80,55 @@ test("reports page filters transaction details and keeps filters after a server 
   await expect(form.locator("select")).toHaveValue("transfers");
 });
 
+test("reports page resolves internal ids to readable item, warehouse, and transaction labels", async ({ page }) => {
+  await page.route(apiUrl("/admin/reports/items"), async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([{ id: "item-1", code: "TEA-0001", name: "Tea leaves", specification: "Iron Goddess", unit: "box", categoryId: "cat-tea", isActive: true }]),
+    });
+  });
+  await page.route(apiUrl("/admin/reports/warehouses"), async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([{ id: "wh-1", code: "WH-01", name: "Warehouse 1", isActive: true }]),
+    });
+  });
+  await page.route(apiUrlPattern("/admin/reports/summary.*"), async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([{ itemId: "item-1", quantity: "11", amount: "230.00" }]),
+    });
+  });
+  await page.route(apiUrlPattern("/admin/reports/transactions.*"), async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([{ id: "tx-1", occurredAt: "2026-08-04T00:00:00.000Z", warehouseId: "wh-1", itemId: "item-1", type: "TRANSFER_OUT", quantity: "-2", unitCost: "20", amount: "40.00", referenceType: "TRANSFER_ORDER" }]),
+    });
+  });
+
+  await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Freports"));
+
+  await expect(page.getByText("Tea leaves", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Warehouse 1", { exact: true })).toBeVisible();
+  await expect(page.getByText("调拨出库", { exact: true })).toBeVisible();
+  await expect(page.getByText("调拨单", { exact: true })).toBeVisible();
+  await expect(page.getByText("item-1", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("wh-1", { exact: true })).toHaveCount(0);
+});
+
 test("reports page enables export when queries are available", async ({ page }) => {
-  await page.route("http://127.0.0.1:3001/admin/reports/warehouses", async (route) => {
+  await page.route(apiUrl("/admin/reports/warehouses"), async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify([{ id: "warehouse-1", code: "WH-01", name: "Warehouse 1", isActive: true }]),
     });
   });
-  await page.route(/http:\/\/127\.0\.0\.1:3001\/admin\/reports\/summary.*/, async (route) => {
+  await page.route(apiUrlPattern("/admin/reports/summary.*"), async (route) => {
     const url = new URL(route.request().url());
     expect(url.searchParams.get("period")).toBe("2026-08");
     expect(url.searchParams.get("warehouseId")).toBe("all");
@@ -97,7 +138,7 @@ test("reports page enables export when queries are available", async ({ page }) 
       body: JSON.stringify([{ itemId: "item-1", quantity: "11", amount: "230.00" }]),
     });
   });
-  await page.route(/http:\/\/127\.0\.0\.1:3001\/admin\/reports\/transactions.*/, async (route) => {
+  await page.route(apiUrlPattern("/admin/reports/transactions.*"), async (route) => {
     const url = new URL(route.request().url());
     expect(url.searchParams.get("period")).toBe("2026-08");
     expect(url.searchParams.get("type")).toBe("all");
@@ -110,7 +151,7 @@ test("reports page enables export when queries are available", async ({ page }) 
       ]),
     });
   });
-  await page.route(/http:\/\/127\.0\.0\.1:3001\/admin\/reports\/export.*/, async (route) => {
+  await page.route(apiUrlPattern("/admin/reports/export.*"), async (route) => {
     const url = new URL(route.request().url());
     expect(url.searchParams.get("period")).toBe("2026-08");
     expect(url.searchParams.get("type")).toBe("all");
@@ -123,7 +164,7 @@ test("reports page enables export when queries are available", async ({ page }) 
     });
   });
 
-  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Freports");
+  await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Freports"));
   const exportButton = page.locator(".report-actions .button--primary");
 
   await expect(exportButton).toBeEnabled();
@@ -138,14 +179,14 @@ test("reports page enables export when queries are available", async ({ page }) 
 test("reports page keeps export enabled after export failure", async ({ page }) => {
   let exportRequests = 0;
 
-  await page.route("http://127.0.0.1:3001/admin/reports/warehouses", async (route) => {
+  await page.route(apiUrl("/admin/reports/warehouses"), async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify([{ id: "warehouse-1", code: "WH-01", name: "Warehouse 1", isActive: true }]),
     });
   });
-  await page.route(/http:\/\/127\.0\.0\.1:3001\/admin\/reports\/summary.*/, async (route) => {
+  await page.route(apiUrlPattern("/admin/reports/summary.*"), async (route) => {
     const url = new URL(route.request().url());
     expect(url.searchParams.get("period")).toBe("2026-08");
     expect(url.searchParams.get("warehouseId")).toBe("all");
@@ -155,7 +196,7 @@ test("reports page keeps export enabled after export failure", async ({ page }) 
       body: JSON.stringify([{ itemId: "item-1", quantity: "11", amount: "230.00" }]),
     });
   });
-  await page.route(/http:\/\/127\.0\.0\.1:3001\/admin\/reports\/transactions.*/, async (route) => {
+  await page.route(apiUrlPattern("/admin/reports/transactions.*"), async (route) => {
     const url = new URL(route.request().url());
     expect(url.searchParams.get("period")).toBe("2026-08");
     expect(url.searchParams.get("type")).toBe("all");
@@ -166,7 +207,7 @@ test("reports page keeps export enabled after export failure", async ({ page }) 
       body: JSON.stringify([]),
     });
   });
-  await page.route(/http:\/\/127\.0\.0\.1:3001\/admin\/reports\/export.*/, async (route) => {
+  await page.route(apiUrlPattern("/admin/reports/export.*"), async (route) => {
     exportRequests += 1;
     const url = new URL(route.request().url());
     expect(url.searchParams.get("period")).toBe("2026-08");
@@ -179,7 +220,7 @@ test("reports page keeps export enabled after export failure", async ({ page }) 
     });
   });
 
-  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2Fadmin%2Freports");
+  await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Freports"));
   const exportButton = page.locator(".report-actions .button--primary");
 
   await expect(exportButton).toBeEnabled();

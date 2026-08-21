@@ -5,9 +5,10 @@ import { InMemoryOutboundStore, OutboundService } from "../../../apps/api/src/ap
 import { ApprovalParser, type WeComApprovalPayload } from "../../../apps/api/src/infrastructure/wecom/approval-parser.js";
 import { ApprovalSyncService, InMemoryApprovalSyncStore } from "../../../apps/api/src/application/wecom/approval-sync-service.js";
 
-function makeDetail(status: number): WeComApprovalPayload {
+function makeDetail(status: number, templateId = "tpl-approved-requisition"): WeComApprovalPayload {
   return {
     sp_no: "202607230021",
+    template_id: templateId,
     sp_status: status,
     apply_time: 1784773140,
     applyer: { userid: "wx-1", name: "申请人", department: "行政部" },
@@ -26,11 +27,11 @@ function makeDetail(status: number): WeComApprovalPayload {
   };
 }
 
-function makeService(detail: WeComApprovalPayload) {
+function makeService(detail: WeComApprovalPayload, approvalTemplateId = "tpl-approved-requisition") {
   const gateway = { fetchDetail: vi.fn().mockResolvedValue(detail) };
   const store = new InMemoryApprovalSyncStore();
   const parser = new ApprovalParser((optionKey) => optionKey === "opt-tea" ? { id: "item-tea" } : undefined);
-  return { gateway, store, service: new ApprovalSyncService({ gateway, parser, store }) };
+  return { gateway, store, service: new ApprovalSyncService({ gateway, parser, store, approvalTemplateId }) };
 }
 
 describe("approval synchronization service", () => {
@@ -67,6 +68,52 @@ describe("approval synchronization service", () => {
 
     await expect(service.sync("202607230021")).rejects.toThrow("unknown item option key: opt-tea");
     expect(store.attempts()[0]).toMatchObject({ status: "FAILED", payload: detail });
+  });
+
+  it("rejects a fetched detail with a different template before parsing or saving", async () => {
+    const detail = makeDetail(2, "tpl-unapproved");
+    const gateway = { fetchDetail: vi.fn().mockResolvedValue(detail) };
+    const parser = { parse: vi.fn() };
+    const store = new InMemoryApprovalSyncStore();
+    const service = new ApprovalSyncService({ gateway, parser, store, approvalTemplateId: "tpl-approved-requisition" });
+
+    await expect(service.sync("202607230021")).rejects.toThrow("enterprise WeChat approval template is not allowed");
+
+    expect(parser.parse).not.toHaveBeenCalled();
+    expect(store.records()).toEqual([]);
+    expect(store.attempts()).toMatchObject([{ status: "FAILED" }]);
+    expect(store.attempts()[0]?.payload).toBeUndefined();
+  });
+
+  it("applies the template guard when a callback is synchronized", async () => {
+    const detail = makeDetail(2, "tpl-unapproved");
+    const { parser, store, service } = (() => {
+      const gateway = { fetchDetail: vi.fn().mockResolvedValue(detail) };
+      const parser = { parse: vi.fn() };
+      const store = new InMemoryApprovalSyncStore();
+      return { parser, store, service: new ApprovalSyncService({ gateway, parser, store, approvalTemplateId: "tpl-approved-requisition" }) };
+    })();
+
+    await expect(service.handleCallback({ spNo: "202607230021" })).rejects.toThrow("enterprise WeChat approval template is not allowed");
+
+    expect(parser.parse).not.toHaveBeenCalled();
+    expect(store.records()).toEqual([]);
+    expect(store.attempts()[0]?.payload).toBeUndefined();
+  });
+
+  it("applies the template guard when an administrator re-synchronizes", async () => {
+    const detail = makeDetail(2, "tpl-unapproved");
+    const { parser, store, service } = (() => {
+      const gateway = { fetchDetail: vi.fn().mockResolvedValue(detail) };
+      const parser = { parse: vi.fn() };
+      const store = new InMemoryApprovalSyncStore();
+      return { parser, store, service: new ApprovalSyncService({ gateway, parser, store, approvalTemplateId: "tpl-approved-requisition" }) };
+    })();
+
+    await expect(service.sync("202607230021")).rejects.toThrow("enterprise WeChat approval template is not allowed");
+
+    expect(parser.parse).not.toHaveBeenCalled();
+    expect(store.records()).toEqual([]);
   });
 
   it("stores the callback payload alongside the fetched detail", async () => {

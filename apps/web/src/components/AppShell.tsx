@@ -1,39 +1,15 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, BarChart3, Building2, ChevronDown, LayoutDashboard, Menu, PackageSearch, Search, Settings, ShieldCheck, UserCircle, Warehouse, X } from "lucide-react";
+import { BarChart3, Building2, ChevronDown, LayoutDashboard, PackageSearch, Search, Settings, ShieldCheck, UserCircle, Warehouse, X } from "lucide-react";
+import { MobileBottomNav } from "../features/mobile/MobileBottomNav";
+import { MobileMoreSheet } from "../features/mobile/MobileMoreSheet";
+import { useMobileViewport } from "../features/mobile/use-mobile-viewport";
 import { LogoMark } from "./LogoMark";
+import { searchInventory, type InventorySearchResult } from "../features/inventory/inventory-api";
+import { NotificationCenter } from "../features/notifications/NotificationCenter";
+export { loadInventoryNotifications } from "../features/notifications/notification-tasks";
 
 export type WarehouseOption = { id: string; code: string; name: string; isActive: boolean };
-export type WorkspaceUser = { name: string; roleLabel: string; role: "ADMIN" | "FINANCE" };
-
-type InventorySearchLocation = {
-  warehouseId: string;
-  warehouseName: string;
-  batchId: string;
-  batchNo: string;
-  quantity: string;
-  unitCost: string;
-  amount: string;
-};
-
-type InventorySearchResult = {
-  itemId: string;
-  code: string;
-  name: string;
-  specification?: string;
-  unit: string;
-  totalQuantity: string;
-  totalAmount: string;
-  locations: InventorySearchLocation[];
-};
-
-type InventoryNotification = {
-  id: string;
-  kind: string;
-  title: string;
-  description: string;
-  href: string;
-  priority: number;
-};
+export type WorkspaceUser = { id: string; name: string; roleLabel: string; role: "ADMIN" | "FINANCE"; notificationIdentityKey: string };
 
 type NavigationItem = {
   label: string;
@@ -81,6 +57,7 @@ export function AppShell({
   onSelectWarehouse(warehouseId: string): void;
 }) {
   const pathname = window.location.pathname;
+  const isMobileViewport = useMobileViewport();
   const currentSection = navItems.find((item) => isActivePath(pathname, item))?.label ?? "工作台";
   const selectedWarehouseLabel = useMemo(
     () => toWarehouseLabel(selectedWarehouseId, warehouses),
@@ -88,7 +65,7 @@ export function AppShell({
   );
   const loginChannel = window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost" ? "本地开发登录" : "企业微信登录";
 
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [moreSheetOpen, setMoreSheetOpen] = useState(false);
   const [warehouseMenuOpen, setWarehouseMenuOpen] = useState(false);
   const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -97,9 +74,6 @@ export function AppShell({
   const [searchResults, setSearchResults] = useState<InventorySearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [notifications, setNotifications] = useState<InventoryNotification[]>([]);
-  const [notificationError, setNotificationError] = useState<string | null>(null);
-  const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
   const searchRequestVersion = useRef(0);
 
   useEffect(() => {
@@ -119,16 +93,7 @@ export function AppShell({
     const timer = window.setTimeout(async () => {
       setSearchLoading(true);
       try {
-        const params = new URLSearchParams({
-          query,
-          warehouseId: selectedWarehouseId,
-        });
-        const response = await fetch(`${apiBaseUrl}/admin/reports/inventory-search?${params.toString()}`, {
-          credentials: "include",
-          signal: controller.signal,
-        });
-        if (!response.ok) throw new Error("全局搜索加载失败");
-        const payload = await response.json() as InventorySearchResult[];
+        const payload = await searchInventory({ query, warehouseId: selectedWarehouseId, signal: controller.signal });
         if (controller.signal.aborted || searchRequestVersion.current !== requestVersion) return;
         setSearchResults(payload);
       } catch (error) {
@@ -149,10 +114,6 @@ export function AppShell({
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (mobileMenuOpen) {
-        setMobileMenuOpen(false);
-        return;
-      }
       if (warehouseMenuOpen) {
         setWarehouseMenuOpen(false);
         return;
@@ -174,39 +135,7 @@ export function AppShell({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [mobileMenuOpen, notificationMenuOpen, searchPopoverOpen, userMenuOpen, warehouseMenuOpen]);
-
-  useEffect(() => {
-    if (user.role !== "ADMIN") {
-      setNotifications([]);
-      setNotificationError(null);
-      setHasUnreadNotifications(false);
-      return;
-    }
-
-    let active = true;
-    const loadNotifications = async () => {
-      try {
-        const response = await fetch(`${apiBaseUrl}/admin/notifications`, { credentials: "include" });
-        if (!response.ok) throw new Error("通知中心加载失败");
-        if (!active) return;
-        const payload = await response.json() as InventoryNotification[];
-        setNotifications(payload);
-        setNotificationError(null);
-        setHasUnreadNotifications(payload.length > 0);
-      } catch (error) {
-        if (!active) return;
-        setNotifications([]);
-        setNotificationError(error instanceof Error ? error.message : "通知中心加载失败");
-        setHasUnreadNotifications(false);
-      }
-    };
-
-    void loadNotifications();
-    return () => {
-      active = false;
-    };
-  }, [user.role]);
+  }, [notificationMenuOpen, searchPopoverOpen, userMenuOpen, warehouseMenuOpen]);
 
   const showSearchPopover = searchPopoverOpen && searchQuery.trim().length > 0;
 
@@ -219,16 +148,12 @@ export function AppShell({
 
   const navigateToSearchResult = (code: string) => {
     clearSearch();
-    window.location.assign(`/admin/items?search=${encodeURIComponent(code)}`);
-  };
-
-  const closeDrawer = () => {
-    setMobileMenuOpen(false);
+    window.location.assign(`/admin/inventory?query=${encodeURIComponent(code)}`);
   };
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <div className="app-shell mobile-app-frame">
+      {!isMobileViewport ? <aside className="sidebar">
         <div className="sidebar__brand">
           <LogoMark />
         </div>
@@ -247,48 +172,11 @@ export function AppShell({
           <strong>库存数据安全运行中</strong>
           <small>三仓库统一管理</small>
         </div>
-      </aside>
-
-      {mobileMenuOpen ? (
-        <div className="mobile-drawer" role="dialog" aria-modal="true" aria-label="移动导航">
-          <button className="mobile-drawer__backdrop" type="button" aria-label="关闭菜单" onClick={closeDrawer} />
-          <div className="mobile-drawer__panel">
-            <div className="mobile-drawer__header">
-              <div>
-                <strong>集团仓库</strong>
-                <small>库存管理后台</small>
-              </div>
-              <button className="topbar-icon-button" type="button" aria-label="关闭菜单" onClick={closeDrawer}>
-                <X size={18} />
-              </button>
-            </div>
-            <nav className="mobile-drawer__nav" aria-label="移动主导航">
-              {navItems.map(({ label, href, icon: Icon, ...item }) => {
-                const active = isActivePath(pathname, { label, href, icon: Icon, ...item });
-                return (
-                  <a
-                    className={`nav-item ${active ? "is-active" : ""}`}
-                    key={`mobile-${label}`}
-                    href={href}
-                    aria-current={active ? "page" : undefined}
-                    onClick={closeDrawer}
-                  >
-                    <Icon size={18} strokeWidth={1.8} />
-                    <span>{label}</span>
-                  </a>
-                );
-              })}
-            </nav>
-          </div>
-        </div>
-      ) : null}
+      </aside> : null}
 
       <div className="workspace">
-        <header className="topbar">
+        {!isMobileViewport ? <header className="topbar">
           <div className="topbar__leading">
-            <button className="topbar-icon-button mobile-nav-toggle" type="button" aria-label="打开菜单" onClick={() => setMobileMenuOpen(true)}>
-              <Menu size={18} />
-            </button>
             <div className="topbar__crumb">
               <span>集团仓库管理系统</span>
               <strong>{currentSection}</strong>
@@ -301,8 +189,8 @@ export function AppShell({
                 aria-expanded={warehouseMenuOpen}
                 onClick={() => {
                   setWarehouseMenuOpen((open) => !open);
-                  setSearchPopoverOpen(false);
                   setNotificationMenuOpen(false);
+                  setSearchPopoverOpen(false);
                   setUserMenuOpen(false);
                 }}
               >
@@ -407,45 +295,20 @@ export function AppShell({
           </div>
 
           <div className="topbar__actions">
-            {user.role === "ADMIN" ? (
-              <div className="topbar-panel">
-                <button
-                  className="topbar-icon-button"
-                  type="button"
-                  aria-label="通知中心"
-                  aria-expanded={notificationMenuOpen}
-                  onClick={() => {
-                    setNotificationMenuOpen((open) => !open);
-                    setWarehouseMenuOpen(false);
-                    setSearchPopoverOpen(false);
-                    setUserMenuOpen(false);
-                  }}
-                >
-                  <Bell size={18} />
-                  {hasUnreadNotifications ? <span className="workspace-icon-button__badge" /> : null}
-                </button>
-                {notificationMenuOpen ? (
-                  <div className="workspace-popover workspace-popover--notifications">
-                    <div className="workspace-popover__header">
-                      <strong>通知中心</strong>
-                      <button className="workspace-link-button" type="button" onClick={() => setHasUnreadNotifications(false)}>全部已读</button>
-                    </div>
-                    {notificationError ? <p className="workspace-popover__empty">{notificationError}</p> : null}
-                    {!notificationError && !notifications.length ? <p className="workspace-popover__empty">暂无待处理通知</p> : null}
-                    {!notificationError && notifications.length ? (
-                      <div className="workspace-notification-list">
-                        {notifications.map((notification) => (
-                          <a className="workspace-notification" key={notification.id} href={notification.href}>
-                            <strong>{notification.title}</strong>
-                            <p>{notification.description}</p>
-                          </a>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
+            <NotificationCenter
+              identityKey={user.notificationIdentityKey}
+              role={user.role}
+              mobile={false}
+              open={notificationMenuOpen}
+              onOpenChange={(open) => {
+                setNotificationMenuOpen(open);
+                if (open) {
+                  setWarehouseMenuOpen(false);
+                  setSearchPopoverOpen(false);
+                  setUserMenuOpen(false);
+                }
+              }}
+            />
 
             <div className="topbar-panel">
               <button
@@ -484,9 +347,16 @@ export function AppShell({
               ) : null}
             </div>
           </div>
-        </header>
+        </header> : null}
         <main className="main-content">{children}</main>
       </div>
+      {isMobileViewport ? (
+        <>
+          <MobileBottomNav role={user.role} pathname={pathname} onOpenMore={() => setMoreSheetOpen(true)} />
+          <MobileMoreSheet open={moreSheetOpen} user={user} loginChannel={loginChannel} onClose={() => setMoreSheetOpen(false)} />
+          <NotificationCenter identityKey={user.notificationIdentityKey} role={user.role} mobile renderTrigger={false} />
+        </>
+      ) : null}
     </div>
   );
 }

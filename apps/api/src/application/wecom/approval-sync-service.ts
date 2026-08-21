@@ -1,5 +1,5 @@
 import type { ApprovalGateway } from "../../infrastructure/wecom/approval-gateway.js";
-import { ApprovalParser, type ParsedApproval, type WeComApprovalPayload } from "../../infrastructure/wecom/approval-parser.js";
+import type { ParsedApproval, WeComApprovalPayload } from "../../infrastructure/wecom/approval-parser.js";
 import { createInventoryMemoryState, type InventoryApprovalOutboundStatus, type InventoryApprovalState, type InventoryMemoryState } from "../inventory/inventory-memory-state.js";
 
 export type ApprovalOutboundStatus = InventoryApprovalOutboundStatus;
@@ -29,6 +29,11 @@ export interface ApprovalSyncStore {
   save(record: ApprovalSyncRecord): Promise<void>;
   nextAttemptNo(weComSpNo: string): Promise<number>;
   recordSyncAttempt(attempt: ApprovalSyncAttempt): Promise<void>;
+  saveWithAttempt?(record: ApprovalSyncRecord, attempt: ApprovalSyncAttempt): Promise<void>;
+}
+
+export interface ApprovalDetailParser {
+  parse(detail: WeComApprovalPayload): ParsedApproval | Promise<ParsedApproval>;
 }
 
 export class InMemoryApprovalSyncStore implements ApprovalSyncStore {
@@ -88,6 +93,11 @@ export class InMemoryApprovalSyncStore implements ApprovalSyncStore {
     this.syncAttempts.push(structuredClone(attempt));
   }
 
+  async saveWithAttempt(record: ApprovalSyncRecord, attempt: ApprovalSyncAttempt): Promise<void> {
+    await this.save(record);
+    await this.recordSyncAttempt(attempt);
+  }
+
   records(): ApprovalSyncRecord[] {
     if (this.state) {
       return [...this.state.approvals.values()].map((record) => toApprovalSyncRecord(record));
@@ -122,15 +132,20 @@ function toApprovalSyncRecord(record: InventoryApprovalState): ApprovalSyncRecor
 }
 
 export class ApprovalSyncService {
-  constructor(private readonly dependencies: { gateway: ApprovalGateway; parser: ApprovalParser; store: ApprovalSyncStore }) {}
+  constructor(private readonly dependencies: { gateway: ApprovalGateway; parser: ApprovalDetailParser; store: ApprovalSyncStore; approvalTemplateId?: string }) {}
 
   async sync(spNo: string, options: { callbackPayload?: unknown } = {}): Promise<{ approvalId: string; created: boolean; status: string }> {
     if (!/^\d{8,32}$/.test(spNo)) throw new Error("enterprise WeChat approval number is invalid");
     const attemptNo = await this.dependencies.store.nextAttemptNo(spNo);
     let detail: WeComApprovalPayload | undefined;
+    let retainFailurePayload = true;
     try {
       detail = await this.dependencies.gateway.fetchDetail(spNo);
-      const parsed = this.dependencies.parser.parse(detail);
+      if (this.dependencies.approvalTemplateId !== undefined && detail.template_id !== this.dependencies.approvalTemplateId) {
+        retainFailurePayload = false;
+        throw new Error("enterprise WeChat approval template is not allowed");
+      }
+      const parsed = await this.dependencies.parser.parse(detail);
       const existing = await this.dependencies.store.findBySpNo(spNo);
       const record: ApprovalSyncRecord = {
         id: existing?.id ?? `approval-${spNo}`,
@@ -139,12 +154,18 @@ export class ApprovalSyncService {
           ? existing && CLOSED_OUTBOUND_STATUSES.has(existing.outboundStatus) ? existing.outboundStatus : "PENDING_OUTBOUND"
           : existing?.outboundStatus ?? "NONE",
       };
-      await this.dependencies.store.save(record);
       const payload = options.callbackPayload === undefined ? detail : { callback: options.callbackPayload, detail };
-      await this.dependencies.store.recordSyncAttempt({ weComSpNo: spNo, status: "SUCCEEDED", attemptNo, payload });
+      const attempt: ApprovalSyncAttempt = { weComSpNo: spNo, status: "SUCCEEDED", attemptNo, payload };
+      if (this.dependencies.store.saveWithAttempt) await this.dependencies.store.saveWithAttempt(record, attempt);
+      else {
+        await this.dependencies.store.save(record);
+        await this.dependencies.store.recordSyncAttempt(attempt);
+      }
       return { approvalId: record.id, created: !existing, status: parsed.status === "APPROVED" ? record.outboundStatus : parsed.status };
     } catch (error) {
-      const payload = options.callbackPayload === undefined ? detail : { callback: options.callbackPayload, detail };
+      const payload = retainFailurePayload
+        ? options.callbackPayload === undefined ? detail : { callback: options.callbackPayload, detail }
+        : undefined;
       await this.dependencies.store.recordSyncAttempt({ weComSpNo: spNo, status: "FAILED", attemptNo, payload, error: error instanceof Error ? error.message : "approval synchronization failed" });
       throw error;
     }

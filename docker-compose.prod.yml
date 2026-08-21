@@ -1,0 +1,132 @@
+x-logging: &bounded-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-app-environment: &app-environment
+  NODE_ENV: ${NODE_ENV:?NODE_ENV is required}
+  PERSISTENCE_DRIVER: ${PERSISTENCE_DRIVER:?PERSISTENCE_DRIVER is required}
+  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+  API_PORT: "3001"
+  API_BASE_URL: ${API_BASE_URL:?API_BASE_URL is required}
+  WEB_BASE_URL: ${WEB_BASE_URL:?WEB_BASE_URL is required}
+  SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
+  LOCAL_AUTH_BYPASS: ${LOCAL_AUTH_BYPASS:-false}
+  WE_COM_CORP_ID: ${WE_COM_CORP_ID:-}
+  WE_COM_AGENT_ID: ${WE_COM_AGENT_ID:-}
+  WE_COM_SECRET: ${WE_COM_SECRET:-}
+  WE_COM_ADMIN_IDS: ${WE_COM_ADMIN_IDS:-}
+  WE_COM_FINANCE_IDS: ${WE_COM_FINANCE_IDS:-}
+  WE_COM_CALLBACK_TOKEN: ${WE_COM_CALLBACK_TOKEN:-}
+  WE_COM_ENCODING_AES_KEY: ${WE_COM_ENCODING_AES_KEY:-}
+  WE_COM_APPROVAL_TEMPLATE_ID: ${WE_COM_APPROVAL_TEMPLATE_ID:-}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - warehouse-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: 0.75
+    logging: *bounded-logging
+    networks:
+      - backend
+
+  migrate:
+    image: ${IMAGE_PREFIX:-warehouse}/migrate:${RELEASE_TAG:-latest}
+    build:
+      context: .
+      target: migrate
+    environment: *app-environment
+    command: ["sh", "-c", "pnpm exec prisma migrate deploy && pnpm exec prisma db seed"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    mem_limit: 384m
+    cpus: 0.75
+    logging: *bounded-logging
+    networks:
+      - backend
+
+  api:
+    image: ${IMAGE_PREFIX:-warehouse}/api:${RELEASE_TAG:-latest}
+    build:
+      context: .
+      target: api-runtime
+    environment: *app-environment
+    expose:
+      - "3001"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: 1.0
+    logging: *bounded-logging
+    networks:
+      - backend
+      # Non-internal bridge provides outbound Enterprise WeChat API access.
+      # The API still has no published host port.
+      - edge
+
+  web:
+    image: ${IMAGE_PREFIX:-warehouse}/web:${RELEASE_TAG:-latest}
+    build:
+      context: .
+      target: web-runtime
+      args:
+        VITE_API_BASE_URL: ""
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?SITE_ADDRESS is required}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:2019/config/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    mem_limit: 96m
+    cpus: 0.25
+    logging: *bounded-logging
+    networks:
+      - edge
+      - backend
+
+volumes:
+  warehouse-postgres:
+  caddy-data:
+  caddy-config:
+
+networks:
+  edge:
+  backend:
+    internal: true

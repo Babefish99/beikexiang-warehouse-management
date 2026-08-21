@@ -1,7 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
+import { apiUrl, apiUrlPattern, loginAs } from "../mobile/mobile-test-helpers";
 
 async function routeWorkspaceWarehouses(page: Page) {
-  await page.route("http://127.0.0.1:3001/admin/reports/warehouses", async (route) => {
+  await page.route(apiUrl("/admin/reports/warehouses"), async (route) => {
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify([
@@ -13,7 +14,7 @@ async function routeWorkspaceWarehouses(page: Page) {
 }
 
 async function routeItems(page: Page) {
-  await page.route("http://127.0.0.1:3001/admin/items?includeInactive=true", async (route) => {
+  await page.route(apiUrl("/admin/items?includeInactive=true"), async (route) => {
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify([
@@ -45,13 +46,13 @@ async function routeItems(page: Page) {
 }
 
 async function routeFinanceReports(page: Page) {
-  await page.route("http://127.0.0.1:3001/admin/reports/summary?period=2026-08", async (route) => {
+  await page.route(apiUrl("/admin/reports/summary?period=2026-08"), async (route) => {
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify([{ itemId: "TEA-001", quantity: "25", amount: "450.00" }]),
     });
   });
-  await page.route("http://127.0.0.1:3001/admin/reports/transactions?period=2026-08&type=all", async (route) => {
+  await page.route(apiUrl("/admin/reports/transactions?period=2026-08&type=all"), async (route) => {
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify([
@@ -71,10 +72,10 @@ async function routeFinanceReports(page: Page) {
   });
 }
 
-test("global workspace search opens the filtered items page from a search result", async ({ page }) => {
+test("global workspace search opens the inventory query page from a search result", async ({ page }) => {
   await routeWorkspaceWarehouses(page);
   await routeItems(page);
-  await page.route(/http:\/\/127\.0\.0\.1:3001\/admin\/reports\/inventory-search.*/, async (route) => {
+  await page.route(apiUrlPattern("/admin/reports/inventory-search.*"), async (route) => {
     const url = new URL(route.request().url());
     expect(url.searchParams.get("query")).toBe("Tea");
     expect(url.searchParams.get("warehouseId")).toBe("all");
@@ -106,7 +107,7 @@ test("global workspace search opens the filtered items page from a search result
     });
   });
 
-  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2F");
+  await loginAs(page, "/", "ADMIN");
   await expect(page.getByRole("heading", { name: "库存总览" })).toBeVisible();
 
   await page.getByLabel("全局搜索").fill("Tea");
@@ -117,17 +118,15 @@ test("global workspace search opens the filtered items page from a search result
   await expect(result).toContainText("数量 25");
 
   await result.click();
-  await expect(page).toHaveURL(/\/admin\/items\?search=TEA-001$/);
-  await expect(page.getByRole("heading", { name: "标准物品库" })).toBeVisible();
-  await expect(page.getByPlaceholder("搜索编码、名称或选项 key")).toHaveValue("TEA-001");
-  await expect(page.getByRole("cell", { name: "TEA-001" })).toBeVisible();
-  await expect(page.getByRole("cell", { name: "COF-001" })).toHaveCount(0);
+  await expect(page).toHaveURL(/\/admin\/inventory\?query=TEA-001$/);
+  await expect(page.getByRole("heading", { name: "库存查询" })).toBeVisible();
+  await expect(page.getByRole("searchbox", { name: "查询库存" })).toHaveValue("TEA-001");
 });
 
 test("changing the selected warehouse clears stale search results and shows the new warehouse context", async ({ page }) => {
   await routeWorkspaceWarehouses(page);
   await routeItems(page);
-  await page.route(/http:\/\/127\.0\.0\.1:3001\/admin\/reports\/inventory-search.*/, async (route) => {
+  await page.route(apiUrlPattern("/admin/reports/inventory-search.*"), async (route) => {
     const url = new URL(route.request().url());
     const warehouseId = url.searchParams.get("warehouseId");
 
@@ -187,7 +186,7 @@ test("changing the selected warehouse clears stale search results and shows the 
     });
   });
 
-  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2F");
+  await loginAs(page, "/", "ADMIN");
   await expect(page.getByRole("heading", { name: "库存总览" })).toBeVisible();
 
   await page.getByLabel("全局搜索").fill("Tea");
@@ -206,7 +205,7 @@ test("changing the selected warehouse clears stale search results and shows the 
 test("Escape closes workspace popovers and updates aria-expanded state", async ({ page }) => {
   await routeWorkspaceWarehouses(page);
   await routeItems(page);
-  await page.route(/http:\/\/127\.0\.0\.1:3001\/admin\/reports\/inventory-search.*/, async (route) => {
+  await page.route(apiUrlPattern("/admin/reports/inventory-search.*"), async (route) => {
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify([
@@ -232,7 +231,7 @@ test("Escape closes workspace popovers and updates aria-expanded state", async (
       ]),
     });
   });
-  await page.route("http://127.0.0.1:3001/admin/notifications", async (route) => {
+  await page.route(apiUrl("/admin/notifications"), async (route) => {
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify([
@@ -248,7 +247,7 @@ test("Escape closes workspace popovers and updates aria-expanded state", async (
     });
   });
 
-  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2F");
+  await loginAs(page, "/", "ADMIN");
   const warehouseButton = page.getByRole("button", { name: /全部仓库/ });
   await warehouseButton.click();
   await expect(warehouseButton).toHaveAttribute("aria-expanded", "true");
@@ -278,10 +277,10 @@ test("Escape closes workspace popovers and updates aria-expanded state", async (
   await expect(page.getByText("登录信息")).toHaveCount(0);
 });
 
-test("notification center shows unread items and clears the local unread indicator", async ({ page }) => {
+test("notification center shows the live task count without local read state", async ({ page }) => {
   await routeWorkspaceWarehouses(page);
   await routeItems(page);
-  await page.route("http://127.0.0.1:3001/admin/notifications", async (route) => {
+  await page.route(apiUrl("/admin/notifications"), async (route) => {
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify([
@@ -297,19 +296,60 @@ test("notification center shows unread items and clears the local unread indicat
     });
   });
 
-  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2F");
+  await loginAs(page, "/", "ADMIN");
   await expect(page.getByRole("heading", { name: "库存总览" })).toBeVisible();
   await expect(page.locator(".sidebar__footer strong")).toHaveCSS("font-size", "14px");
   await expect(page.locator(".sidebar__footer small")).toHaveCSS("font-size", "12px");
   await expect(page.getByText("Inventory Center", { exact: true })).toHaveCount(0);
 
-  const notificationButton = page.getByRole("button", { name: "通知中心" });
-  await expect(notificationButton.locator(".workspace-icon-button__badge")).toHaveCount(1);
+  const notificationButton = page.getByRole("button", { name: /通知中心/ });
+  await expect(notificationButton).toContainText("1");
   await notificationButton.click();
   await expect(page.getByText("盘点差异待复核")).toBeVisible();
-  await expect(page.getByRole("button", { name: "全部已读" })).toBeVisible();
-  await page.getByRole("button", { name: "全部已读" }).click();
-  await expect(notificationButton.locator(".workspace-icon-button__badge")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "全部已读" })).toHaveCount(0);
+  await expect(notificationButton).toContainText("1");
+});
+
+test("desktop notification popover toggles and stays mutually exclusive with other workspace tools", async ({ page }) => {
+  await routeWorkspaceWarehouses(page);
+  await routeItems(page);
+  await page.route(apiUrlPattern("/admin/reports/inventory-search.*"), async (route) => {
+    await route.fulfill({ contentType: "application/json", body: "[]" });
+  });
+  await page.route(apiUrl("/admin/notifications"), async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify([{
+        id: "notification-1",
+        kind: "ANOMALY",
+        title: "盘点差异待复核",
+        description: "杭州一仓存在 1 条盘点差异，请及时处理。",
+        href: "/admin/stocktake",
+        priority: 1,
+      }]),
+    });
+  });
+
+  await loginAs(page, "/", "ADMIN");
+  const notificationButton = page.getByRole("button", { name: /通知中心/ });
+  const notificationPopover = page.getByRole("region", { name: "通知与待办" });
+
+  await notificationButton.click();
+  await expect(notificationPopover).toBeVisible();
+  await notificationButton.click();
+  await expect(notificationPopover).toHaveCount(0);
+
+  await notificationButton.click();
+  await page.getByRole("button", { name: /全部仓库/ }).click();
+  await expect(notificationPopover).toHaveCount(0);
+
+  await notificationButton.click();
+  await page.getByLabel("全局搜索").fill("Tea");
+  await expect(notificationPopover).toHaveCount(0);
+
+  await notificationButton.click();
+  await page.getByRole("button", { name: /本地管理员/ }).click();
+  await expect(notificationPopover).toHaveCount(0);
 });
 
 test("saved warehouse selection restores from localStorage", async ({ page }) => {
@@ -318,7 +358,7 @@ test("saved warehouse selection restores from localStorage", async ({ page }) =>
   await page.addInitScript(() => {
     window.localStorage.setItem("warehouse.selectedWarehouseId", "warehouse-2");
   });
-  await page.route(/http:\/\/127\.0\.0\.1:3001\/admin\/reports\/inventory-search.*/, async (route) => {
+  await page.route(apiUrlPattern("/admin/reports/inventory-search.*"), async (route) => {
     const url = new URL(route.request().url());
     expect(url.searchParams.get("warehouseId")).toBe("warehouse-2");
     await route.fulfill({
@@ -347,7 +387,7 @@ test("saved warehouse selection restores from localStorage", async ({ page }) =>
     });
   });
 
-  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2F");
+  await loginAs(page, "/", "ADMIN");
   await expect(page.getByRole("button", { name: /WH-02 · 上海二仓/ })).toBeVisible();
   await page.getByLabel("全局搜索").fill("Tea");
   await expect(page.getByRole("button", { name: /SH-002/ })).toBeVisible();
@@ -357,7 +397,7 @@ test("desktop topbar keeps search beside the warehouse selector at approved type
   await routeWorkspaceWarehouses(page);
   await routeItems(page);
 
-  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2F");
+  await loginAs(page, "/", "ADMIN");
   await expect(page.getByRole("button", { name: /全部仓库/ })).toBeVisible();
 
   const layout = await page.locator(".topbar").evaluate((topbar) => {
@@ -386,7 +426,7 @@ test("invalid saved warehouse selection resets to all", async ({ page }) => {
     window.localStorage.setItem("warehouse.selectedWarehouseId", "warehouse-missing");
   });
 
-  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2F");
+  await loginAs(page, "/", "ADMIN");
   await expect(page.getByRole("button", { name: /全部仓库/ })).toBeVisible();
   await expect.poll(async () => page.evaluate(() => window.localStorage.getItem("warehouse.selectedWarehouseId"))).toBe("all");
 });
@@ -396,12 +436,12 @@ test("finance report shell does not request notifications", async ({ page }) => 
   await routeFinanceReports(page);
 
   let notificationRequests = 0;
-  await page.route("http://127.0.0.1:3001/admin/notifications", async (route) => {
+  await page.route(apiUrl("/admin/notifications"), async (route) => {
     notificationRequests += 1;
     await route.fulfill({ contentType: "application/json", body: "[]" });
   });
 
-  await page.goto("http://127.0.0.1:3001/auth/local?role=FINANCE&returnTo=%2Fadmin%2Freports");
+  await loginAs(page, "/admin/reports", "FINANCE");
   await expect(page.getByRole("heading", { name: "报表中心" })).toBeVisible();
   await expect(page.getByRole("button", { name: /全部仓库/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "通知中心" })).toHaveCount(0);

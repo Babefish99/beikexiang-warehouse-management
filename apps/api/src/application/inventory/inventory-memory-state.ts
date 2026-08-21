@@ -59,6 +59,7 @@ export interface InventoryIssuedAllocationState {
 
 export interface InventoryStocktakeAdjustmentState {
   stocktakeId: string;
+  periodCode: string;
   operatorId: string;
   occurredAt: string;
   warehouseId: string;

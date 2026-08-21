@@ -11,8 +11,9 @@ export function registerInboundRoutes(app: FastifyInstance, dependencies: { inbo
       entityType: "INBOUND_ORDER",
       getEntityId: ({ result, request }) => result?.inboundId ?? request.id,
     }, async (request, reply) => {
+      const { warehouseId, itemId, quantity, unitCost, purchasedAt, productionDate, expiryDate, purchaser, remark } = request.body;
       reply.code(201);
-      return dependencies.inboundService.create(request.body);
+      return dependencies.inboundService.create({ warehouseId, itemId, quantity, unitCost, purchasedAt, productionDate, expiryDate, purchaser, remark });
     }),
   );
 }

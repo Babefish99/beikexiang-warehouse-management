@@ -16,7 +16,8 @@ export class OpeningStockService {
   async create(input: { verifiedBy: string; rows: OpeningStockRow[] }): Promise<{ batchIds: string[] }> {
     if (!input.verifiedBy.trim()) throw new Error("verified by is required");
     if (!input.rows.length) throw new Error("opening stock rows are required");
-    const batchIds: string[] = [];
+    const occurredAt = new Date().toISOString();
+    const rows = [];
     for (const row of input.rows) {
       if (!row.warehouseId.trim()) throw new Error("warehouse is required");
       if (!row.itemId.trim()) throw new Error("item is required");
@@ -25,10 +26,10 @@ export class OpeningStockService {
       const quantity = assertNonNegative(row.quantity, "quantity");
       const unitCost = assertNonNegative(row.unitCost, "unit cost");
       if (unitCost.isZero() && !row.remark?.trim()) throw new Error("remark is required when unit cost is zero");
-      await this.assertPeriodOpen?.();
-      const result = await this.store.recordStockEntry({ warehouseId: row.warehouseId, itemId: row.itemId, batchNo: row.batchNo, quantity: quantity.toString(), unitCost: decimal(unitCost).toString(), purchasedAt: new Date().toISOString(), remark: row.remark, ledgerType: "OPENING_BALANCE", referenceType: "OPENING_STOCK", referenceId: `opening-${input.verifiedBy}-${Date.now()}`, occurredAt: new Date().toISOString() });
-      batchIds.push(result.batchId);
+      rows.push({ warehouseId: row.warehouseId, itemId: row.itemId, batchNo: row.batchNo, quantity: quantity.toString(), unitCost: decimal(unitCost).toString(), purchasedAt: occurredAt, remark: row.remark });
     }
-    return { batchIds };
+    await this.assertPeriodOpen?.();
+    const result = await this.store.recordOpeningStock({ operatorId: input.verifiedBy, referenceId: `opening-${crypto.randomUUID()}`, occurredAt, rows });
+    return { batchIds: result.batchIds };
   }
 }

@@ -16,7 +16,6 @@ const BAD_REQUEST_PATTERNS = [
   /is invalid$/i,
   /\b(?:is|are) required\b/i,
   /already exists/i,
-  /already closed/i,
   /cannot /i,
   /does not belong to/i,
   /unknown item option key/i,
@@ -25,7 +24,6 @@ const BAD_REQUEST_PATTERNS = [
   /exceeds/i,
   /substitution/i,
   /closed period:/i,
-  /changed;/i,
   /duplicate approval number:/i,
   /cannot become negative/i,
   /quantity must be positive/i,
@@ -34,8 +32,13 @@ const BAD_REQUEST_PATTERNS = [
   /nothing is issued/i,
 ];
 
+const CONFLICT_PATTERNS = [
+  /already closed/i,
+  /stock balance changed/i,
+];
+
 export class BusinessRuleError extends Error {
-  constructor(message: string, readonly statusCode: 400 | 404 = 400) {
+  constructor(message: string, readonly statusCode: 400 | 404 | 409 = 400) {
     super(message);
     this.name = "BusinessRuleError";
   }
@@ -46,6 +49,9 @@ export function classifyAdminBusinessError(error: unknown): BusinessRuleError | 
   if (!(error instanceof Error)) return undefined;
   if (NOT_FOUND_PATTERNS.some((pattern) => pattern.test(error.message))) {
     return new BusinessRuleError(error.message, 404);
+  }
+  if (CONFLICT_PATTERNS.some((pattern) => pattern.test(error.message))) {
+    return new BusinessRuleError(error.message, 409);
   }
   if (BAD_REQUEST_PATTERNS.some((pattern) => pattern.test(error.message))) {
     return new BusinessRuleError(error.message, 400);

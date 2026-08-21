@@ -3,6 +3,7 @@ import type { UserRole } from "../../application/auth/role-service.js";
 export interface AuditEvent {
   actorUserId: string;
   actorRole: UserRole;
+  actorName?: string;
   action: string;
   entityType: string;
   entityId: string;

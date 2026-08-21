@@ -97,14 +97,18 @@ describe("inventory query report routes", () => {
       const financeCookie = await createSessionCookie(app, "FINANCE");
       const applicantCookie = await createSessionCookie(app, "APPLICANT");
 
-      const [financeWarehouses, financeSearch, applicantWarehouses, applicantSearch] = await Promise.all([
+      const [financeWarehouses, financeItems, financeSearch, applicantWarehouses, applicantItems, applicantSearch] = await Promise.all([
         app.inject({ method: "GET", url: "/admin/reports/warehouses", headers: { cookie: financeCookie } }),
+        app.inject({ method: "GET", url: "/admin/reports/items", headers: { cookie: financeCookie } }),
         app.inject({ method: "GET", url: "/admin/reports/inventory-search?query=warehouse&warehouseId=all", headers: { cookie: financeCookie } }),
         app.inject({ method: "GET", url: "/admin/reports/warehouses", headers: { cookie: applicantCookie } }),
+        app.inject({ method: "GET", url: "/admin/reports/items", headers: { cookie: applicantCookie } }),
         app.inject({ method: "GET", url: "/admin/reports/inventory-search?query=warehouse&warehouseId=all", headers: { cookie: applicantCookie } }),
       ]);
 
       expect(financeWarehouses.statusCode).toBe(200);
+      expect(financeItems.statusCode).toBe(200);
+      expect(financeItems.json()).toEqual([]);
       expect(financeWarehouses.json()).toEqual([
         expect.objectContaining({ id: "warehouse-1", code: "WH-01", name: "待配置仓库一" }),
         expect.objectContaining({ id: "warehouse-2", code: "WH-02", name: "待配置仓库二" }),
@@ -113,6 +117,7 @@ describe("inventory query report routes", () => {
       expect(financeSearch.statusCode).toBe(200);
       expect(financeSearch.json()).toEqual([]);
       expect(applicantWarehouses.statusCode).toBe(403);
+      expect(applicantItems.statusCode).toBe(403);
       expect(applicantSearch.statusCode).toBe(403);
     } finally {
       await app.close();

@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { apiUrl, apiUrlPattern, loginAs, webBaseUrl } from "../mobile/mobile-test-helpers";
 
 test("dashboard quick actions open the corresponding operation pages", async ({ page }) => {
   const dashboardItemsWarehouseIds: Array<string | null> = [];
@@ -9,7 +10,7 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
   let captureItemPageRequests = false;
   let expectedTransactionWarehouseId = "all";
 
-  await page.route(/^http:\/\/127\.0\.0\.1:3001\/admin\/items(?:\?|$)/, async (route) => {
+  await page.route(apiUrlPattern("/admin/items(?:\\?|$)"), async (route) => {
     const url = new URL(route.request().url());
     if (route.request().method() !== "GET") {
       await route.fallback();
@@ -39,7 +40,7 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
       ]),
     });
   });
-  await page.route(/http:\/\/127\.0\.0\.1:3001\/admin\/outbound\/pending.*/, async (route) => {
+  await page.route(apiUrlPattern("/admin/outbound/pending.*"), async (route) => {
     const url = new URL(route.request().url());
     expect(url.searchParams.has("warehouseId")).toBe(false);
     dashboardPendingWarehouseIds.push(url.searchParams.get("warehouseId"));
@@ -53,7 +54,7 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
       }]),
     });
   });
-  await page.route(/http:\/\/127\.0\.0\.1:3001\/admin\/reports\/transactions.*/, async (route) => {
+  await page.route(apiUrlPattern("/admin/reports/transactions.*"), async (route) => {
     const url = new URL(route.request().url());
     expect(url.searchParams.get("period")).toBe("2026-08");
     expect(url.searchParams.get("warehouseId")).toBe(expectedTransactionWarehouseId);
@@ -79,7 +80,7 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
 
     await route.fallback();
   });
-  await page.route("http://127.0.0.1:3001/admin/reports/warehouses", async (route) => {
+  await page.route(apiUrl("/admin/reports/warehouses"), async (route) => {
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify([
@@ -88,8 +89,11 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
       ]),
     });
   });
+  await page.route(apiUrl("/admin/notifications"), async (route) => {
+    await route.fulfill({ contentType: "application/json", body: "[]" });
+  });
 
-  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2F");
+  await loginAs(page, "/", "ADMIN");
   await expect(page.locator(".page-header h1")).toBeVisible();
   await expect(page.locator(".metric")).toHaveCount(4);
   await expect(page.locator(".metric .metric__label")).toHaveCount(4);
@@ -145,7 +149,7 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
     await page.locator(destination.selector).click();
     await expect(page).toHaveURL(new RegExp(`${destination.path}$`));
     await expect(page.locator(".page-header h1")).toBeVisible();
-    await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2F");
+    await loginAs(page, "/", "ADMIN");
     await expect(page.locator(".page-header h1")).toBeVisible();
   }
 
@@ -155,7 +159,7 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
   dashboardOutboundWarehouseIds.length = 0;
   captureItemPageRequests = true;
 
-  await page.goto(new URL("/admin/items?search=TEA-001", page.url()).toString());
+  await page.goto(new URL("/admin/items?search=TEA-001", webBaseUrl).toString());
   await expect(page.locator(".master-data-panel .master-data-toolbar input")).toHaveValue("TEA-001");
   await expect.poll(() => itemPageWarehouseIds.length).toBeGreaterThan(0);
   expect(itemPageWarehouseIds.every((warehouseId) => warehouseId === null)).toBe(true);
@@ -176,7 +180,7 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
 
   captureItemPageRequests = false;
   expectedTransactionWarehouseId = "all";
-  await page.goto("http://127.0.0.1:3001/auth/local?returnTo=%2F");
+  await loginAs(page, "/", "ADMIN");
   await expect(page.locator(".page-header h1")).toBeVisible();
   await expect.poll(() => dashboardItemsWarehouseIds.length).toBeGreaterThan(0);
   await expect.poll(() => dashboardPendingWarehouseIds.length).toBeGreaterThan(0);

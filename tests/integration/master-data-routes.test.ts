@@ -65,9 +65,13 @@ describe("master data admin routes", () => {
     const deactivated = await app.inject({ method: "POST", url: `/admin/items/${itemId}/deactivate` });
     expect(deactivated.statusCode).toBe(204);
 
+    const reactivated = await app.inject({ method: "POST", url: `/admin/items/${itemId}/activate` });
+    expect(reactivated.statusCode).toBe(200);
+    expect(reactivated.json()).toMatchObject({ id: itemId, code: "TEA-0001", isActive: true });
+
     const list = await app.inject({ method: "GET", url: "/admin/items?includeInactive=true" });
     expect(list.json()).toEqual([
-      expect.objectContaining({ id: itemId, isActive: false }),
+      expect.objectContaining({ id: itemId, isActive: true }),
     ]);
   });
 

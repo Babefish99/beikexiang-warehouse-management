@@ -13,6 +13,7 @@ export interface StocktakeBalance {
 
 export interface StocktakeAdjustment {
   stocktakeId: string;
+  periodCode: string;
   operatorId: string;
   occurredAt: string;
   warehouseId: string;
@@ -25,7 +26,13 @@ export interface StocktakeAdjustment {
   reason?: string;
 }
 
-export class InMemoryStocktakeStore {
+export interface StocktakeStore {
+  balance(warehouseId: string, batchId: string): StocktakeBalance | undefined | Promise<StocktakeBalance | undefined>;
+  listBalances(): StocktakeBalance[] | Promise<StocktakeBalance[]>;
+  record(adjustment: StocktakeAdjustment): void | Promise<void>;
+}
+
+export class InMemoryStocktakeStore implements StocktakeStore {
   private readonly state: InventoryMemoryState;
 
   constructor(state: InventoryMemoryState = createInventoryMemoryState()) {
@@ -84,28 +91,29 @@ export class InMemoryStocktakeStore {
 }
 
 export class StocktakeService {
-  constructor(private readonly store: InMemoryStocktakeStore, private readonly periodStore: AccountingPeriodStore = new InMemoryAccountingPeriodStore()) {}
+  constructor(private readonly store: StocktakeStore, private readonly periodStore: AccountingPeriodStore = new InMemoryAccountingPeriodStore()) {}
 
   async listOptions(): Promise<{ balances: StocktakeBalance[] }> {
-    return { balances: this.store.listBalances() };
+    return { balances: await this.store.listBalances() };
   }
 
   async record(input: { periodCode?: string; period?: Pick<AccountingPeriod, "code">; operatorId?: string; warehouseId: string; itemId: string; batchId: string; bookQuantity: string; actualQuantity: string; reason?: string }): Promise<{ stocktakeId: string; difference: string }> {
     const periodCode = input.periodCode?.trim() || input.period?.code.trim();
     if (!periodCode) throw new Error("period code is required");
-    const period = this.periodStore.getOrCreate(periodCode);
+    const period = await this.periodStore.getOrCreate(periodCode);
     if (period.status !== "OPEN") throw new Error(`closed period: ${period.code}`);
     if (!input.warehouseId.trim() || !input.itemId.trim() || !input.batchId.trim()) throw new Error("warehouse, item, and batch are required");
     const actualQuantity = new Decimal(input.actualQuantity);
     if (!actualQuantity.isFinite() || actualQuantity.isNegative()) throw new Error("stocktake quantity is invalid");
     const difference = actualQuantity.minus(input.bookQuantity);
     if (!difference.isZero() && !input.reason?.trim()) throw new Error("reason is required");
-    const balance = this.store.balance(input.warehouseId, input.batchId);
+    const balance = await this.store.balance(input.warehouseId, input.batchId);
     if (!balance || balance.itemId !== input.itemId) throw new Error("stocktake balance not found");
     if (balance.bookQuantity !== input.bookQuantity) throw new Error("stocktake balance changed; reload options");
     const stocktakeId = crypto.randomUUID();
-    this.store.record({
+    await this.store.record({
       stocktakeId,
+      periodCode,
       operatorId: input.operatorId?.trim() || "admin",
       occurredAt: new Date().toISOString(),
       warehouseId: input.warehouseId,

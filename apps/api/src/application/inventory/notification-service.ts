@@ -39,7 +39,7 @@ export class NotificationService {
         kind: "PENDING_OUTBOUND",
         title: "待出库审批",
         description: `${pendingOutboundCount} 条已通过的领用审批待管理员确认出库。`,
-        href: "/admin/outbound/pending",
+        href: "/admin/outbound",
         priority: 1,
       });
     }
@@ -50,7 +50,7 @@ export class NotificationService {
         kind: "LOW_STOCK",
         title: `库存预警：${item.itemName}`,
         description: `${item.itemName} 当前库存 ${item.totalQuantity}，低于最低库存 ${item.minimumStock}。`,
-        href: "/admin/items",
+        href: `/admin/inventory?query=${encodeURIComponent(item.itemCode)}`,
         priority: 1,
       });
     }

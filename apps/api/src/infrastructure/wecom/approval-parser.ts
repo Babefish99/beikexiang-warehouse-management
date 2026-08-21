@@ -23,6 +23,7 @@ export interface WeComApprovalTable {
 
 export interface WeComApprovalPayload {
   sp_no: string;
+  template_id?: string;
   sp_status: number | string;
   apply_time: number | string;
   applyer: { userid: string; name: string; department?: string };

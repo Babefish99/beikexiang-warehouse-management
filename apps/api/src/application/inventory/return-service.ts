@@ -6,11 +6,12 @@ export class ReturnService {
 
   async listOptions(): Promise<{ allocations: Array<{ id: string; outboundOrderId: string; warehouseId: string; itemId: string; batchId: string; issuedQuantity: string; remainingReturnableQuantity: string; unitCost: string }> }> {
     const allocations = await this.store.listIssuedAllocations();
+    const returnedQuantities = await Promise.all(allocations.map((allocation) => this.store.getReturnedQuantity(allocation.id)));
     return {
       allocations: allocations
-        .map((allocation) => ({
+        .map((allocation, index) => ({
           ...allocation,
-          remainingReturnableQuantity: new Decimal(allocation.issuedQuantity).minus(this.store.getReturnedQuantity(allocation.id)).toString(),
+          remainingReturnableQuantity: new Decimal(allocation.issuedQuantity).minus(returnedQuantities[index]!).toString(),
         }))
         .filter((allocation) => new Decimal(allocation.remainingReturnableQuantity).gt(0)),
     };
@@ -18,7 +19,7 @@ export class ReturnService {
 
   async create(input: { outboundAllocationId: string; quantity: string; reason: string }): Promise<{ returnId: string; status: "COMPLETED"; unitCost: string }> {
     if (!input.outboundAllocationId.trim()) throw new Error("outbound allocation is required");
-    const allocation = this.store.getAllocation(input.outboundAllocationId);
+    const allocation = await this.store.getAllocation(input.outboundAllocationId);
     if (!allocation) throw new Error(`outbound allocation not found: ${input.outboundAllocationId}`);
     await this.assertPeriodOpen?.();
     const result = await this.store.returnStock({ allocation, quantity: input.quantity, reason: input.reason });

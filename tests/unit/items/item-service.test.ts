@@ -21,6 +21,16 @@ describe("item service", () => {
     await expect(repository.get(first.id)).resolves.toMatchObject({ isActive: false });
   });
 
+  it("reactivates a deactivated item without changing its definition", async () => {
+    const repository = new InMemoryItemRepository();
+    const service = new ItemService(repository);
+    const item = await service.create({ ...input, code: "CY-0001" });
+
+    await service.deactivate(item.id);
+    await expect(service.activate(item.id)).resolves.toMatchObject({ id: item.id, isActive: true });
+    await expect(repository.get(item.id)).resolves.toMatchObject({ name: input.name, code: "CY-0001", isActive: true });
+  });
+
   it("does not allow a code change after ledger activity", async () => {
     const repository = new InMemoryItemRepository();
     const service = new ItemService(repository);

@@ -3,37 +3,47 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 
 export interface StructuralSeedData {
-  warehouses: Array<{ code: string; name: string; isPlaceholder: boolean; isActive: boolean }>;
-  categories: Array<{ prefix: string; name: string }>;
+  roles: Array<{ id: string; code: string; name: string }>;
+  warehouses: Array<{ id: string; code: string; name: string; isPlaceholder: boolean; isActive: boolean }>;
+  categories: Array<{ id: string; code: string; prefix: string; name: string }>;
   historicalRows: unknown[];
 }
 
 export function getStructuralSeedData(): StructuralSeedData {
   return {
+    roles: [
+      { id: "role-admin", code: "ADMIN", name: "管理员" },
+      { id: "role-finance", code: "FINANCE", name: "财务" },
+      { id: "role-applicant", code: "APPLICANT", name: "领用人" },
+    ],
     warehouses: [
-      { code: "WH-01", name: "待配置仓库一", isPlaceholder: true, isActive: true },
-      { code: "WH-02", name: "待配置仓库二", isPlaceholder: true, isActive: true },
-      { code: "WH-03", name: "待配置仓库三", isPlaceholder: true, isActive: true },
+      { id: "warehouse-1", code: "WH-01", name: "待配置仓库一", isPlaceholder: true, isActive: true },
+      { id: "warehouse-2", code: "WH-02", name: "待配置仓库二", isPlaceholder: true, isActive: true },
+      { id: "warehouse-3", code: "WH-03", name: "待配置仓库三", isPlaceholder: true, isActive: true },
     ],
     categories: [
-      { prefix: "BJ", name: "办公用品" },
-      { prefix: "CY", name: "茶饮" },
-      { prefix: "WP", name: "物品" },
+      { id: "category-bj", code: "CATEGORY_BJ", prefix: "BJ", name: "办公用品" },
+      { id: "category-cy", code: "CATEGORY_CY", prefix: "CY", name: "茶饮" },
+      { id: "category-wp", code: "CATEGORY_WP", prefix: "WP", name: "物品" },
     ],
     historicalRows: [],
   };
 }
 
 export async function seedStructuralData(client: {
-  warehouse: { upsert(args: { where: { code: string }; update: { name: string; isPlaceholder: boolean; isActive: boolean }; create: { code: string; name: string; isPlaceholder: boolean; isActive: boolean } }): Promise<unknown> };
-  itemCategory: { upsert(args: { where: { code: string }; update: { name: string; prefix: string }; create: { code: string; name: string; prefix: string } }): Promise<unknown> };
+  role: { upsert(args: { where: { code: string }; update: { id: string; code: string; name: string }; create: { id: string; code: string; name: string } }): Promise<unknown> };
+  warehouse: { upsert(args: { where: { code: string }; update: { id: string; code: string; name: string; isPlaceholder: boolean; isActive: boolean }; create: { id: string; code: string; name: string; isPlaceholder: boolean; isActive: boolean } }): Promise<unknown> };
+  itemCategory: { upsert(args: { where: { code: string }; update: { id: string; code: string; name: string; prefix: string }; create: { id: string; code: string; name: string; prefix: string } }): Promise<unknown> };
 }): Promise<void> {
   const seedData = getStructuralSeedData();
+  for (const role of seedData.roles) {
+    await client.role.upsert({ where: { code: role.code }, update: role, create: role });
+  }
   for (const warehouse of seedData.warehouses) {
     await client.warehouse.upsert({ where: { code: warehouse.code }, update: warehouse, create: warehouse });
   }
   for (const category of seedData.categories) {
-    await client.itemCategory.upsert({ where: { code: `CATEGORY_${category.prefix}` }, update: category, create: { ...category, code: `CATEGORY_${category.prefix}` } });
+    await client.itemCategory.upsert({ where: { code: category.code }, update: category, create: category });
   }
 }
 

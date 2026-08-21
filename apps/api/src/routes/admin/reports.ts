@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { InventoryQueryService } from "../../application/inventory/inventory-query-service.js";
 import type { InventoryReportService, TransactionReportService, TransactionReportType } from "../../application/reports/report-query-service.js";
+import type { ItemDefinition } from "../../domain/items/item.js";
 import type { WarehouseDefinition } from "../../domain/warehouses/warehouse.js";
 import { buildExcelCompatibleReport } from "../../infrastructure/export/report-export.js";
 
@@ -19,6 +20,7 @@ export function registerReportRoutes(app: FastifyInstance, dependencies: {
   inventoryReportService: InventoryReportService;
   transactionReportService: TransactionReportService;
   inventoryQueryService: InventoryQueryService;
+  listReportItems: () => Promise<ItemDefinition[]>;
   listReportWarehouses: () => Promise<WarehouseDefinition[]>;
 }): void {
   app.get<{ Querystring: ReportQuery }>("/admin/reports/summary", async (request) => dependencies.inventoryReportService.getSummary(readPeriod(request.query.period), request.query.warehouseId));
@@ -28,6 +30,7 @@ export function registerReportRoutes(app: FastifyInstance, dependencies: {
   app.get<{ Querystring: InventorySearchQuery }>("/admin/reports/inventory-search", async (request) => {
     return dependencies.inventoryQueryService.search(request.query.query ?? "", request.query.warehouseId);
   });
+  app.get("/admin/reports/items", async () => dependencies.listReportItems());
   app.get("/admin/reports/warehouses", async () => dependencies.listReportWarehouses());
   app.get<{ Querystring: ReportQuery }>("/admin/reports/export", async (request, reply) => {
     const period = readPeriod(request.query.period);

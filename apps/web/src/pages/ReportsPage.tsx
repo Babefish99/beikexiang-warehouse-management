@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FileSpreadsheet, RefreshCw } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
 
 type SummaryRow = { itemId: string; quantity: string; amount: string };
+type ItemLookup = { id: string; name: string };
+type WarehouseLookup = { id: string; name: string };
 type TransactionRow = {
   id: string;
   occurredAt: string;
@@ -25,6 +27,25 @@ const transactionFilters: Array<{ value: TransactionFilter; label: string }> = [
   { value: "returns", label: "退库" },
   { value: "adjustments", label: "盘点调整" },
 ];
+const transactionTypeLabels: Record<string, string> = {
+  INBOUND: "入库",
+  OPENING_BALANCE: "期初库存",
+  OUTBOUND: "出库",
+  TRANSFER_IN: "调拨入库",
+  TRANSFER_OUT: "调拨出库",
+  RETURN: "退库",
+  ADJUSTMENT: "库存调整",
+  STOCKTAKE_ADJUSTMENT: "盘点调整",
+};
+const referenceTypeLabels: Record<string, string> = {
+  OPENING_STOCK: "期初库存",
+  INBOUND_ORDER: "入库单",
+  OUTBOUND_ORDER: "出库单",
+  TRANSFER_ORDER: "调拨单",
+  OUTBOUND_ALLOCATION: "原出库分配",
+  STOCK_ADJUSTMENT: "库存调整",
+  STOCKTAKE_ADJUSTMENT: "盘点调整",
+};
 
 async function readError(response: Response): Promise<string> {
   const payload = await response.json().catch(() => null) as { message?: string; error?: string } | null;
@@ -40,6 +61,8 @@ function readFilename(response: Response, period: string, type: TransactionFilte
 export function ReportsPage({ warehouseId }: { warehouseId: string }) {
   const [summary, setSummary] = useState<SummaryRow[]>([]);
   const [transactions, setTransactions] = useState<TransactionRow[]>([]);
+  const [items, setItems] = useState<ItemLookup[]>([]);
+  const [warehouses, setWarehouses] = useState<WarehouseLookup[]>([]);
   const [period, setPeriod] = useState(new Date().toISOString().slice(0, 7));
   const [type, setType] = useState<TransactionFilter>("all");
   const [loading, setLoading] = useState(true);
@@ -48,6 +71,17 @@ export function ReportsPage({ warehouseId }: { warehouseId: string }) {
   const [exportError, setExportError] = useState<string | null>(null);
   const [queryAvailable, setQueryAvailable] = useState(false);
   const encodedWarehouseId = encodeURIComponent(warehouseId);
+  const itemNameById = useMemo(() => new Map(items.map((item) => [item.id, item.name])), [items]);
+  const warehouseNameById = useMemo(() => new Map(warehouses.map((warehouse) => [warehouse.id, warehouse.name])), [warehouses]);
+
+  const loadLookups = async () => {
+    const [itemResponse, warehouseResponse] = await Promise.all([
+      fetch(`${apiBaseUrl}/admin/reports/items`, { credentials: "include" }),
+      fetch(`${apiBaseUrl}/admin/reports/warehouses`, { credentials: "include" }),
+    ]);
+    if (itemResponse.ok) setItems(await itemResponse.json() as ItemLookup[]);
+    if (warehouseResponse.ok) setWarehouses(await warehouseResponse.json() as WarehouseLookup[]);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -74,6 +108,10 @@ export function ReportsPage({ warehouseId }: { warehouseId: string }) {
   useEffect(() => {
     void load();
   }, [period, type, warehouseId]);
+
+  useEffect(() => {
+    void loadLookups();
+  }, []);
 
   const exportReport = async () => {
     setExporting(true);
@@ -156,7 +194,7 @@ export function ReportsPage({ warehouseId }: { warehouseId: string }) {
                 <tbody>
                   {summary.length ? summary.map((row) => (
                     <tr key={row.itemId}>
-                      <td>{row.itemId}</td>
+                      <td>{itemNameById.get(row.itemId) ?? row.itemId}</td>
                       <td>{row.quantity}</td>
                       <td>{row.amount}</td>
                     </tr>
@@ -192,13 +230,13 @@ export function ReportsPage({ warehouseId }: { warehouseId: string }) {
                   {transactions.length ? transactions.map((row) => (
                     <tr key={row.id}>
                       <td>{row.occurredAt.slice(0, 10)}</td>
-                      <td>{row.warehouseId}</td>
-                      <td>{row.itemId}</td>
-                      <td>{row.type}</td>
+                      <td>{warehouseNameById.get(row.warehouseId) ?? row.warehouseId}</td>
+                      <td>{itemNameById.get(row.itemId) ?? row.itemId}</td>
+                      <td>{transactionTypeLabels[row.type] ?? row.type}</td>
                       <td>{row.quantity}</td>
                       <td>{row.unitCost}</td>
                       <td>{row.amount}</td>
-                      <td>{row.referenceType}</td>
+                      <td>{referenceTypeLabels[row.referenceType] ?? row.referenceType}</td>
                     </tr>
                   )) : <tr><td colSpan={8}>当前筛选没有交易明细。</td></tr>}
                 </tbody>

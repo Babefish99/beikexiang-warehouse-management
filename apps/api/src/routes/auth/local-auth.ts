@@ -4,6 +4,7 @@ import { isAllowedLocalAuthHost, isLoopbackAddress, localUserForRole } from "../
 import { WeComOAuthClient } from "../../infrastructure/wecom/oauth-client.js";
 import type { SessionService } from "../../application/auth/session-service.js";
 import type { AuditService } from "../../infrastructure/audit/audit-service.js";
+import type { IdentityService } from "../../infrastructure/db/runtime.js";
 
 const SESSION_COOKIE = "warehouse_session";
 
@@ -34,6 +35,7 @@ export function registerLocalAuthRoutes(
     apiBaseUrl: string;
     webBaseUrl: string;
     sessionService: Pick<SessionService, "createSession" | "cookieOptions">;
+    identityService?: Pick<IdentityService, "ensureUser">;
     auditService: Pick<AuditService, "record">;
   },
 ): void {
@@ -60,6 +62,7 @@ export function registerLocalAuthRoutes(
       return reply.code(400).send({ error: "invalid_local_auth_role" });
     }
 
+    await dependencies.identityService?.ensureUser(user);
     const token = dependencies.sessionService.createSession(user);
     const safeReturnTo = oauthClient.decodeReturnTo(encodeReturnTo(request.query.returnTo ?? "/"));
 
@@ -67,6 +70,7 @@ export function registerLocalAuthRoutes(
     await dependencies.auditService.record({
       actorUserId: user.id,
       actorRole: user.role,
+      actorName: user.name,
       action: "LOGIN",
       entityType: "SESSION",
       entityId: user.id,

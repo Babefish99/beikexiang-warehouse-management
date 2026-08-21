@@ -37,23 +37,25 @@ export class InventoryQueryService {
   constructor(private readonly dependencies: {
     listItems: () => Promise<ItemDefinition[]>;
     listWarehouses: () => Promise<WarehouseDefinition[]>;
-    listBatches: () => StoredBatch[];
-    listBalances: () => InventoryBalanceSnapshot[];
+    listBatches: () => StoredBatch[] | Promise<StoredBatch[]>;
+    listBalances: () => InventoryBalanceSnapshot[] | Promise<InventoryBalanceSnapshot[]>;
   }) {}
 
   async search(query: string, warehouseId?: string): Promise<InventorySearchResult[]> {
     const normalizedQuery = query.trim().toLowerCase();
     if (!normalizedQuery) return [];
 
-    const [items, warehouses] = await Promise.all([
+    const [items, warehouses, batches, balances] = await Promise.all([
       this.dependencies.listItems(),
       this.dependencies.listWarehouses(),
+      this.dependencies.listBatches(),
+      this.dependencies.listBalances(),
     ]);
     const activeItems = items.filter((item) => item.isActive);
     const activeWarehouses = warehouses.filter((warehouse) => warehouse.isActive);
     const warehouseById = new Map(activeWarehouses.map((warehouse) => [warehouse.id, warehouse]));
     const itemById = new Map(activeItems.map((item) => [item.id, item]));
-    const batchById = new Map(this.dependencies.listBatches().map((batch) => [batch.id, batch]));
+    const batchById = new Map(batches.map((batch) => [batch.id, batch]));
     const shouldFilterWarehouse = Boolean(warehouseId && warehouseId !== "all");
     const results = new Map<string, {
       item: ItemDefinition;
@@ -62,7 +64,7 @@ export class InventoryQueryService {
       locations: Array<InventorySearchLocation & { warehouseCode: string }>;
     }>();
 
-    for (const balance of this.dependencies.listBalances()) {
+    for (const balance of balances) {
       const item = itemById.get(balance.itemId);
       const warehouse = warehouseById.get(balance.warehouseId);
       const batch = batchById.get(balance.batchId);

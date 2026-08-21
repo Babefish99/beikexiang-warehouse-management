@@ -49,6 +49,49 @@ describe("local auth routes", () => {
     }
   });
 
+  it("persists the login identity before issuing a session and writing its audit", async () => {
+    const app = Fastify();
+    const events: string[] = [];
+    registerLocalAuthRoutes(app, {
+      enabled: true,
+      apiBaseUrl: "http://localhost:3001",
+      webBaseUrl: "http://localhost:5174",
+      identityService: {
+        async ensureUser(user) {
+          events.push(`identity:${user.id}:${user.name}:${user.role}`);
+        },
+      },
+      sessionService: {
+        createSession() {
+          events.push("session");
+          return "session-token";
+        },
+        cookieOptions() {
+          return { httpOnly: true, sameSite: "lax", secure: false, path: "/", maxAge: 3600 };
+        },
+      },
+      auditService: {
+        async record() {
+          events.push("audit");
+        },
+      },
+    });
+
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: "/auth/local",
+        remoteAddress: "127.0.0.1",
+        headers: { host: "localhost:3001" },
+      });
+
+      expect(response.statusCode).toBe(302);
+      expect(events).toEqual(["identity:local-admin:本地管理员:ADMIN", "session", "audit"]);
+    } finally {
+      await app.close();
+    }
+  });
+
   it.each([
     ["FINANCE", "/admin/reports"],
     ["APPLICANT", "/admin/items"],
