@@ -1,6 +1,6 @@
 # 集团仓库管理系统项目状态
 
-> 最后更新：2026-08-21（Asia/Shanghai；发布事实截至 2026-08-14）
+> 最后更新：2026-08-21（Asia/Shanghai；线上发布事实截至 2026-08-14；本地共享前门验证截至 2026-08-21）
 > 用途：作为后续 Codex 任务、人工开发、测试和部署的统一交接入口。开始新任务时先读本文件，再检查 Git、服务器和企业微信的实时状态。
 > 安全：本文不保存 Secret、数据库密码、会话密钥、回调 Token 或 EncodingAESKey。
 > 摘要交接：日常验收与运维请先读 [项目状态与发布交接](docs/项目状态与发布交接.md)，完整时间线和证据仍以本文件为准。
@@ -13,8 +13,8 @@
 - 企业微信可信域名、可信 IP 和审批回调仍受 ICP 备案审核进度影响。
 - 企业微信真实登录及“审批通过 → 自动生成待出库单 → 实际出库 → 报表”的全链路尚未验收。
 - 三个仓库的正式名称和生产期初库存尚未完成最终核对与导入验收。
-- 原开发分支与生产部署分支的代码历史已经通过本地正常合并收敛；当前集成基线为 `feat/warehouse-system@a03e87e`，服务器仍运行 2026-08-14 的 `fada1d6` 发布版本。
-- 本轮手机响应式实现未修改生产 Secret；本地 Docker Desktop VM 仍为 Off，但服务器按生产发布脚本完成了备份、构建、迁移和服务健康验证。当前电脑访问公网 HTTPS 仍被连接重置，不能把该客户端的公网探测结果误记为通过。
+- 原开发分支与生产部署分支的代码历史已经通过本地正常合并收敛；`a03e87e` 是该历史合并提交，当前集成头为 `feat/warehouse-system@77619dc`。服务器仍运行 2026-08-14 的 `fada1d6` 发布版本。
+- 2026-08-14 的手机响应式验收环境中本地 Docker Desktop VM 曾为 Off；2026-08-21 本机 Docker Engine 27.2.0 已可用，并仅用于共享前门的 Compose 配置解析，未构建或启动容器。两轮本地工作均未修改生产 Secret。当前电脑访问公网 HTTPS 仍被连接重置，不能把该客户端的公网探测结果误记为通过。
 - 正常登记入库已改为由服务端按采购日期生成全局日序批次号；本轮手机端把采购日期放在批次号之前，并显示只读的 `YYYYMMDD-001` 格式预览，最终号码仍由服务端确认。出库空态已把状态图标与文字成组对齐，并移除无审批时孤立的“选择待办”标题。用户已完成本地/手机验收；这仍不能据此视为上线或生产验收。
 
 ## 2. 产品范围与已确认规则
@@ -119,7 +119,7 @@ D:\桌面\仓库
 
 - 路径：`D:\桌面\仓库`
 - 分支：`feat/warehouse-system`
-- 当前本地合并提交：`a03e87e merge: integrate mobile responsive release branch`，合并来源为 `codex/production-deployment@b2bedbf`，无冲突。
+- 当前 HEAD：`77619dc fix(deploy): preserve fixed assets frontdoor`；它在 `a03e87e merge: integrate mobile responsive release branch` 的已合并集成基线上新增了共享 Caddy 前门本地配置。
 - 合并前与生产分支重叠的未提交内容已保存在 `stash@{0}`（`codex pre-mobile-merge backup 2026-08-21`）作为安全备份；未自动恢复或删除。
 - 用户原有的未跟踪计划文档、演示文稿检查文件和临时演示目录仍保留在工作区，未改写、未清理、未提交。
 
@@ -142,7 +142,7 @@ D:\桌面\仓库
 
 ### 5.4 合并后的基线规则
 
-开发与生产部署代码已在 `feat/warehouse-system@a03e87e` 完成本地正常合并，生产持久化、部署能力和手机响应式改动均已进入当前分支。服务器仍对应旧发布源 `fada1d6`；下一次发布前必须从包含 `a03e87e` 的集成基线运行完整门禁、备份生产数据库并生成新发布版本，不能再用未同步的新旧分支相互覆盖。
+开发与生产部署代码已在 `feat/warehouse-system@a03e87e` 完成本地正常合并，生产持久化、部署能力和手机响应式改动均已进入当前分支。其后的当前 HEAD `77619dc` 还包含共享 Caddy 前门的固定资产站点隔离。服务器仍对应旧发布源 `fada1d6`；下一次发布前必须从包含 `77619dc` 的集成基线运行完整门禁、备份生产数据库并生成新发布版本，不能再用未同步的新旧分支相互覆盖。
 
 ## 6. 阿里云部署状态
 
@@ -323,11 +323,19 @@ Task 8 首轮完整 E2E 曾为 75 passed、29 failed；29 个失败全部来自�
 
 - 当前对话已完成手机响应式分支交付、生产部署分支回合并、Prisma Client 同步验证和状态文档收口。用户后续将在新任务中提出新的开发需求；不要从旧对话推断尚未明确的新需求。
 - 新任务开始时必须先完整阅读本文件和 `docs/项目状态与发布交接.md`，再运行 `git status --short --branch`、`git log -3 --oneline --decorate` 与 `git stash list` 核对实时状态。
-- 不要假定仓库存在 `main` 分支。当前集成分支为 `feat/warehouse-system`；已核验的分支整合提交为 `a03e87e`，其后的状态文档提交为 `29edae8`。开始开发时以实际 `HEAD` 为准。
+- 不要假定仓库存在 `main` 分支。当前集成分支为 `feat/warehouse-system`；已核验的分支整合提交为 `a03e87e`，当前共享前门本地验证提交为 `77619dc`。开始开发时以实际 `HEAD` 为准。
 - `stash@{0}` 是合并前重叠修改的安全备份。未经差异审查和用户确认，不得自动 `pop`、`apply` 或 `drop`；它不属于新需求的默认实现输入。
 - 工作区现有 `.tmp_ppt/`、两份 2026-08-08 计划文档、演示文稿检查文件和演示目录均为用户保留资料。新任务不得清理、覆盖或顺带提交。
 - 下一次功能开发应先判断影响范围；涉及多步骤功能时从当前集成基线创建明确分支或 worktree，不得使用不存在的 `main` 作为引用。修改完成后至少运行针对性测试、类型检查、生产构建和 `git diff --check`。
 - 下一次服务器发布、Push、生产数据库操作或企业微信配置变更仍需单独授权；不能因本地代码已整合而推断线上已更新。
+
+### 10.10 共享 Caddy 前门与固定资产站点隔离（2026-08-21）
+
+- 仓库项目的 `deploy/Caddyfile` 现在是其共享前门发布的权威配置来源；固定资产项目源码未修改。`warehouse.beikexiang.cn` 继续仅服务仓库静态页面和 `api:3001` 的仓库接口；`assets.beikexiang.cn` 是独立站点，仅反代 Docker DNS 上游 `beikexiang-assets:8088`。即使两个项目存在同名路径，仍以精确主机名隔离，不共享路径前缀或跨项目 API 代理。
+- 新增 `deploy/frontdoor-assets.override.yml`，它只将 Compose 的 `web` 服务替换为 `${FRONTDOOR_IMAGE}` 并设置 `build: null`，与固定资产系统现有共享前门切换脚本兼容；它不涉及 API、migrate、PostgreSQL、8088 宿主机端口或 `backend` 内部网络。
+- TDD 证据：新增覆盖文件断言后，`corepack pnpm exec vitest run tests/deployment/production-config.test.ts` 首次为 11 项中 1 项失败，错误为 `expected '' to contain 'web:'`；新增最小覆盖文件后同一命令为 11/11 通过。
+- 新鲜本地门禁：Docker Engine 客户端/服务端均为 27.2.0；以 `deploy/.env.production.example` 和临时 `FRONTDOOR_IMAGE=beikexiang/frontdoor:local` 执行 `docker compose ... config --quiet` exit 0，未启动、构建、拉取容器或连接服务器。随后部署配置 Vitest 11/11、`corepack pnpm typecheck`、`corepack pnpm build`（Web 转换 1613 个模块）及 `git diff --check HEAD~1..HEAD` 均 exit 0。
+- 提交：设计规格为 `1deb36b docs: specify shared frontdoor isolation`，本地配置为 `77619dc fix(deploy): preserve fixed assets frontdoor`。本次没有 Push、部署、服务器命令、生产数据库、生产 Secret 或企业微信操作；服务器仍运行 `20260814T093837Z-fada1d6738d6-8012`。授权发布前仍须重新核验服务器容器/共享网络，并经 Caddy 对两个主机名分别执行健康检查。
 
 ## 11. 文档维护规则
 
