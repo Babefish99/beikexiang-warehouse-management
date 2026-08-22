@@ -109,6 +109,41 @@ test("1180px pointer unpin restores compact sidebar focus expansion on Tab", asy
   await expect.poll(() => compactLayout(page)).toEqual({ sidebarWidth: 232, workspaceLeft: 64 });
 });
 
+test("compact desktop keeps the topbar and dashboard readable without horizontal overflow", async ({ page }) => {
+  await page.setViewportSize({ width: 980, height: 900 });
+  await loginAs(page, "/", "ADMIN");
+  await expect(page.locator(".metric-strip")).toBeVisible();
+
+  const narrow = await page.evaluate(() => {
+    const metricStrip = document.querySelector<HTMLElement>(".metric-strip");
+    const dashboard = document.querySelector<HTMLElement>(".dashboard-grid");
+    const topbar = document.querySelector<HTMLElement>(".topbar");
+    if (!metricStrip || !dashboard || !topbar) throw new Error("dashboard layout is missing");
+    return {
+      overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      topbarHeight: Math.round(topbar.getBoundingClientRect().height),
+      metricColumns: getComputedStyle(metricStrip).gridTemplateColumns.split(" ").length,
+      dashboardColumns: getComputedStyle(dashboard).gridTemplateColumns.split(" ").length,
+    };
+  });
+
+  expect(narrow).toEqual({ overflow: false, topbarHeight: 74, metricColumns: 2, dashboardColumns: 1 });
+
+  await page.setViewportSize({ width: 1180, height: 900 });
+  const wide = await page.evaluate(() => {
+    const metricStrip = document.querySelector<HTMLElement>(".metric-strip");
+    const dashboard = document.querySelector<HTMLElement>(".dashboard-grid");
+    if (!metricStrip || !dashboard) throw new Error("dashboard layout is missing");
+    return {
+      overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      metricColumns: getComputedStyle(metricStrip).gridTemplateColumns.split(" ").length,
+      dashboardColumns: getComputedStyle(dashboard).gridTemplateColumns.split(" ").length,
+    };
+  });
+
+  expect(wide).toEqual({ overflow: false, metricColumns: 4, dashboardColumns: 1 });
+});
+
 test("desktop and mobile navigation remain on their existing boundaries", async ({ page }) => {
   await page.setViewportSize({ width: 1181, height: 900 });
   await loginAs(page, "/", "ADMIN");
