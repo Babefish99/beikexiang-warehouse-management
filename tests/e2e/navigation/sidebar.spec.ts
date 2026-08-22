@@ -136,19 +136,27 @@ test("1180px focus-only sidebar collapses after focus moves to the workspace", a
   await expect.poll(() => compactLayout(page)).toEqual({ sidebarWidth: 64, workspaceLeft: 64 });
 });
 
-test("980px compact topbar retains the current page and user role without horizontal overflow", async ({ page }) => {
-  await page.setViewportSize({ width: 980, height: 900 });
-  await loginAs(page, "/", "ADMIN");
+test("821px and 980px compact topbar retains its page, role, and user controls without horizontal overflow", async ({ page }) => {
+  for (const width of [821, 980]) {
+    await page.setViewportSize({ width, height: 900 });
+    await loginAs(page, "/", "ADMIN");
 
-  await expect(page.locator(".topbar__crumb strong")).toBeVisible();
-  await expect(page.locator(".topbar__crumb strong")).toHaveText("首页");
-  await expect(page.locator(".workspace-user-button small")).toBeVisible();
-  await expect(page.locator(".workspace-user-button small")).toHaveText("库存管理员");
-  await expect(page.locator(".topbar__crumb span")).toBeHidden();
-  await expect(page.locator(".workspace-user-button strong")).toHaveCSS("text-overflow", "ellipsis");
-  await expect(page.locator(".workspace-user-button small")).toHaveCSS("text-overflow", "ellipsis");
-  await expect(page.locator(".topbar")).toHaveCSS("height", "74px");
-  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+    const userButton = page.locator(".workspace-user-button");
+    const userIcons = userButton.locator("> svg");
+    await expect(page.locator(".topbar__crumb strong")).toBeVisible();
+    await expect(page.locator(".topbar__crumb strong")).toHaveText("首页");
+    await expect(userButton).toBeVisible();
+    await expect(page.locator(".workspace-user-button small")).toBeVisible();
+    await expect(page.locator(".workspace-user-button small")).toHaveText("库存管理员");
+    await expect(userIcons).toHaveCount(2);
+    await expect(userIcons.nth(0)).toBeVisible();
+    await expect(userIcons.nth(1)).toBeVisible();
+    await expect(page.locator(".topbar__crumb span")).toBeHidden();
+    await expect(page.locator(".workspace-user-button strong")).toHaveCSS("text-overflow", "ellipsis");
+    await expect(page.locator(".workspace-user-button small")).toHaveCSS("text-overflow", "ellipsis");
+    await expect(page.locator(".topbar")).toHaveCSS("height", "74px");
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+  }
 });
 
 test("ADMIN and FINANCE retain the existing desktop navigation labels and hrefs", async ({ page }) => {
