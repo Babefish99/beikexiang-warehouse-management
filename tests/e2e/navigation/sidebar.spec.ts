@@ -37,6 +37,30 @@ test("1180px sidebar stays compact until it is pinned, then collapses on a secon
   const sidebar = page.locator(".sidebar");
   const workspace = page.locator(".workspace");
   const toggle = page.getByRole("button", { name: "固定展开侧栏" });
+  const compactBrandGeometry = () => sidebar.evaluate((node) => {
+    const logo = node.querySelector<HTMLElement>(".logo-mark");
+    const image = logo?.querySelector("img");
+    const button = node.querySelector<HTMLElement>(".sidebar__toggle");
+    if (!logo || !image || !button) return null;
+
+    const logoBox = logo.getBoundingClientRect();
+    const imageBox = image.getBoundingClientRect();
+    const buttonBox = button.getBoundingClientRect();
+    return {
+      logoWidth: Math.round(logoBox.width),
+      imageWidth: Math.round(imageBox.width),
+      buttonWidth: Math.round(buttonBox.width),
+      logoFlexShrink: getComputedStyle(logo).flexShrink,
+      overlap: Math.round(Math.max(0, logoBox.right - buttonBox.left)),
+    };
+  });
+  const expectedBrandGeometry = {
+    logoWidth: 152,
+    imageWidth: 168,
+    buttonWidth: 36,
+    logoFlexShrink: "0",
+    overlap: 0,
+  };
 
   await page.mouse.move(1179, 880);
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -45,12 +69,14 @@ test("1180px sidebar stays compact until it is pinned, then collapses on a secon
 
   await sidebar.hover();
   await expect.poll(() => sidebar.evaluate((node) => Math.round(node.getBoundingClientRect().width))).toBe(232);
+  await expect.poll(compactBrandGeometry).toEqual(expectedBrandGeometry);
   await page.mouse.move(1179, 880);
   await expect.poll(() => sidebar.evaluate((node) => Math.round(node.getBoundingClientRect().width))).toBe(64);
 
   await toggle.click();
   await expect(page.getByRole("button", { name: "收起固定侧栏" })).toHaveAttribute("aria-expanded", "true");
   await expect.poll(() => sidebar.evaluate((node) => Math.round(node.getBoundingClientRect().width))).toBe(232);
+  await expect.poll(compactBrandGeometry).toEqual(expectedBrandGeometry);
   await expect.poll(() => workspace.evaluate((node) => Math.round(node.getBoundingClientRect().left))).toBe(232);
 
   await page.getByRole("button", { name: "收起固定侧栏" }).click();

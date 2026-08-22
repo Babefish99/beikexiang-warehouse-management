@@ -28,7 +28,23 @@ button { font: inherit; color: inherit; cursor: pointer; }
   }
   .app-shell--compact-sidebar .workspace { margin-left: 64px; transition: margin-left .18s ease; }
   .app-shell--compact-sidebar.app-shell--compact-sidebar-pinned .workspace { margin-left: 232px; }
-  .app-shell--compact-sidebar .sidebar__brand { padding: 0 14px; justify-content: space-between; }
+  .app-shell--compact-sidebar .sidebar__brand {
+    padding: 0 14px;
+    display: grid;
+    grid-template-columns: 152px 36px;
+    justify-content: start;
+    gap: 8px;
+  }
+  .app-shell--compact-sidebar .sidebar__brand .logo-mark {
+    width: 152px;
+    height: 48px;
+    flex: 0 0 152px;
+  }
+  .app-shell--compact-sidebar .sidebar__brand .logo-mark img {
+    width: 168px;
+    left: -6.4px;
+    top: -62.4px;
+  }
   .app-shell--compact-sidebar .sidebar__toggle {
     width: 36px;
     height: 36px;
@@ -62,6 +78,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   }
   .app-shell--compact-sidebar .sidebar:not(:hover):not(.sidebar--pinned) .sidebar__brand,
   .app-shell--compact-sidebar .sidebar:not(:hover):not(.sidebar--pinned) .nav-item { justify-content: center; }
+  .app-shell--compact-sidebar .sidebar:not(:hover):not(.sidebar--pinned) .sidebar__brand { grid-template-columns: 36px; }
   .app-shell--compact-sidebar .sidebar:not(:hover):not(.sidebar--pinned) .nav-item { padding-inline: 0; }
 }
 
