@@ -375,6 +375,14 @@ Task 8 首轮完整 E2E 曾为 75 passed、29 failed；29 个失败全部来自�
 - 服务器上传归档 SHA-256 一致且不含 `deploy/.env.production`；发布脚本创建发布前备份 `warehouse-20260822T023811Z-3531381.sql.gz`，顺序构建 migrate/API/Web、执行迁移/seed，并完成发布版本 `20260822T023810Z-3f61393e00633d7efac09918b7e60fe4b06acd2f-3531208`。API、PostgreSQL、Web 均为 `healthy`，服务器和本机公网的仓库 `/health` 均返回 Prisma 与数据库 `ok`，校验文本精确为 `uIghWtRwsuUPacAx`，固定资产入口为 HTTP 200；共享 `warehouse-prod_edge` 网络仍包含仓库、固定资产和其他既有服务，未触碰 `yuemuhui`、生产 Secret 或数据卷，且未 Push。
 - 未完成事项：当前企业微信账号需刷新/重新进入仓库应用，以确认既有 Cookie 会被新服务端代码实时映射为管理员；企业微信真实登录、审批回调和完整业务链路仍未验收。
 
+### 10.16 紧凑桌面布局本地验证与交接（2026-08-22）
+
+- 本地分支 `codex/compact-desktop-layout` 已包含获批的紧凑桌面行为：在 `821px–1180px` 默认显示 `64px` 图标侧栏；鼠标悬停或键盘焦点临时以 `232px` 覆盖内容区，而工作区仍保留 `64px`；指针点击固定后工作区同步使用 `232px` 留边；再次点击收起；刷新恢复默认收起；`<=820px` 的既有手机导航未改。`821px/980px` 紧凑顶栏保留当前页、角色及头像/菜单控件且无水平溢出；`1180px` 的网格、指标和仪表盘仍可读，`1181px`/`820px` 保持既有桌面/手机边界。
+- 新鲜侧栏 E2E：使用隔离 memory persistence 与 local-auth 执行 `corepack pnpm exec playwright test tests/e2e/navigation/sidebar.spec.ts`，11/11 通过（14.2s）。覆盖 ADMIN/FINANCE 既有导航标签与 href、指针固定/取消固定、键盘焦点与取消固定路径、工作区焦点收起路径、刷新，以及 `1181px`/`820px` 边界。
+- 新鲜完整 Vitest：`corepack pnpm test` exit 1；唯一失败为 `tests/deployment/deployment-scripts.test.ts` 的 Linux `/bin/sh` 打包验证，错误为 `spawnSync docker ETIMEDOUT`，Docker 绑定本 Windows worktree 的主机目录时超时。结果为 47 个文件通过、3 个跳过、1 个失败；261 个测试通过、17 个跳过、1 个失败（40.07s）。该阻塞也已在 ASCII 临时目录中独立复现，而不含 bind mount 的普通 Docker 容器可运行；它仍是未解决的 Docker Desktop 主机目录 bind-mount 本地环境阻塞，绝非完整测试通过，且未改动产品、测试或 Docker 配置。
+- 新鲜类型、构建与差异检查：`corepack pnpm typecheck` exit 0；`corepack pnpm build` exit 0（Web 转换 1613 个模块）；文档修改前 `git diff --check` 无输出、exit 0。文档提交前后仍需保持 diff 检查无输出。
+- 边界：本轮仅本地开发与交接记录；没有手机端、API、Push、生产部署、生产数据库、Secret 或企业微信配置变更。服务器仍运行已发布的 `3f61393` 版本；任何线上发布须重新获得明确授权。
+
 ## 11. 文档维护规则
 
 出现以下事件时必须更新本文的“最后更新”“最近核验”和“待办优先级”：
@@ -387,11 +395,3 @@ Task 8 首轮完整 E2E 曾为 75 passed、29 failed；29 个失败全部来自�
 - 域名、服务器、部署目录或运行方式发生变化。
 
 更新时记录事实和验证证据；不能把“代码已实现”“已经部署”“已经联通”“已经验收”混写成同一种状态。
-
-### 10.16 紧凑桌面布局本地验证与交接（2026-08-22）
-
-- 本地分支 `codex/compact-desktop-layout` 已包含获批的紧凑桌面行为：在 `821px–1180px` 默认显示 `64px` 图标侧栏；鼠标悬停或键盘焦点临时以 `232px` 覆盖内容区，而工作区仍保留 `64px`；指针点击固定后工作区同步使用 `232px` 留边；再次点击收起；刷新恢复默认收起；`<=820px` 的既有手机导航未改。`980px/1180px` 的紧凑顶栏、指标和仪表盘可读性也在本轮范围内。
-- 新鲜侧栏 E2E：使用隔离 memory persistence 与 local-auth 执行 `corepack pnpm exec playwright test tests/e2e/navigation/sidebar.spec.ts`，7/7 通过（11.0s）。覆盖指针固定/取消固定、键盘取消固定、指针到键盘焦点、刷新及 `1181px`/`820px` 边界。
-- 新鲜完整 Vitest：`corepack pnpm test` exit 1；仅 `tests/deployment/deployment-scripts.test.ts` 的 Linux `/bin/sh` 打包验证失败，错误为 `spawnSync docker ETIMEDOUT`，Docker 绑定本 Windows worktree 的挂载路径时超时。结果为 47 个文件通过、3 个跳过、1 个失败；261 个测试通过、17 个跳过、1 个失败（40.04s）。这是已独立诊断的本地 Docker bind-mount 环境阻塞，未被表述为测试通过，也未修改产品、测试或部署代码。
-- 新鲜类型、构建与差异检查：`corepack pnpm typecheck` exit 0；`corepack pnpm build` exit 0（Web 转换 1613 个模块）；验证前的 `git diff --check` 无输出、exit 0。文档提交前后仍需保持 diff 检查无输出。
-- 边界：本轮仅本地开发与交接记录；没有 Push、生产部署、生产数据库、Secret 或企业微信配置变更。服务器仍运行已发布的 `3f61393` 版本；任何线上发布须重新获得明确授权。
