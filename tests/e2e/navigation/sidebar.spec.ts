@@ -136,15 +136,21 @@ test("1180px focus-only sidebar collapses after focus moves to the workspace", a
   await expect.poll(() => compactLayout(page)).toEqual({ sidebarWidth: 64, workspaceLeft: 64 });
 });
 
-test("821px and 980px compact topbar retains its page, role, and user controls without horizontal overflow", async ({ page }) => {
-  for (const width of [821, 980]) {
+test("821px through 1080px compact topbar keeps focus order aligned with its geometry", async ({ page }) => {
+  for (const width of [821, 980, 1080]) {
     await page.setViewportSize({ width, height: 900 });
     await loginAs(page, "/", "ADMIN");
 
+    const warehouseSelector = page.locator(".topbar-selector");
+    const search = page.getByRole("searchbox", { name: "全局搜索" });
+    const actions = page.locator(".topbar__actions");
     const userButton = page.locator(".workspace-user-button");
     const userIcons = userButton.locator("> svg");
     await expect(page.locator(".topbar__crumb strong")).toBeVisible();
     await expect(page.locator(".topbar__crumb strong")).toHaveText("首页");
+    await expect(warehouseSelector).toBeVisible();
+    await expect(search).toBeVisible();
+    await expect(actions).toBeVisible();
     await expect(userButton).toBeVisible();
     await expect(page.locator(".workspace-user-button small")).toBeVisible();
     await expect(page.locator(".workspace-user-button small")).toHaveText("库存管理员");
@@ -155,63 +161,74 @@ test("821px and 980px compact topbar retains its page, role, and user controls w
     await expect(page.locator(".workspace-user-button strong")).toHaveCSS("text-overflow", "ellipsis");
     await expect(page.locator(".workspace-user-button small")).toHaveCSS("text-overflow", "ellipsis");
     await expect(page.locator(".topbar")).toHaveCSS("height", "74px");
+
+    await warehouseSelector.focus();
+    await page.keyboard.press("Tab");
+    await expect(search).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(actions.locator("button").first()).toBeFocused();
+    await expect.poll(() => page.evaluate(() => {
+      const topbar = document.querySelector<HTMLElement>(".topbar");
+      const selector = document.querySelector<HTMLElement>(".topbar-selector");
+      const searchInput = document.querySelector<HTMLElement>(".workspace-search input");
+      const action = document.querySelector<HTMLElement>(".topbar__actions button");
+      if (!topbar || !selector || !searchInput || !action) throw new Error("topbar controls are missing");
+      const topbarRect = topbar.getBoundingClientRect();
+      const selectorRect = selector.getBoundingClientRect();
+      const searchRect = searchInput.getBoundingClientRect();
+      const actionRect = action.getBoundingClientRect();
+      return {
+        focusGeometry: selectorRect.left < searchRect.left && searchRect.left < actionRect.left,
+        topbarHeight: Math.round(topbarRect.height),
+        overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      };
+    })).toEqual({ focusGeometry: true, topbarHeight: 74, overflow: false });
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
   }
 });
 
-test("980px compact topbar keeps visual and keyboard order while containing a long user name", async ({ page }) => {
-  await page.setViewportSize({ width: 980, height: 900 });
-  await loginAs(page, "/", "ADMIN");
+test("821px through 1180px compact topbar contains long user identity controls", async ({ page }) => {
+  for (const width of [821, 980, 1180]) {
+    await page.setViewportSize({ width, height: 900 });
+    await loginAs(page, "/", "ADMIN");
 
-  const warehouseSelector = page.locator(".topbar-selector");
-  const search = page.getByRole("searchbox", { name: "全局搜索" });
-  const userButton = page.locator(".workspace-user-button");
-  const userIcons = userButton.locator("> svg");
+    const userButton = page.locator(".workspace-user-button");
+    const role = userButton.locator("small");
+    const userIcons = userButton.locator("> svg");
+    await userButton.locator("strong").evaluate((name) => {
+      name.textContent = "Enterprise WeCom user name that is deliberately far too long for the compact desktop topbar";
+    });
 
-  await expect(warehouseSelector).toBeVisible();
-  await expect(search).toBeVisible();
-  await expect(userButton).toBeVisible();
-  const topbarOrder = await page.evaluate(() => {
-    const leading = document.querySelector<HTMLElement>(".topbar__leading");
-    const center = document.querySelector<HTMLElement>(".topbar__center");
-    const actions = document.querySelector<HTMLElement>(".topbar__actions");
-    if (!leading || !center || !actions) throw new Error("topbar regions are missing");
-    return [leading, center, actions].map((element) => element.getBoundingClientRect().left);
-  });
-  expect(topbarOrder[0]).toBeLessThan(topbarOrder[1]);
-  expect(topbarOrder[1]).toBeLessThan(topbarOrder[2]);
-
-  await warehouseSelector.focus();
-  await page.keyboard.press("Tab");
-  await expect(search).toBeFocused();
-  const focusOrder = await page.evaluate(() => {
-    const selector = document.querySelector<HTMLElement>(".topbar-selector");
-    const searchInput = document.querySelector<HTMLElement>(".workspace-search input");
-    const actions = document.querySelector<HTMLElement>(".topbar__actions");
-    if (!selector || !searchInput || !actions) throw new Error("topbar controls are missing");
-    return [selector, searchInput, actions].map((element) => element.getBoundingClientRect().left);
-  });
-  expect(focusOrder[0]).toBeLessThan(focusOrder[1]);
-  expect(focusOrder[1]).toBeLessThan(focusOrder[2]);
-
-  await userButton.locator("strong").evaluate((name) => {
-    name.textContent = "Enterprise WeCom user name that is deliberately far too long for the compact desktop topbar";
-  });
-  await expect(page.locator(".workspace-user-button small")).toBeVisible();
-  await expect(userIcons.nth(0)).toBeVisible();
-  await expect(userIcons.nth(1)).toBeVisible();
-  await expect.poll(() => page.evaluate(() => {
-    const topbar = document.querySelector<HTMLElement>(".topbar");
-    const button = document.querySelector<HTMLElement>(".workspace-user-button");
-    if (!topbar || !button) throw new Error("topbar user button is missing");
-    const topbarRect = topbar.getBoundingClientRect();
-    const buttonRect = button.getBoundingClientRect();
-    return {
-      buttonWithinTopbar: buttonRect.right <= topbarRect.right,
-      compactButton: buttonRect.width <= 220,
-      overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-    };
-  })).toEqual({ buttonWithinTopbar: true, compactButton: true, overflow: false });
+    await expect(userButton).toBeVisible();
+    await expect(role).toBeVisible();
+    await expect(userIcons).toHaveCount(2);
+    await expect(userIcons.nth(0)).toBeVisible();
+    await expect(userIcons.nth(1)).toBeVisible();
+    await expect.poll(() => page.evaluate((viewportWidth) => {
+      const topbar = document.querySelector<HTMLElement>(".topbar");
+      const button = document.querySelector<HTMLElement>(".workspace-user-button");
+      const roleText = button?.querySelector<HTMLElement>("small");
+      const icons = Array.from(button?.querySelectorAll<HTMLElement>(":scope > svg") ?? []);
+      if (!topbar || !button || !roleText || icons.length !== 2) throw new Error("topbar user controls are missing");
+      const topbarRect = topbar.getBoundingClientRect();
+      const buttonRect = button.getBoundingClientRect();
+      const contains = (outer: DOMRect, inner: DOMRect) =>
+        inner.left >= outer.left && inner.right <= outer.right && inner.top >= outer.top && inner.bottom <= outer.bottom;
+      return {
+        buttonBounded: buttonRect.width <= Math.min(220, viewportWidth * .22),
+        buttonWithinTopbar: contains(topbarRect, buttonRect),
+        roleWithinButton: contains(buttonRect, roleText.getBoundingClientRect()),
+        iconsWithinButton: icons.every((icon) => contains(buttonRect, icon.getBoundingClientRect())),
+        overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      };
+    }, width)).toEqual({
+      buttonBounded: true,
+      buttonWithinTopbar: true,
+      roleWithinButton: true,
+      iconsWithinButton: true,
+      overflow: false,
+    });
+  }
 });
 
 test("ADMIN and FINANCE retain the existing desktop navigation labels and hrefs", async ({ page }) => {
