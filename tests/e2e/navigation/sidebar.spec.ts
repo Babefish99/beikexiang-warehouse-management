@@ -60,6 +60,43 @@ test("980px expanded compact sidebar keeps the full brand controls within its bo
   });
 });
 
+test("980px compact sidebar exposes accessible navigation controls and reaches the user menu by keyboard", async ({ page }) => {
+  await page.setViewportSize({ width: 980, height: 900 });
+  await loginAs(page, "/", "ADMIN");
+
+  const toggle = page.getByRole("button", { name: "展开导航" });
+  const navigation = page.getByRole("navigation", { name: "主导航" });
+  const home = navigation.getByRole("link", { name: "首页" });
+
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(toggle.locator(":scope > svg")).toBeVisible();
+  await expect(home).toHaveAttribute("title", "首页");
+  await expect(home).toHaveAttribute("aria-current", "page");
+
+  for (const link of await navigation.getByRole("link").all()) {
+    await expect(link).toHaveAttribute("title");
+    await expect(link.locator(":scope > svg")).toBeVisible();
+  }
+
+  await toggle.click();
+  await expect(page.getByRole("button", { name: "收起导航" })).toHaveAttribute("aria-expanded", "true");
+
+  const warehouseSelector = page.locator(".topbar-selector");
+  const search = page.getByRole("searchbox", { name: "全局搜索" });
+  const notification = page.getByRole("button", { name: /通知中心/ });
+  const userMenuButton = page.locator(".workspace-user-button");
+  await warehouseSelector.focus();
+  await page.keyboard.press("Tab");
+  await expect(search).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(notification).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(userMenuButton).toBeFocused();
+  await userMenuButton.press("Enter");
+  await expect(userMenuButton).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByText("登录信息", { exact: true })).toBeVisible();
+});
+
 test("sidebar navigation opens the corresponding admin pages", async ({ page }) => {
   await page.goto(apiUrl("/auth/local?returnTo=%2F"));
   await expect(page.getByRole("heading", { name: "库存总览" })).toBeVisible();
