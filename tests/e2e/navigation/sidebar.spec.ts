@@ -24,6 +24,42 @@ test("sidebar brand renders the company logo instead of the text placeholder", a
   await expect.poll(() => logo.evaluate((image) => image.complete && image.naturalWidth > 0)).toBe(true);
 });
 
+test("980px expanded compact sidebar keeps the full brand controls within its bounds", async ({ page }) => {
+  await page.setViewportSize({ width: 980, height: 900 });
+  await loginAs(page, "/", "ADMIN");
+
+  await page.locator(".sidebar").hover();
+
+  await expect.poll(() => page.evaluate(() => {
+    const sidebar = document.querySelector<HTMLElement>(".sidebar");
+    const workspace = document.querySelector<HTMLElement>(".workspace");
+    const brand = document.querySelector<HTMLElement>(".sidebar__brand");
+    const logo = brand?.querySelector<HTMLElement>(":scope > .logo-mark");
+    const toggle = brand?.querySelector<HTMLElement>(":scope > .sidebar__toggle");
+    if (!sidebar || !workspace || !brand || !logo || !toggle) throw new Error("compact sidebar brand is missing");
+
+    const brandRect = brand.getBoundingClientRect();
+    const logoRect = logo.getBoundingClientRect();
+    const toggleRect = toggle.getBoundingClientRect();
+    return {
+      sidebarWidth: Math.round(sidebar.getBoundingClientRect().width),
+      workspaceLeft: Math.round(workspace.getBoundingClientRect().left),
+      logoWidth: Math.round(logoRect.width),
+      toggleWidth: Math.round(toggleRect.width),
+      directChildrenInsideBrand: logoRect.left >= brandRect.left && logoRect.right <= brandRect.right
+        && toggleRect.left >= brandRect.left && toggleRect.right <= brandRect.right,
+      childrenDoNotOverlap: logoRect.right <= toggleRect.left || toggleRect.right <= logoRect.left,
+    };
+  })).toEqual({
+    sidebarWidth: 232,
+    workspaceLeft: 64,
+    logoWidth: 190,
+    toggleWidth: 32,
+    directChildrenInsideBrand: true,
+    childrenDoNotOverlap: true,
+  });
+});
+
 test("sidebar navigation opens the corresponding admin pages", async ({ page }) => {
   await page.goto(apiUrl("/auth/local?returnTo=%2F"));
   await expect(page.getByRole("heading", { name: "库存总览" })).toBeVisible();
