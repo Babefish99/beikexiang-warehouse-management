@@ -387,3 +387,11 @@ Task 8 首轮完整 E2E 曾为 75 passed、29 failed；29 个失败全部来自�
 - 域名、服务器、部署目录或运行方式发生变化。
 
 更新时记录事实和验证证据；不能把“代码已实现”“已经部署”“已经联通”“已经验收”混写成同一种状态。
+
+### 10.16 紧凑桌面布局本地验证与交接（2026-08-22）
+
+- 本地分支 `codex/compact-desktop-layout` 已包含获批的紧凑桌面行为：在 `821px–1180px` 默认显示 `64px` 图标侧栏；鼠标悬停或键盘焦点临时以 `232px` 覆盖内容区，而工作区仍保留 `64px`；指针点击固定后工作区同步使用 `232px` 留边；再次点击收起；刷新恢复默认收起；`<=820px` 的既有手机导航未改。`980px/1180px` 的紧凑顶栏、指标和仪表盘可读性也在本轮范围内。
+- 新鲜侧栏 E2E：使用隔离 memory persistence 与 local-auth 执行 `corepack pnpm exec playwright test tests/e2e/navigation/sidebar.spec.ts`，7/7 通过（11.0s）。覆盖指针固定/取消固定、键盘取消固定、指针到键盘焦点、刷新及 `1181px`/`820px` 边界。
+- 新鲜完整 Vitest：`corepack pnpm test` exit 1；仅 `tests/deployment/deployment-scripts.test.ts` 的 Linux `/bin/sh` 打包验证失败，错误为 `spawnSync docker ETIMEDOUT`，Docker 绑定本 Windows worktree 的挂载路径时超时。结果为 47 个文件通过、3 个跳过、1 个失败；261 个测试通过、17 个跳过、1 个失败（40.04s）。这是已独立诊断的本地 Docker bind-mount 环境阻塞，未被表述为测试通过，也未修改产品、测试或部署代码。
+- 新鲜类型、构建与差异检查：`corepack pnpm typecheck` exit 0；`corepack pnpm build` exit 0（Web 转换 1613 个模块）；验证前的 `git diff --check` 无输出、exit 0。文档提交前后仍需保持 diff 检查无输出。
+- 边界：本轮仅本地开发与交接记录；没有 Push、生产部署、生产数据库、Secret 或企业微信配置变更。服务器仍运行已发布的 `3f61393` 版本；任何线上发布须重新获得明确授权。
