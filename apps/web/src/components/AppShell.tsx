@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { BarChart3, Building2, ChevronDown, LayoutDashboard, PackageSearch, Search, Settings, ShieldCheck, UserCircle, Warehouse, X } from "lucide-react";
+import { BarChart3, Building2, ChevronDown, LayoutDashboard, PackageSearch, PanelLeftClose, PanelLeftOpen, Search, Settings, ShieldCheck, UserCircle, Warehouse, X } from "lucide-react";
 import { MobileBottomNav } from "../features/mobile/MobileBottomNav";
 import { MobileMoreSheet } from "../features/mobile/MobileMoreSheet";
 import { useMobileViewport } from "../features/mobile/use-mobile-viewport";
@@ -66,6 +66,8 @@ export function AppShell({
   const loginChannel = window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost" ? "本地开发登录" : "企业微信登录";
 
   const [moreSheetOpen, setMoreSheetOpen] = useState(false);
+  const [compactSidebarPinned, setCompactSidebarPinned] = useState(false);
+  const [compactSidebarHoverSuppressed, setCompactSidebarHoverSuppressed] = useState(false);
   const [warehouseMenuOpen, setWarehouseMenuOpen] = useState(false);
   const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -152,16 +154,30 @@ export function AppShell({
   };
 
   return (
-    <div className="app-shell mobile-app-frame">
-      {!isMobileViewport ? <aside className="sidebar">
+    <div className={`app-shell mobile-app-frame${compactSidebarPinned ? " app-shell--sidebar-pinned" : ""}${compactSidebarHoverSuppressed ? " app-shell--sidebar-hover-suppressed" : ""}`}>
+      {!isMobileViewport ? <aside className="sidebar" onMouseMove={() => {
+        if (compactSidebarHoverSuppressed) setCompactSidebarHoverSuppressed(false);
+      }}>
         <div className="sidebar__brand">
           <LogoMark />
+          <button
+            className="sidebar__toggle"
+            type="button"
+            aria-label={compactSidebarPinned ? "收起导航" : "展开导航"}
+            aria-expanded={compactSidebarPinned}
+            onClick={() => {
+              setCompactSidebarHoverSuppressed(compactSidebarPinned);
+              setCompactSidebarPinned((pinned) => !pinned);
+            }}
+          >
+            {compactSidebarPinned ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+          </button>
         </div>
         <nav className="sidebar__nav" aria-label="主导航">
           {navItems.map(({ label, href, icon: Icon, ...item }) => {
             const active = isActivePath(pathname, { label, href, icon: Icon, ...item });
             return (
-              <a className={`nav-item ${active ? "is-active" : ""}`} key={label} href={href} aria-current={active ? "page" : undefined}>
+              <a className={`nav-item ${active ? "is-active" : ""}`} key={label} href={href} title={label} aria-current={active ? "page" : undefined}>
                 <Icon size={18} strokeWidth={1.8} />
                 <span>{label}</span>
               </a>
