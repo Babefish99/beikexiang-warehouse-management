@@ -72,6 +72,25 @@ test("1180px compact sidebar hovers temporarily and pins only after a click", as
   await expect.poll(() => compactLayout(page)).toEqual({ sidebarWidth: 64, workspaceLeft: 64 });
 });
 
+test("1180px keyboard unpin keeps the focused compact sidebar expanded", async ({ page }) => {
+  await page.setViewportSize({ width: 1180, height: 900 });
+  await loginAs(page, "/", "ADMIN");
+
+  const toggle = page.locator(".sidebar__toggle");
+  await toggle.focus();
+  await toggle.press("Enter");
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect.poll(() => compactLayout(page)).toEqual({ sidebarWidth: 232, workspaceLeft: 232 });
+
+  await toggle.press("Enter");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect.poll(() => compactLayout(page)).toEqual({ sidebarWidth: 232, workspaceLeft: 64 });
+
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("link", { name: "首页" })).toBeFocused();
+  await expect.poll(() => compactLayout(page)).toEqual({ sidebarWidth: 232, workspaceLeft: 64 });
+});
+
 test("desktop and mobile navigation remain on their existing boundaries", async ({ page }) => {
   await page.setViewportSize({ width: 1181, height: 900 });
   await loginAs(page, "/", "ADMIN");

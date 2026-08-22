@@ -165,8 +165,8 @@ export function AppShell({
             type="button"
             aria-label={compactSidebarPinned ? "收起导航" : "展开导航"}
             aria-expanded={compactSidebarPinned}
-            onClick={() => {
-              setCompactSidebarHoverSuppressed(compactSidebarPinned);
+            onClick={(event) => {
+              setCompactSidebarHoverSuppressed(compactSidebarPinned && event.detail > 0);
               setCompactSidebarPinned((pinned) => !pinned);
             }}
           >
