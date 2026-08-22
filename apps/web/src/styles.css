@@ -138,11 +138,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .topbar { height: 74px; min-height: 74px; padding-inline: clamp(16px, 2vw, 24px); flex-wrap: nowrap; gap: 12px; }
   .topbar__leading { min-width: 0; flex: 0 1 auto; gap: 8px; flex-wrap: nowrap; }
   .topbar__crumb span { display: none; }
-  .topbar__center { min-width: 0; flex: 1 1 260px; }
+  .topbar__center { order: 0; min-width: 0; flex: 1 1 260px; }
   .topbar__actions { flex: 0 0 auto; gap: 6px; }
   .topbar-selector { min-width: 0; max-width: 190px; overflow: hidden; }
   .topbar-selector span, .workspace-user-button strong, .workspace-user-button small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .workspace-user-button { min-width: 0; padding-inline: 8px; }
+  .workspace-user-button { min-width: 0; max-width: min(220px, 22vw); padding-inline: 8px; }
+  .workspace-user-button span { min-width: 0; }
+  .workspace-user-button > svg { flex: 0 0 auto; }
   .main-content { padding: clamp(18px, 2.5vw, 26px) clamp(18px, 3vw, 30px) 44px; }
   .dashboard-grid { grid-template-columns: minmax(0, 1fr); }
 }

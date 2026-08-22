@@ -159,6 +159,61 @@ test("821px and 980px compact topbar retains its page, role, and user controls w
   }
 });
 
+test("980px compact topbar keeps visual and keyboard order while containing a long user name", async ({ page }) => {
+  await page.setViewportSize({ width: 980, height: 900 });
+  await loginAs(page, "/", "ADMIN");
+
+  const warehouseSelector = page.locator(".topbar-selector");
+  const search = page.getByRole("searchbox", { name: "全局搜索" });
+  const userButton = page.locator(".workspace-user-button");
+  const userIcons = userButton.locator("> svg");
+
+  await expect(warehouseSelector).toBeVisible();
+  await expect(search).toBeVisible();
+  await expect(userButton).toBeVisible();
+  const topbarOrder = await page.evaluate(() => {
+    const leading = document.querySelector<HTMLElement>(".topbar__leading");
+    const center = document.querySelector<HTMLElement>(".topbar__center");
+    const actions = document.querySelector<HTMLElement>(".topbar__actions");
+    if (!leading || !center || !actions) throw new Error("topbar regions are missing");
+    return [leading, center, actions].map((element) => element.getBoundingClientRect().left);
+  });
+  expect(topbarOrder[0]).toBeLessThan(topbarOrder[1]);
+  expect(topbarOrder[1]).toBeLessThan(topbarOrder[2]);
+
+  await warehouseSelector.focus();
+  await page.keyboard.press("Tab");
+  await expect(search).toBeFocused();
+  const focusOrder = await page.evaluate(() => {
+    const selector = document.querySelector<HTMLElement>(".topbar-selector");
+    const searchInput = document.querySelector<HTMLElement>(".workspace-search input");
+    const actions = document.querySelector<HTMLElement>(".topbar__actions");
+    if (!selector || !searchInput || !actions) throw new Error("topbar controls are missing");
+    return [selector, searchInput, actions].map((element) => element.getBoundingClientRect().left);
+  });
+  expect(focusOrder[0]).toBeLessThan(focusOrder[1]);
+  expect(focusOrder[1]).toBeLessThan(focusOrder[2]);
+
+  await userButton.locator("strong").evaluate((name) => {
+    name.textContent = "Enterprise WeCom user name that is deliberately far too long for the compact desktop topbar";
+  });
+  await expect(page.locator(".workspace-user-button small")).toBeVisible();
+  await expect(userIcons.nth(0)).toBeVisible();
+  await expect(userIcons.nth(1)).toBeVisible();
+  await expect.poll(() => page.evaluate(() => {
+    const topbar = document.querySelector<HTMLElement>(".topbar");
+    const button = document.querySelector<HTMLElement>(".workspace-user-button");
+    if (!topbar || !button) throw new Error("topbar user button is missing");
+    const topbarRect = topbar.getBoundingClientRect();
+    const buttonRect = button.getBoundingClientRect();
+    return {
+      buttonWithinTopbar: buttonRect.right <= topbarRect.right,
+      compactButton: buttonRect.width <= 220,
+      overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    };
+  })).toEqual({ buttonWithinTopbar: true, compactButton: true, overflow: false });
+});
+
 test("ADMIN and FINANCE retain the existing desktop navigation labels and hrefs", async ({ page }) => {
   const destinations = [
     { label: "首页", href: "/" },
