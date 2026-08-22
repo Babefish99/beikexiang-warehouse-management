@@ -378,10 +378,10 @@ Task 8 首轮完整 E2E 曾为 75 passed、29 failed；29 个失败全部来自�
 ### 10.16 紧凑桌面布局本地验证与交接（2026-08-22）
 
 - 本地分支 `codex/compact-desktop-layout` 已包含获批的紧凑桌面行为：在 `821px–1180px` 默认显示 `64px` 图标侧栏；鼠标悬停或键盘焦点临时以 `232px` 覆盖内容区，而工作区仍保留 `64px`；指针点击固定后工作区同步使用 `232px` 留边；再次点击收起；刷新恢复默认收起；`<=820px` 的既有手机导航未改。`821px/980px` 紧凑顶栏保留当前页、角色及头像/菜单控件且无水平溢出；`1180px` 的网格、指标和仪表盘仍可读，`1181px`/`820px` 保持既有桌面/手机边界。
-- 新鲜侧栏 E2E：以隔离的 memory persistence 与 local-auth（API `127.0.0.1:3611`、Web `127.0.0.1:5775`）执行 `corepack pnpm exec playwright test tests/e2e/navigation/sidebar.spec.ts`，13/13 通过（18.7s）。除原有 ADMIN/FINANCE 既有标签与 href、悬停/指针固定与取消固定、键盘焦点与取消固定、工作区焦点收起、刷新及 `1181px`/`820px` 行为/边界/角色覆盖外，新增 `980px` 展开品牌边界、`821px`/`980px`/`1080px` 焦点顺序与几何、`821px`/`980px`/`1180px` 长姓名控件收容断言。
-- 隔离本地浏览器视觉验收（不是生产或企业微信验收）：`820px` 为手机底部导航和手机入库表单、无桌面侧栏或页面溢出；`980px` 为 64px 紧凑侧栏、保留顶栏上下文/角色、两列指标和单列仪表盘，入库表单可读且无溢出，悬停覆盖为 232px/工作区 64px、固定后为 232px/工作区 232px；`1180px` 为紧凑侧栏、四项指标和单列仪表盘且无溢出；`1440px` 为完整 232px 侧栏和双列仪表盘且无溢出。`980px` 适配修正后再次量得品牌 Logo 190px、切换控件 32px、间距 3px，均在品牌范围内。
-- 新鲜完整 Vitest：`corepack pnpm test` exit 1；唯一失败为 `tests/deployment/deployment-scripts.test.ts` 的 Linux `/bin/sh` 打包验证，错误为 `spawnSync docker ETIMEDOUT`，Docker 绑定本 Windows worktree 的主机目录时超时。结果为 47 个文件通过、3 个跳过、1 个失败；261 个测试通过、17 个跳过、1 个失败（43.45s）。该阻塞也已在 ASCII 临时目录中独立复现，而不含 bind mount 的普通 Docker 容器可运行；它仍是未解决的 Docker Desktop 主机目录 bind-mount 本地环境阻塞，绝非完整测试通过，且未改动产品、测试或 Docker 配置。
-- 新鲜类型、构建与差异检查：`corepack pnpm typecheck` exit 0；`corepack pnpm build` exit 0（Web 转换 1613 个模块）；文档修改前 `git diff --check` 无输出、exit 0。文档提交前后仍需保持 `git diff --check` 与 `git diff --cached --check` 无输出。
+- 新鲜侧栏 E2E：以隔离的 memory persistence 与 local-auth（API `127.0.0.1:3620`、Web `127.0.0.1:5790`）执行 `corepack pnpm exec playwright test tests/e2e/navigation/sidebar.spec.ts`，14/14 通过（19.5s）。除 ADMIN/FINANCE 既有标签与 href、悬停/指针固定与取消固定、键盘焦点与取消固定、工作区焦点收起、刷新及 `1181px`/`820px` 行为/边界/角色覆盖外，覆盖 `980px` 展开品牌边界、`821px`/`980px`/`1080px` 焦点顺序与几何、`821px`/`980px`/`1180px` 长姓名控件收容，以及切换控件的可访问名称/`aria-expanded`、导航文字提示和完整 Tab 路径至当前用户菜单。
+- 隔离本地浏览器视觉验收（不是生产或企业微信验收）：`820px` 为手机底部导航和手机入库表单、无桌面侧栏或页面溢出；`980px` 为 64px 紧凑侧栏、保留顶栏上下文/角色、两列指标和单列仪表盘，入库表单可读且无溢出，悬停覆盖为 232px/工作区 64px、固定后为 232px/工作区 232px；`1180px` 为紧凑侧栏、四项指标和单列仪表盘，入库表单可读且无水平溢出；`1440px` 为完整 232px 侧栏和双列仪表盘，入库表单亦可读且无水平溢出。`980px` 适配修正后再次量得品牌 Logo 190px、切换控件 32px、间距 3px，均在品牌范围内。
+- 新鲜完整 Vitest：`corepack pnpm test` exit 1；唯一失败为 `tests/deployment/deployment-scripts.test.ts` 的 Linux `/bin/sh` 打包验证，错误为 `spawnSync docker ETIMEDOUT`，Docker 绑定本 Windows worktree 的主机目录时超时。结果为 47 个文件通过、3 个跳过、1 个失败；261 个测试通过、17 个跳过、1 个失败（42.25s）。该阻塞也已在 ASCII 临时目录中独立复现，而不含 bind mount 的普通 Docker 容器可运行；它仍是未解决的 Docker Desktop 主机目录 bind-mount 本地环境阻塞，绝非完整测试通过，且未改动产品、测试或 Docker 配置。
+- 新鲜类型、构建与差异检查：`corepack pnpm typecheck` exit 0；`corepack pnpm build` exit 0（Web 转换 1613 个模块）；文档修改后 `git diff --check` 无输出、exit 0。
 - 边界：本轮仅本地开发与交接记录；没有手机端、API、Push、生产部署、生产数据库、Secret 或企业微信配置变更。服务器仍运行已发布的 `3f61393` 版本；任何线上发布须重新获得明确授权。
 
 ## 11. 文档维护规则
