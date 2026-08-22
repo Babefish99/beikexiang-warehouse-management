@@ -155,7 +155,9 @@ export function AppShell({
 
   return (
     <div className={`app-shell mobile-app-frame${compactSidebarPinned ? " app-shell--sidebar-pinned" : ""}${compactSidebarHoverSuppressed ? " app-shell--sidebar-hover-suppressed" : ""}`}>
-      {!isMobileViewport ? <aside className="sidebar" onMouseMove={() => {
+      {!isMobileViewport ? <aside className="sidebar" onFocusCapture={() => {
+        if (compactSidebarHoverSuppressed) setCompactSidebarHoverSuppressed(false);
+      }} onMouseMove={() => {
         if (compactSidebarHoverSuppressed) setCompactSidebarHoverSuppressed(false);
       }}>
         <div className="sidebar__brand">
