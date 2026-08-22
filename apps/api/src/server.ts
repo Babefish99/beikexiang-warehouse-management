@@ -164,8 +164,12 @@ export function buildServer(options: BuildServerOptions = {}) {
     corpId: process.env.WE_COM_CORP_ID ?? "",
   });
 
-  const getSessionUser = (request: { headers: { cookie?: string } }) =>
-    sessionService.readSession(readCookie(request.headers.cookie, SESSION_COOKIE) ?? "");
+  const getSessionUser = (request: { headers: { cookie?: string } }) => {
+    const user = sessionService.readSession(readCookie(request.headers.cookie, SESSION_COOKIE) ?? "");
+    if (!user) return null;
+    if (user.isLocalAuth && config.localAuthEnabled) return user;
+    return { ...user, role: roleForUser(user.weComUserId) };
+  };
 
   app.addHook("onRequest", async (request, reply) => {
     if (!request.url.startsWith("/admin")) return;

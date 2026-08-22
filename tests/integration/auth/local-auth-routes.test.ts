@@ -198,6 +198,32 @@ describe("local auth routes", () => {
     }
   });
 
+  it("does not retain local administrator access after local auth is disabled", async () => {
+    vi.stubEnv("PERSISTENCE_DRIVER", "memory");
+    vi.stubEnv("LOCAL_AUTH_BYPASS", "false");
+    const cookie = new SessionService("local-development-session-secret").createSession({
+      id: "local-admin",
+      weComUserId: "local-admin",
+      name: "本地管理员",
+      role: "ADMIN",
+      isLocalAuth: true,
+    });
+    const app = buildServer();
+
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: "/admin/items",
+        headers: { cookie: `warehouse_session=${encodeURIComponent(cookie)}` },
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toEqual({ error: "forbidden" });
+    } finally {
+      await app.close();
+    }
+  });
+
   it("rejects non-loopback local login attempts", async () => {
     vi.stubEnv("LOCAL_AUTH_BYPASS", "true");
     const app = buildServer();

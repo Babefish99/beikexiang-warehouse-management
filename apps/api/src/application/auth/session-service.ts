@@ -1,7 +1,9 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import type { AuthenticatedUser } from "./role-service.js";
 
-interface SessionPayload extends AuthenticatedUser {
+export type AuthenticatedSessionUser = AuthenticatedUser & { isLocalAuth?: true };
+
+interface SessionPayload extends AuthenticatedSessionUser {
   exp: number;
 }
 
@@ -21,7 +23,7 @@ export class SessionService {
     this.key = createHash("sha256").update(secret).digest();
   }
 
-  createSession(user: AuthenticatedUser): string {
+  createSession(user: AuthenticatedSessionUser): string {
     const payload: SessionPayload = { ...user, exp: Math.floor(Date.now() / 1000) + this.ttlSeconds };
     const iv = randomBytes(12);
     const cipher = createCipheriv("aes-256-gcm", this.key, iv);
@@ -30,7 +32,7 @@ export class SessionService {
     return [iv, tag, encrypted].map((part) => part.toString("base64url")).join(".");
   }
 
-  readSession(token: string): AuthenticatedUser | null {
+  readSession(token: string): AuthenticatedSessionUser | null {
     try {
       const [ivValue, tagValue, encryptedValue] = token.split(".");
       if (!ivValue || !tagValue || !encryptedValue) return null;
@@ -38,7 +40,13 @@ export class SessionService {
       decipher.setAuthTag(Buffer.from(tagValue, "base64url"));
       const payload = JSON.parse(Buffer.concat([decipher.update(Buffer.from(encryptedValue, "base64url")), decipher.final()]).toString("utf8")) as SessionPayload;
       if (payload.exp <= Math.floor(Date.now() / 1000)) return null;
-      return { id: payload.id, weComUserId: payload.weComUserId, name: payload.name, role: payload.role };
+      return {
+        id: payload.id,
+        weComUserId: payload.weComUserId,
+        name: payload.name,
+        role: payload.role,
+        ...(payload.isLocalAuth ? { isLocalAuth: true } : {}),
+      };
     } catch {
       return null;
     }

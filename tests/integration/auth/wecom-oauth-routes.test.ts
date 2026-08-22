@@ -23,6 +23,8 @@ describe("enterprise WeChat OAuth routes", () => {
     vi.stubEnv("WE_COM_CORP_ID", "wx-test-corp");
     vi.stubEnv("WE_COM_AGENT_ID", "1000001");
     vi.stubEnv("WE_COM_SECRET", "test-secret");
+    vi.stubEnv("WE_COM_ADMIN_IDS", "");
+    vi.stubEnv("WE_COM_FINANCE_IDS", "");
     vi.stubEnv("SESSION_SECRET", "local-development-session-secret");
   });
 
@@ -59,6 +61,69 @@ describe("enterprise WeChat OAuth routes", () => {
       expect(callback.headers.location).toBe("https://warehouse-web.example.com/admin/reports");
       expect(sessionCookie).toContain("warehouse_session=");
       expect(sessionCookie).toContain("Secure");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("re-evaluates an existing session role after its WeCom user becomes an administrator", async () => {
+    vi.stubEnv("WE_COM_ADMIN_IDS", "");
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "token-1" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ UserId: "wx-1" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+    const app = buildServer();
+
+    try {
+      const authorize = await app.inject({ method: "GET", url: "/auth/wecom/authorize?returnTo=%2F" });
+      const pendingCookie = firstSetCookie(authorize);
+      const state = new URL(authorize.json().authorizeUrl).searchParams.get("state");
+      const callback = await app.inject({
+        method: "GET",
+        url: `/auth/wecom/callback?code=code-1&state=${encodeURIComponent(state ?? "")}`,
+        headers: { cookie: cookiePair(pendingCookie, "wecom_oauth_state") },
+      });
+      const sessionCookie = cookiePair(firstSetCookie(callback), "warehouse_session");
+
+      const applicantSession = await app.inject({ method: "GET", url: "/auth/session", headers: { cookie: sessionCookie } });
+      expect(applicantSession.json()).toMatchObject({ user: { weComUserId: "wx-1", role: "APPLICANT" } });
+
+      vi.stubEnv("WE_COM_ADMIN_IDS", "wx-1");
+
+      const adminSession = await app.inject({ method: "GET", url: "/auth/session", headers: { cookie: sessionCookie } });
+      expect(adminSession.json()).toMatchObject({ user: { weComUserId: "wx-1", role: "ADMIN" } });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("revokes an existing administrator session when its WeCom user leaves the allowlist", async () => {
+    vi.stubEnv("WE_COM_ADMIN_IDS", "wx-1");
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "token-1" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ UserId: "wx-1" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+    const app = buildServer();
+
+    try {
+      const authorize = await app.inject({ method: "GET", url: "/auth/wecom/authorize?returnTo=%2F" });
+      const pendingCookie = firstSetCookie(authorize);
+      const state = new URL(authorize.json().authorizeUrl).searchParams.get("state");
+      const callback = await app.inject({
+        method: "GET",
+        url: `/auth/wecom/callback?code=code-1&state=${encodeURIComponent(state ?? "")}`,
+        headers: { cookie: cookiePair(pendingCookie, "wecom_oauth_state") },
+      });
+      const sessionCookie = cookiePair(firstSetCookie(callback), "warehouse_session");
+
+      vi.stubEnv("WE_COM_ADMIN_IDS", "");
+
+      const revokedSession = await app.inject({ method: "GET", url: "/auth/session", headers: { cookie: sessionCookie } });
+      const reports = await app.inject({ method: "GET", url: "/admin/reports/summary?period=2026-08", headers: { cookie: sessionCookie } });
+
+      expect(revokedSession.json()).toMatchObject({ user: { weComUserId: "wx-1", role: "APPLICANT" } });
+      expect(reports.statusCode).toBe(403);
+      expect(reports.json()).toEqual({ error: "forbidden" });
     } finally {
       await app.close();
     }

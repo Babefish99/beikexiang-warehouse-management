@@ -63,7 +63,7 @@ export function registerLocalAuthRoutes(
     }
 
     await dependencies.identityService?.ensureUser(user);
-    const token = dependencies.sessionService.createSession(user);
+    const token = dependencies.sessionService.createSession({ ...user, isLocalAuth: true });
     const safeReturnTo = oauthClient.decodeReturnTo(encodeReturnTo(request.query.returnTo ?? "/"));
 
     reply.header("set-cookie", buildCookie(SESSION_COOKIE, token, dependencies.sessionService.cookieOptions(false)));
