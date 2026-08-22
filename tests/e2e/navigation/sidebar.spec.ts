@@ -109,6 +109,69 @@ test("1180px pointer unpin restores compact sidebar focus expansion on Tab", asy
   await expect.poll(() => compactLayout(page)).toEqual({ sidebarWidth: 232, workspaceLeft: 64 });
 });
 
+test("1180px pinned sidebar remains expanded after focus moves to the workspace", async ({ page }) => {
+  await page.setViewportSize({ width: 1180, height: 900 });
+  await loginAs(page, "/", "ADMIN");
+
+  const toggle = page.locator(".sidebar__toggle");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect.poll(() => compactLayout(page)).toEqual({ sidebarWidth: 232, workspaceLeft: 232 });
+
+  await page.locator(".topbar-selector").focus();
+  await expect(page.locator(".topbar-selector")).toBeFocused();
+  await expect.poll(() => compactLayout(page)).toEqual({ sidebarWidth: 232, workspaceLeft: 232 });
+});
+
+test("1180px focus-only sidebar collapses after focus moves to the workspace", async ({ page }) => {
+  await page.setViewportSize({ width: 1180, height: 900 });
+  await loginAs(page, "/", "ADMIN");
+
+  await page.getByRole("link", { name: "首页" }).focus();
+  await expect(page.getByRole("link", { name: "首页" })).toBeFocused();
+  await expect.poll(() => compactLayout(page)).toEqual({ sidebarWidth: 232, workspaceLeft: 64 });
+
+  await page.locator(".topbar-selector").focus();
+  await expect(page.locator(".topbar-selector")).toBeFocused();
+  await expect.poll(() => compactLayout(page)).toEqual({ sidebarWidth: 64, workspaceLeft: 64 });
+});
+
+test("980px compact topbar retains the current page and user role without horizontal overflow", async ({ page }) => {
+  await page.setViewportSize({ width: 980, height: 900 });
+  await loginAs(page, "/", "ADMIN");
+
+  await expect(page.locator(".topbar__crumb strong")).toBeVisible();
+  await expect(page.locator(".topbar__crumb strong")).toHaveText("首页");
+  await expect(page.locator(".workspace-user-button small")).toBeVisible();
+  await expect(page.locator(".workspace-user-button small")).toHaveText("库存管理员");
+  await expect(page.locator(".topbar__crumb span")).toBeHidden();
+  await expect(page.locator(".workspace-user-button strong")).toHaveCSS("text-overflow", "ellipsis");
+  await expect(page.locator(".workspace-user-button small")).toHaveCSS("text-overflow", "ellipsis");
+  await expect(page.locator(".topbar")).toHaveCSS("height", "74px");
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+});
+
+test("ADMIN and FINANCE retain the existing desktop navigation labels and hrefs", async ({ page }) => {
+  const destinations = [
+    { label: "首页", href: "/" },
+    { label: "库存台账", href: "/admin/items" },
+    { label: "出入库管理", href: "/admin/outbound" },
+    { label: "报表中心", href: "/admin/reports" },
+    { label: "系统设置", href: "/admin/warehouses" },
+  ];
+
+  for (const role of ["ADMIN", "FINANCE"] as const) {
+    await page.setViewportSize({ width: 1181, height: 900 });
+    await loginAs(page, "/", role);
+    const navigation = page.getByRole("navigation", { name: "主导航" });
+    await expect(navigation).toBeVisible();
+
+    for (const destination of destinations) {
+      await expect(navigation.getByRole("link", { name: destination.label })).toHaveAttribute("href", destination.href);
+    }
+  }
+});
+
 test("compact desktop keeps the topbar and dashboard readable without horizontal overflow", async ({ page }) => {
   await page.setViewportSize({ width: 980, height: 900 });
   await loginAs(page, "/", "ADMIN");

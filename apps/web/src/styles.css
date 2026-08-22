@@ -148,9 +148,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 
 @media (min-width: 821px) and (max-width: 980px) {
-  .topbar__crumb { display: none; }
+  .topbar__crumb { min-width: 0; }
+  .topbar__crumb strong { max-width: min(22vw, 180px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .topbar-selector { max-width: 158px; }
-  .workspace-user-button span { display: none; }
+  .workspace-user-button span { min-width: 0; }
   .metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .metric { padding: 16px; }
   .metric:nth-child(2n) { border-right: 0; }
