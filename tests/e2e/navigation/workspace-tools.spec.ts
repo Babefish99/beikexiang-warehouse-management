@@ -75,10 +75,13 @@ async function routeFinanceReports(page: Page) {
 test("global workspace search opens the inventory query page from a search result", async ({ page }) => {
   await routeWorkspaceWarehouses(page);
   await routeItems(page);
+  const inventoryQueries: string[] = [];
   await page.route(apiUrlPattern("/admin/reports/inventory-search.*"), async (route) => {
     const url = new URL(route.request().url());
-    expect(url.searchParams.get("query")).toBe("Tea");
+    const query = url.searchParams.get("query");
+    expect(["Tea", "TEA-001"]).toContain(query);
     expect(url.searchParams.get("warehouseId")).toBe("all");
+    inventoryQueries.push(query ?? "");
 
     await route.fulfill({
       contentType: "application/json",
@@ -121,6 +124,7 @@ test("global workspace search opens the inventory query page from a search resul
   await expect(page).toHaveURL(/\/admin\/inventory\?query=TEA-001$/);
   await expect(page.getByRole("heading", { name: "库存查询" })).toBeVisible();
   await expect(page.getByRole("searchbox", { name: "查询库存" })).toHaveValue("TEA-001");
+  await expect.poll(() => inventoryQueries).toEqual(["Tea", "TEA-001"]);
 });
 
 test("changing the selected warehouse clears stale search results and shows the new warehouse context", async ({ page }) => {

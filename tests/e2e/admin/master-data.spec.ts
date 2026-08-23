@@ -212,8 +212,10 @@ test.describe("master data administration", () => {
     const form = page.locator("form");
     await expect(form.locator("select").nth(0)).toContainText("WH-01 · Main warehouse");
     await expect(form.locator("select").nth(1)).toContainText("TEA-0001 · Tea leaves");
-    await expect(form.getByLabel("批次号 *")).toHaveCount(0);
-    await expect(form.getByText("按采购日期自动生成，例如 20260814-001")).toBeVisible();
+    const batchPreview = form.getByLabel("批次号（系统生成）");
+    await expect(batchPreview).toHaveAttribute("readonly", "");
+    await form.getByLabel("采购日期 *").fill("2026-08-14");
+    await expect(batchPreview).toHaveValue("20260814-001");
     await form.locator("select").nth(0).selectOption("warehouse-1");
     await form.locator("select").nth(1).selectOption("item-1");
     await form.getByLabel("入库数量 *").fill("5");
@@ -228,7 +230,7 @@ test.describe("master data administration", () => {
     await expect(page.getByText("inbound rejected by server")).toBeVisible();
     await expect(form.locator("select").nth(0)).toHaveValue("warehouse-1");
     await expect(form.locator("select").nth(1)).toHaveValue("item-1");
-    await expect(form.getByLabel("批次号 *")).toHaveCount(0);
+    await expect(batchPreview).toHaveValue("20260814-001");
     await expect(form.getByLabel("采购单价 *")).toHaveValue("0");
     await expect(form.getByLabel("采购人")).toHaveValue("Alex");
   });
