@@ -46,7 +46,10 @@ test.describe("desktop route preservation above the mobile breakpoint", () => {
     test(`${routeCase.path} keeps its existing desktop page`, async ({ page }) => {
       if (routeCase.request) {
         await page.route(apiUrl(routeCase.request), async (route) => {
-          await route.fulfill({ contentType: "application/json", body: "[]" });
+          await route.fulfill({
+            contentType: "application/json",
+            body: routeCase.path === "/admin/transfers" ? '{"balances":[]}' : "[]",
+          });
         });
       }
       if (routeCase.path === "/admin/opening-stock") {

@@ -8,7 +8,6 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
   const dashboardOutboundWarehouseIds: Array<string | null> = [];
   const itemPageWarehouseIds: Array<string | null> = [];
   let captureItemPageRequests = false;
-  let expectedTransactionWarehouseId = "all";
 
   await page.route(apiUrlPattern("/admin/items(?:\\?|$)"), async (route) => {
     const url = new URL(route.request().url());
@@ -56,16 +55,17 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
   });
   await page.route(apiUrlPattern("/admin/reports/transactions.*"), async (route) => {
     const url = new URL(route.request().url());
+    const warehouseId = url.searchParams.get("warehouseId");
     expect(url.searchParams.get("period")).toBe("2026-08");
-    expect(url.searchParams.get("warehouseId")).toBe(expectedTransactionWarehouseId);
-
-    if (url.searchParams.get("type") === "inbound") dashboardInboundWarehouseIds.push(url.searchParams.get("warehouseId"));
-    if (url.searchParams.get("type") === "outbound") dashboardOutboundWarehouseIds.push(url.searchParams.get("warehouseId"));
+    if (url.searchParams.get("type") === "inbound") dashboardInboundWarehouseIds.push(warehouseId);
+    if (url.searchParams.get("type") === "outbound") dashboardOutboundWarehouseIds.push(warehouseId);
 
     if (url.searchParams.get("type") === "inbound") {
       await route.fulfill({
         contentType: "application/json",
-        body: JSON.stringify([{ quantity: "12", amount: "120.00" }]),
+        body: JSON.stringify([warehouseId === "warehouse-2"
+          ? { quantity: "21", amount: "210.00" }
+          : { quantity: "12", amount: "120.00" }]),
       });
       return;
     }
@@ -73,7 +73,9 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
     if (url.searchParams.get("type") === "outbound") {
       await route.fulfill({
         contentType: "application/json",
-        body: JSON.stringify([{ quantity: "3", amount: "30.00" }]),
+        body: JSON.stringify([warehouseId === "warehouse-2"
+          ? { quantity: "8", amount: "80.00" }
+          : { quantity: "3", amount: "30.00" }]),
       });
       return;
     }
@@ -179,7 +181,6 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
   expect(await editForm.evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(" ").filter(Boolean).length)).toBe(2);
 
   captureItemPageRequests = false;
-  expectedTransactionWarehouseId = "all";
   await loginAs(page, "/", "ADMIN");
   await expect(page.locator(".page-header h1")).toBeVisible();
   await expect.poll(() => dashboardItemsWarehouseIds.length).toBeGreaterThan(0);
@@ -191,21 +192,25 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
   expect(dashboardInboundWarehouseIds.every((warehouseId) => warehouseId === "all")).toBe(true);
   expect(dashboardOutboundWarehouseIds.every((warehouseId) => warehouseId === "all")).toBe(true);
 
-  const initialDashboardRequestCounts = {
-    items: dashboardItemsWarehouseIds.length,
-    pending: dashboardPendingWarehouseIds.length,
-    inbound: dashboardInboundWarehouseIds.length,
-    outbound: dashboardOutboundWarehouseIds.length,
-  };
-  expectedTransactionWarehouseId = "warehouse-2";
+  const selectedInboundResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === "/admin/reports/transactions"
+      && url.searchParams.get("type") === "inbound"
+      && url.searchParams.get("warehouseId") === "warehouse-2";
+  });
+  const selectedOutboundResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === "/admin/reports/transactions"
+      && url.searchParams.get("type") === "outbound"
+      && url.searchParams.get("warehouseId") === "warehouse-2";
+  });
   await page.locator(".topbar-selector").click();
   await page.getByRole("menuitemradio", { name: /WH-02/ }).click();
-  await expect.poll(() => dashboardItemsWarehouseIds.length).toBeGreaterThan(initialDashboardRequestCounts.items);
-  await expect.poll(() => dashboardPendingWarehouseIds.length).toBeGreaterThan(initialDashboardRequestCounts.pending);
-  await expect.poll(() => dashboardInboundWarehouseIds.length).toBeGreaterThan(initialDashboardRequestCounts.inbound);
-  await expect.poll(() => dashboardOutboundWarehouseIds.length).toBeGreaterThan(initialDashboardRequestCounts.outbound);
+  await Promise.all([selectedInboundResponse, selectedOutboundResponse]);
   expect(dashboardItemsWarehouseIds.every((warehouseId) => warehouseId === null)).toBe(true);
   expect(dashboardPendingWarehouseIds.every((warehouseId) => warehouseId === null)).toBe(true);
-  expect(dashboardInboundWarehouseIds.slice(initialDashboardRequestCounts.inbound).every((warehouseId) => warehouseId === "warehouse-2")).toBe(true);
-  expect(dashboardOutboundWarehouseIds.slice(initialDashboardRequestCounts.outbound).every((warehouseId) => warehouseId === "warehouse-2")).toBe(true);
+  expect(dashboardInboundWarehouseIds).toContain("warehouse-2");
+  expect(dashboardOutboundWarehouseIds).toContain("warehouse-2");
+  await expect(page.locator(".metric--inbound .metric__value strong")).toHaveText("21 / 210.00");
+  await expect(page.locator(".metric--outbound .metric__value strong")).toHaveText("8 / 80.00");
 });

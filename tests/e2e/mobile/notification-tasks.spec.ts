@@ -9,10 +9,11 @@ const tasks = [
   { id: "period-close-2026-08", kind: "PERIOD_CLOSE", title: "当前期间待结账", description: "记账期间 2026-08 尚未结账。", href: "/admin/period-close", priority: 3 },
 ];
 
-async function openMobileNotificationCenter(page: Page) {
+async function openMobileNotificationCenter(page: Page, beforeOpen?: () => void) {
   await page.getByRole("button", { name: "更多" }).click();
   const moreSheet = page.getByRole("dialog", { name: "更多功能" });
   await expect(moreSheet.getByRole("button", { name: /通知中心/ })).toContainText("5");
+  beforeOpen?.();
   await moreSheet.getByRole("button", { name: /通知中心/ }).click();
   return page.getByRole("dialog", { name: "通知与待办" });
 }
@@ -146,31 +147,35 @@ test("modal link coordination leaves external and alternate navigation semantics
 });
 
 test("business completion bypasses an older request and resolved tasks stay removed", async ({ page }) => {
-  let requestCount = 0;
+  let holdNextRequest = false;
+  let returnResolvedTasks = false;
   let releaseOlderRequest!: () => void;
   const olderRequestReleased = new Promise<void>((resolve) => { releaseOlderRequest = resolve; });
   let olderRequestStarted!: () => void;
   const olderRequestHasStarted = new Promise<void>((resolve) => { olderRequestStarted = resolve; });
   let olderRequestFinished!: () => void;
   const olderRequestHasFinished = new Promise<void>((resolve) => { olderRequestFinished = resolve; });
+  let resolvedRequestFinished!: () => void;
+  const resolvedRequestHasFinished = new Promise<void>((resolve) => { resolvedRequestFinished = resolve; });
   await page.route(apiUrl("/admin/notifications"), async (route) => {
-    requestCount += 1;
-    if (requestCount === 2) {
+    if (holdNextRequest) {
+      holdNextRequest = false;
       olderRequestStarted();
       await olderRequestReleased;
       await route.fulfill({ contentType: "application/json", body: JSON.stringify(tasks) });
       olderRequestFinished();
       return;
     }
-    await route.fulfill({ contentType: "application/json", body: requestCount === 1 ? JSON.stringify(tasks) : "[]" });
+    await route.fulfill({ contentType: "application/json", body: returnResolvedTasks ? "[]" : JSON.stringify(tasks) });
+    if (returnResolvedTasks) resolvedRequestFinished();
   });
   await loginAs(page, "/", "ADMIN");
   await expect(page.getByRole("button", { name: "更多" })).toBeVisible();
-  await expect.poll(() => requestCount).toBeGreaterThanOrEqual(1);
-  const center = await openMobileNotificationCenter(page);
+  const center = await openMobileNotificationCenter(page, () => { holdNextRequest = true; });
   await olderRequestHasStarted;
+  returnResolvedTasks = true;
   await page.evaluate(() => window.dispatchEvent(new Event("warehouse:business-completed")));
-  await expect.poll(() => requestCount).toBeGreaterThanOrEqual(3);
+  await resolvedRequestHasFinished;
   releaseOlderRequest();
   await olderRequestHasFinished;
 
