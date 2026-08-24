@@ -377,13 +377,14 @@ Task 8 首轮完整 E2E 曾为 75 passed、29 failed；29 个失败全部来自�
 
 ### 10.16 紧凑桌面布局本地验证与交接（2026-08-22，2026-08-24 复验）
 
-- 本地分支 `codex/compact-desktop-layout` 已包含获批的紧凑桌面行为：在 `821px–1180px` 默认显示 `64px` 图标侧栏；鼠标悬停或键盘焦点临时以 `232px` 覆盖内容区，而工作区仍保留 `64px`；指针点击固定后工作区同步使用 `232px` 留边；再次点击收起；刷新恢复默认收起；`<=820px` 的既有手机导航未改。`821px/980px` 紧凑顶栏保留当前页、角色及头像/菜单控件且无水平溢出；`1180px` 的网格、指标和仪表盘仍可读，`1181px`/`820px` 保持既有桌面/手机边界。
+- 来源分支 `codex/compact-desktop-layout@46b1b22` 实现了获批的紧凑桌面行为，并已在 2026-08-24 通过合并提交 `7b85a76` 进入 `feat/warehouse-system`：在 `821px–1180px` 默认显示 `64px` 图标侧栏；鼠标悬停或键盘焦点临时以 `232px` 覆盖内容区，而工作区仍保留 `64px`；指针点击固定后工作区同步使用 `232px` 留边；再次点击收起；刷新恢复默认收起；`<=820px` 的既有手机导航未改。`821px/980px` 紧凑顶栏保留当前页、角色及头像/菜单控件且无水平溢出；`1180px` 的网格、指标和仪表盘仍可读，`1181px`/`820px` 保持既有桌面/手机边界。
 - 2026-08-24 新鲜侧栏 E2E：为避免 Playwright 默认端口复用本机固定资产系统，显式使用仓库专属临时端口和进程级测试配置（API `127.0.0.1:13001`、Web `127.0.0.1:13000`、memory persistence、local-auth）执行 `corepack pnpm exec playwright test tests/e2e/navigation/sidebar.spec.ts`，14/14 通过（29.0s）。除 ADMIN/FINANCE 既有标签与 href、悬停/指针固定与取消固定、键盘焦点与取消固定、工作区焦点收起、刷新及 `1181px`/`820px` 行为/边界/角色覆盖外，覆盖 `980px` 展开品牌边界、`821px`/`980px`/`1080px` 焦点顺序与几何、`821px`/`980px`/`1180px` 长姓名控件收容，以及切换控件的可访问名称/`aria-expanded`、导航文字提示和完整 Tab 路径至当前用户菜单。临时端口和进程已在测试后释放，未停止或修改固定资产系统的既有本地服务。
 - 隔离本地浏览器视觉验收（不是生产或企业微信验收）：`820px` 为手机底部导航和手机入库表单、无桌面侧栏或页面溢出；`980px` 为 64px 紧凑侧栏、保留顶栏上下文/角色、两列指标和单列仪表盘，入库表单可读且无溢出，悬停覆盖为 232px/工作区 64px、固定后为 232px/工作区 232px；`1180px` 为紧凑侧栏、四项指标和单列仪表盘，入库表单可读且无水平溢出；`1440px` 为完整 232px 侧栏和双列仪表盘，入库表单亦可读且无水平溢出。`980px` 适配修正后再次量得品牌 Logo 190px、切换控件 32px、间距 3px，均在品牌范围内。
 - Docker Desktop 本地门禁已解除：经用户手动加入精确父目录 `D:\桌面\仓库\.worktrees\compact-desktop-layout\.superpowers` 并应用设置后，只读 bind-mount 探针返回 `bind-ok`；定向 `tests/deployment/deployment-scripts.test.ts` 为 4/4 通过（26.01s）。此前的 `spawnSync docker ETIMEDOUT` 根因是该动态 `release-test-*` 临时目录的父目录未获 Docker Desktop 文件共享授权，不需要修改产品代码、测试调度或超时策略。
 - 新鲜完整 Vitest：临时启动当前仓库 API `127.0.0.1:13001`，并将 `bootstrap.test.ts` 的完整健康检查 URL 显式设为 `http://127.0.0.1:13001/health` 后，`corepack pnpm test` 为 48 个文件通过、3 个跳过；262 个测试通过、17 个跳过、0 个失败（20.12s）。一次并行执行曾使 `bootstrap.test.ts` 触发固定 5 秒超时；该测试单独运行 1/1 通过（59ms），无产品回归证据。
 - 新鲜类型、构建与差异检查：`corepack pnpm typecheck` exit 0；`corepack pnpm build` exit 0（Web 转换 1613 个模块）；文档修改后 `git diff --check` 无输出、exit 0。
 - 本地集成：2026-08-24 按用户选择将 `codex/compact-desktop-layout@46b1b22` 本地合并到 `feat/warehouse-system`。合并时以紧凑布局分支的获批交互和 14 项 E2E 为主，并保留集成分支随后加入的登录测试稳定性处理及切换按钮 hover/focus 可见样式；旧的并行侧栏状态机与对应单元测试已移除。合并暂存结果再次通过侧栏 E2E 14/14（28.1s）、完整 Vitest 48 个文件通过/3 个跳过且 262 个测试通过/17 个跳过（13.75s）、API/Web 类型检查、生产构建和 `git diff --check`。
+- 合并提交 `7b85a76` 的提交后复验再次通过：侧栏 E2E 14/14（26.0s）；完整 Vitest 48 个文件通过、3 个跳过，262 个测试通过、17 个跳过、0 个失败（36.26s）；API/Web 类型检查、生产构建和最终 `git diff --check` 均通过。已清理本次拥有的 `.worktrees/compact-desktop-layout` worktree，并删除已合并的来源分支 `codex/compact-desktop-layout`；未触碰其他 worktree。
 - 边界：本次只完成本地合并与验证，没有 Push、生产部署、生产数据库、Secret 或企业微信配置变更。服务器仍运行已发布的 `3f61393` 版本；任何线上发布继续按既定授权流程执行。
 
 ## 11. 文档维护规则
