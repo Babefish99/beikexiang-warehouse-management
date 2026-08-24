@@ -1,6 +1,5 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { BarChart3, Building2, ChevronDown, LayoutDashboard, PackageSearch, PanelLeftClose, PanelLeftOpen, Search, Settings, ShieldCheck, UserCircle, Warehouse, X } from "lucide-react";
-import { getCompactSidebarShellClasses, useCompactSidebarViewport } from "../features/layout/compact-sidebar";
 import { MobileBottomNav } from "../features/mobile/MobileBottomNav";
 import { MobileMoreSheet } from "../features/mobile/MobileMoreSheet";
 import { useMobileViewport } from "../features/mobile/use-mobile-viewport";
@@ -59,7 +58,6 @@ export function AppShell({
 }) {
   const pathname = window.location.pathname;
   const isMobileViewport = useMobileViewport();
-  const isCompactSidebar = useCompactSidebarViewport();
   const currentSection = navItems.find((item) => isActivePath(pathname, item))?.label ?? "工作台";
   const selectedWarehouseLabel = useMemo(
     () => toWarehouseLabel(selectedWarehouseId, warehouses),
@@ -68,7 +66,8 @@ export function AppShell({
   const loginChannel = window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost" ? "本地开发登录" : "企业微信登录";
 
   const [moreSheetOpen, setMoreSheetOpen] = useState(false);
-  const [isCompactSidebarPinned, setIsCompactSidebarPinned] = useState(false);
+  const [compactSidebarPinned, setCompactSidebarPinned] = useState(false);
+  const [compactSidebarHoverSuppressed, setCompactSidebarHoverSuppressed] = useState(false);
   const [warehouseMenuOpen, setWarehouseMenuOpen] = useState(false);
   const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -141,10 +140,6 @@ export function AppShell({
   }, [notificationMenuOpen, searchPopoverOpen, userMenuOpen, warehouseMenuOpen]);
 
   const showSearchPopover = searchPopoverOpen && searchQuery.trim().length > 0;
-  const compactSidebarClasses = getCompactSidebarShellClasses(
-    isCompactSidebar,
-    isCompactSidebarPinned,
-  );
 
   const clearSearch = () => {
     setSearchQuery("");
@@ -159,29 +154,34 @@ export function AppShell({
   };
 
   return (
-    <div className={["app-shell", "mobile-app-frame", ...compactSidebarClasses].join(" ")}>
-      {!isMobileViewport ? <aside className={`sidebar ${isCompactSidebar && isCompactSidebarPinned ? "sidebar--pinned" : ""}`}>
+    <div className={`app-shell mobile-app-frame${compactSidebarPinned ? " app-shell--sidebar-pinned" : ""}${compactSidebarHoverSuppressed ? " app-shell--sidebar-hover-suppressed" : ""}`}>
+      {!isMobileViewport ? <aside className="sidebar" onFocusCapture={() => {
+        if (compactSidebarHoverSuppressed) setCompactSidebarHoverSuppressed(false);
+      }} onMouseMove={() => {
+        if (compactSidebarHoverSuppressed) setCompactSidebarHoverSuppressed(false);
+      }}>
         <div className="sidebar__brand">
           <LogoMark />
-          {isCompactSidebar ? (
-            <button
-              className="sidebar__toggle"
-              type="button"
-              aria-label={isCompactSidebarPinned ? "收起固定侧栏" : "固定展开侧栏"}
-              aria-expanded={isCompactSidebarPinned}
-              onClick={() => setIsCompactSidebarPinned((pinned) => !pinned)}
-            >
-              {isCompactSidebarPinned ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
-            </button>
-          ) : null}
+          <button
+            className="sidebar__toggle"
+            type="button"
+            aria-label={compactSidebarPinned ? "收起导航" : "展开导航"}
+            aria-expanded={compactSidebarPinned}
+            onClick={(event) => {
+              setCompactSidebarHoverSuppressed(compactSidebarPinned && event.detail > 0);
+              setCompactSidebarPinned((pinned) => !pinned);
+            }}
+          >
+            {compactSidebarPinned ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+          </button>
         </div>
         <nav className="sidebar__nav" aria-label="主导航">
           {navItems.map(({ label, href, icon: Icon, ...item }) => {
             const active = isActivePath(pathname, { label, href, icon: Icon, ...item });
             return (
-              <a className={`nav-item ${active ? "is-active" : ""}`} key={label} href={href} aria-current={active ? "page" : undefined} title={isCompactSidebar && !isCompactSidebarPinned ? label : undefined}>
+              <a className={`nav-item ${active ? "is-active" : ""}`} key={label} href={href} title={label} aria-current={active ? "page" : undefined}>
                 <Icon size={18} strokeWidth={1.8} />
-                <span className="nav-item__label">{label}</span>
+                <span>{label}</span>
               </a>
             );
           })}
