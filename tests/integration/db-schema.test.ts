@@ -21,6 +21,13 @@ const stocktakeSnapshotMigrationDirectory = readdirSync(resolve(process.cwd(), "
 const stocktakeSnapshotMigrationPath = stocktakeSnapshotMigrationDirectory
   ? resolve(process.cwd(), "prisma/migrations", stocktakeSnapshotMigrationDirectory, "migration.sql")
   : "";
+const openingImportMigrationPath = resolve(
+  process.cwd(),
+  "prisma/migrations/20260824170000_opening_stock_import/migration.sql",
+);
+const openingImportMigration = existsSync(openingImportMigrationPath)
+  ? readFileSync(openingImportMigrationPath, "utf8")
+  : "";
 
 function modelBody(modelName: string): string {
   return schema.match(new RegExp(`model ${modelName} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? "";
@@ -38,6 +45,7 @@ describe("database schema contract", () => {
       "ApprovalLine",
       "InboundOrder",
       "InboundLine",
+      "OpeningStockImport",
       "ProcurementBatch",
       "StockBalance",
       "OutboundOrder",
@@ -79,6 +87,16 @@ describe("database schema contract", () => {
     expect(schema).toMatch(/remainingQuantity\s+Decimal\s+@db\.Decimal\(18,\s*4\)/);
     expect(schema).toMatch(/unitCost\s+Decimal\s+@db\.Decimal\(18,\s*4\)/);
     expect(schema).toMatch(/amount\s+Decimal\s+@db\.Decimal\(18,\s*2\)/);
+  });
+
+  it("stores an immutable opening-stock import summary and optional positive-row remarks", () => {
+    const importModel = modelBody("OpeningStockImport");
+
+    expect(schema).toContain("model OpeningStockImport {");
+    expect(importModel).toMatch(/^\s*id\s+String\s+@id\s*$/m);
+    expect(importModel).toMatch(/totalQuantity\s+Decimal\s+@db\.Decimal\(18,\s*4\)/);
+    expect(importModel).toMatch(/totalAmount\s+Decimal\s+@db\.Decimal\(18,\s*2\)/);
+    expect(modelBody("InboundLine")).toMatch(/^\s*remark\s+String\?\s*$/m);
   });
 
   it("enforces unique codes and accounting periods", () => {
@@ -166,6 +184,13 @@ describe("database schema contract", () => {
     expect(migration).toContain('ALTER COLUMN "actualQuantity" SET NOT NULL');
   });
 
+  it("checks in the additive opening-stock import migration", () => {
+    expect(existsSync(openingImportMigrationPath)).toBe(true);
+    expect(openingImportMigration).toContain('CREATE TABLE "OpeningStockImport"');
+    expect(openingImportMigration).toContain('CONSTRAINT "OpeningStockImport_pkey" PRIMARY KEY ("id")');
+    expect(openingImportMigration).toContain('ALTER TABLE "InboundLine" ADD COLUMN "remark" TEXT');
+  });
+
   it("seeds only structural placeholder data", () => {
     const seedData = getStructuralSeedData();
 
@@ -181,10 +206,11 @@ describe("database schema contract", () => {
       { id: "warehouse-3", code: "WH-03" },
     ]);
     expect(seedData.warehouses.every((warehouse) => warehouse.isPlaceholder)).toBe(true);
-    expect(seedData.categories.map(({ id, code, prefix }) => ({ id, code, prefix }))).toEqual([
-      { id: "category-bj", code: "CATEGORY_BJ", prefix: "BJ" },
-      { id: "category-cy", code: "CATEGORY_CY", prefix: "CY" },
-      { id: "category-wp", code: "CATEGORY_WP", prefix: "WP" },
+    expect(seedData.categories).toEqual([
+      { id: "category-bj", code: "CATEGORY_BJ", prefix: "BJ", name: "白酒" },
+      { id: "category-hj", code: "CATEGORY_HJ", prefix: "HJ", name: "红酒" },
+      { id: "category-cy", code: "CATEGORY_CY", prefix: "CY", name: "茶饮" },
+      { id: "category-wp", code: "CATEGORY_WP", prefix: "WP", name: "其他物品" },
     ]);
     expect(seedData.historicalRows).toEqual([]);
   });

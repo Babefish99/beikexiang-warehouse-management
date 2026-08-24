@@ -20,10 +20,26 @@ describe("structural database seed", () => {
     expect(categoryUpsert).toHaveBeenCalledTimes(seedData.categories.length);
     expect(roleUpsert.mock.calls.map(([call]) => call.where.code)).toEqual(["ADMIN", "FINANCE", "APPLICANT"]);
     expect(warehouseUpsert.mock.calls.map(([call]) => call.where.code)).toEqual(["WH-01", "WH-02", "WH-03"]);
-    expect(categoryUpsert.mock.calls.map(([call]) => call.where.code)).toEqual(["CATEGORY_BJ", "CATEGORY_CY", "CATEGORY_WP"]);
+    expect(categoryUpsert.mock.calls.map(([call]) => call.where.code)).toEqual([
+      "CATEGORY_BJ",
+      "CATEGORY_HJ",
+      "CATEGORY_CY",
+      "CATEGORY_WP",
+    ]);
     expect(roleUpsert.mock.calls.map(([call]) => call.update.id)).toEqual(["role-admin", "role-finance", "role-applicant"]);
     expect(warehouseUpsert.mock.calls.map(([call]) => call.update.id)).toEqual(["warehouse-1", "warehouse-2", "warehouse-3"]);
-    expect(categoryUpsert.mock.calls.map(([call]) => call.update.id)).toEqual(["category-bj", "category-cy", "category-wp"]);
+    expect(categoryUpsert.mock.calls.map(([call]) => call.update.id)).toEqual([
+      "category-bj",
+      "category-hj",
+      "category-cy",
+      "category-wp",
+    ]);
+    expect(seedData.categories).toEqual([
+      { id: "category-bj", code: "CATEGORY_BJ", prefix: "BJ", name: "白酒" },
+      { id: "category-hj", code: "CATEGORY_HJ", prefix: "HJ", name: "红酒" },
+      { id: "category-cy", code: "CATEGORY_CY", prefix: "CY", name: "茶饮" },
+      { id: "category-wp", code: "CATEGORY_WP", prefix: "WP", name: "其他物品" },
+    ]);
     expect(warehouseUpsert.mock.calls.every(([call]) => call.create.isPlaceholder)).toBe(true);
   });
 });

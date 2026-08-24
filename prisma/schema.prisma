@@ -129,9 +129,27 @@ model InboundLine {
   quantity       Decimal          @db.Decimal(18, 4)
   unitCost       Decimal          @db.Decimal(18, 4)
   amount         Decimal          @db.Decimal(18, 2)
+  remark         String?
   inboundOrder   InboundOrder     @relation(fields: [inboundOrderId], references: [id])
   batch          ProcurementBatch @relation(fields: [batchId], references: [id])
   item           Item             @relation(fields: [itemId], references: [id])
+}
+
+model OpeningStockImport {
+  id                String   @id
+  fileSha256        String
+  sourceFileName    String
+  baselineDate      DateTime
+  operatorId        String
+  financeReviewer   String
+  itemCount         Int
+  createdItemCount  Int
+  inventoryRowCount Int
+  positiveRowCount  Int
+  zeroRowCount      Int
+  totalQuantity     Decimal  @db.Decimal(18, 4)
+  totalAmount       Decimal  @db.Decimal(18, 2)
+  importedAt        DateTime @default(now())
 }
 
 model ProcurementBatch {

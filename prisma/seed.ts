@@ -2,6 +2,8 @@ import { pathToFileURL } from "node:url";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 
+import { CANONICAL_ITEM_CATEGORIES } from "../apps/api/src/domain/items/item-category.ts";
+
 export interface StructuralSeedData {
   roles: Array<{ id: string; code: string; name: string }>;
   warehouses: Array<{ id: string; code: string; name: string; isPlaceholder: boolean; isActive: boolean }>;
@@ -21,11 +23,7 @@ export function getStructuralSeedData(): StructuralSeedData {
       { id: "warehouse-2", code: "WH-02", name: "待配置仓库二", isPlaceholder: true, isActive: true },
       { id: "warehouse-3", code: "WH-03", name: "待配置仓库三", isPlaceholder: true, isActive: true },
     ],
-    categories: [
-      { id: "category-bj", code: "CATEGORY_BJ", prefix: "BJ", name: "办公用品" },
-      { id: "category-cy", code: "CATEGORY_CY", prefix: "CY", name: "茶饮" },
-      { id: "category-wp", code: "CATEGORY_WP", prefix: "WP", name: "物品" },
-    ],
+    categories: CANONICAL_ITEM_CATEGORIES.map((category) => ({ ...category })),
     historicalRows: [],
   };
 }
