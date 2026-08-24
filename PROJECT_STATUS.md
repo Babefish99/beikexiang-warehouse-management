@@ -375,14 +375,15 @@ Task 8 首轮完整 E2E 曾为 75 passed、29 failed；29 个失败全部来自�
 - 服务器上传归档 SHA-256 一致且不含 `deploy/.env.production`；发布脚本创建发布前备份 `warehouse-20260822T023811Z-3531381.sql.gz`，顺序构建 migrate/API/Web、执行迁移/seed，并完成发布版本 `20260822T023810Z-3f61393e00633d7efac09918b7e60fe4b06acd2f-3531208`。API、PostgreSQL、Web 均为 `healthy`，服务器和本机公网的仓库 `/health` 均返回 Prisma 与数据库 `ok`，校验文本精确为 `uIghWtRwsuUPacAx`，固定资产入口为 HTTP 200；共享 `warehouse-prod_edge` 网络仍包含仓库、固定资产和其他既有服务，未触碰 `yuemuhui`、生产 Secret 或数据卷，且未 Push。
 - 未完成事项：当前企业微信账号需刷新/重新进入仓库应用，以确认既有 Cookie 会被新服务端代码实时映射为管理员；企业微信真实登录、审批回调和完整业务链路仍未验收。
 
-### 10.16 紧凑桌面布局本地验证与交接（2026-08-22）
+### 10.16 紧凑桌面布局本地验证与交接（2026-08-22，2026-08-24 复验）
 
 - 本地分支 `codex/compact-desktop-layout` 已包含获批的紧凑桌面行为：在 `821px–1180px` 默认显示 `64px` 图标侧栏；鼠标悬停或键盘焦点临时以 `232px` 覆盖内容区，而工作区仍保留 `64px`；指针点击固定后工作区同步使用 `232px` 留边；再次点击收起；刷新恢复默认收起；`<=820px` 的既有手机导航未改。`821px/980px` 紧凑顶栏保留当前页、角色及头像/菜单控件且无水平溢出；`1180px` 的网格、指标和仪表盘仍可读，`1181px`/`820px` 保持既有桌面/手机边界。
-- 新鲜侧栏 E2E：以隔离的 memory persistence 与 local-auth（API `127.0.0.1:3620`、Web `127.0.0.1:5790`）执行 `corepack pnpm exec playwright test tests/e2e/navigation/sidebar.spec.ts`，14/14 通过（19.5s）。除 ADMIN/FINANCE 既有标签与 href、悬停/指针固定与取消固定、键盘焦点与取消固定、工作区焦点收起、刷新及 `1181px`/`820px` 行为/边界/角色覆盖外，覆盖 `980px` 展开品牌边界、`821px`/`980px`/`1080px` 焦点顺序与几何、`821px`/`980px`/`1180px` 长姓名控件收容，以及切换控件的可访问名称/`aria-expanded`、导航文字提示和完整 Tab 路径至当前用户菜单。
+- 2026-08-24 新鲜侧栏 E2E：为避免 Playwright 默认端口复用本机固定资产系统，显式使用仓库专属临时端口和进程级测试配置（API `127.0.0.1:13001`、Web `127.0.0.1:13000`、memory persistence、local-auth）执行 `corepack pnpm exec playwright test tests/e2e/navigation/sidebar.spec.ts`，14/14 通过（29.0s）。除 ADMIN/FINANCE 既有标签与 href、悬停/指针固定与取消固定、键盘焦点与取消固定、工作区焦点收起、刷新及 `1181px`/`820px` 行为/边界/角色覆盖外，覆盖 `980px` 展开品牌边界、`821px`/`980px`/`1080px` 焦点顺序与几何、`821px`/`980px`/`1180px` 长姓名控件收容，以及切换控件的可访问名称/`aria-expanded`、导航文字提示和完整 Tab 路径至当前用户菜单。临时端口和进程已在测试后释放，未停止或修改固定资产系统的既有本地服务。
 - 隔离本地浏览器视觉验收（不是生产或企业微信验收）：`820px` 为手机底部导航和手机入库表单、无桌面侧栏或页面溢出；`980px` 为 64px 紧凑侧栏、保留顶栏上下文/角色、两列指标和单列仪表盘，入库表单可读且无溢出，悬停覆盖为 232px/工作区 64px、固定后为 232px/工作区 232px；`1180px` 为紧凑侧栏、四项指标和单列仪表盘，入库表单可读且无水平溢出；`1440px` 为完整 232px 侧栏和双列仪表盘，入库表单亦可读且无水平溢出。`980px` 适配修正后再次量得品牌 Logo 190px、切换控件 32px、间距 3px，均在品牌范围内。
-- 新鲜完整 Vitest：`corepack pnpm test` exit 1；唯一失败为 `tests/deployment/deployment-scripts.test.ts` 的 Linux `/bin/sh` 打包验证，错误为 `spawnSync docker ETIMEDOUT`，Docker 绑定本 Windows worktree 的主机目录时超时。结果为 47 个文件通过、3 个跳过、1 个失败；261 个测试通过、17 个跳过、1 个失败（42.25s）。该阻塞也已在 ASCII 临时目录中独立复现，而不含 bind mount 的普通 Docker 容器可运行；它仍是未解决的 Docker Desktop 主机目录 bind-mount 本地环境阻塞，绝非完整测试通过，且未改动产品、测试或 Docker 配置。
+- Docker Desktop 本地门禁已解除：经用户手动加入精确父目录 `D:\桌面\仓库\.worktrees\compact-desktop-layout\.superpowers` 并应用设置后，只读 bind-mount 探针返回 `bind-ok`；定向 `tests/deployment/deployment-scripts.test.ts` 为 4/4 通过（26.01s）。此前的 `spawnSync docker ETIMEDOUT` 根因是该动态 `release-test-*` 临时目录的父目录未获 Docker Desktop 文件共享授权，不需要修改产品代码、测试调度或超时策略。
+- 新鲜完整 Vitest：临时启动当前仓库 API `127.0.0.1:13001`，并将 `bootstrap.test.ts` 的完整健康检查 URL 显式设为 `http://127.0.0.1:13001/health` 后，`corepack pnpm test` 为 48 个文件通过、3 个跳过；262 个测试通过、17 个跳过、0 个失败（20.12s）。一次并行执行曾使 `bootstrap.test.ts` 触发固定 5 秒超时；该测试单独运行 1/1 通过（59ms），无产品回归证据。
 - 新鲜类型、构建与差异检查：`corepack pnpm typecheck` exit 0；`corepack pnpm build` exit 0（Web 转换 1613 个模块）；文档修改后 `git diff --check` 无输出、exit 0。
-- 边界：本轮仅本地开发与交接记录；没有手机端、API、Push、生产部署、生产数据库、Secret 或企业微信配置变更。服务器仍运行已发布的 `3f61393` 版本；任何线上发布须重新获得明确授权。
+- 边界：本轮仅调整本机 Docker Desktop 文件共享并完成本地验证和交接记录；紧凑布局分支尚未合并到 `feat/warehouse-system`，没有 Push、生产部署、生产数据库、Secret 或企业微信配置变更。服务器仍运行已发布的 `3f61393` 版本；任何本地集成或线上发布继续按既定授权流程执行。
 
 ## 11. 文档维护规则
 
