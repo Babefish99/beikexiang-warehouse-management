@@ -56,15 +56,19 @@ class FakeOpeningStockImportStore implements OpeningStockImportStore {
 
 describe("OpeningStockImportService preview", () => {
   const parser = new ExcelOpeningStockWorkbookParser();
-  const tokenService = new OpeningStockPreviewTokenService("test-session-secret", {
-    now: () => new Date("2026-08-24T08:00:00.000Z"),
-  });
+  let currentTime: Date;
+  let tokenService: OpeningStockPreviewTokenService;
   let fakeStore: FakeOpeningStockImportStore;
   let service: OpeningStockImportService;
   let validBuffer: Buffer;
   let periodStore: InMemoryAccountingPeriodStore;
 
   beforeEach(async () => {
+    vi.restoreAllMocks();
+    currentTime = new Date("2026-08-24T08:00:00.000Z");
+    tokenService = new OpeningStockPreviewTokenService("test-session-secret", {
+      now: () => new Date(currentTime),
+    });
     fakeStore = new FakeOpeningStockImportStore();
     periodStore = new InMemoryAccountingPeriodStore();
     service = new OpeningStockImportService(parser, fakeStore, tokenService, periodStore);
@@ -251,5 +255,189 @@ describe("OpeningStockImportService preview", () => {
     expect(preview.canCommit).toBe(false);
     expect(preview.previewToken).toBeUndefined();
     expect(preview.issues).toContainEqual(expect.objectContaining({ code, severity: "ERROR" }));
+  });
+
+  it("requires finance reviewer and explicit joint confirmation", async () => {
+    const preview = await validPreview();
+
+    await expect(
+      service.commit({
+        actorId: "admin-1",
+        fileName: "期初库存.xlsx",
+        buffer: validBuffer,
+        previewToken: preview.previewToken!,
+        financeReviewer: "",
+        confirmed: true,
+      }),
+    ).rejects.toMatchObject({ message: "财务复核人不能为空", statusCode: 400 });
+    await expect(
+      service.commit({
+        actorId: "admin-1",
+        fileName: "期初库存.xlsx",
+        buffer: validBuffer,
+        previewToken: preview.previewToken!,
+        financeReviewer: "财务甲",
+        confirmed: false,
+      }),
+    ).rejects.toMatchObject({ message: "请确认已与财务共同复核", statusCode: 400 });
+    await expect(
+      service.commit({
+        actorId: "admin-1",
+        fileName: "期初库存.xlsx",
+        buffer: validBuffer,
+        previewToken: preview.previewToken!,
+        financeReviewer: "财".repeat(101),
+        confirmed: true,
+      }),
+    ).rejects.toMatchObject({ message: "财务复核人不能超过 100 个字符", statusCode: 400 });
+    expect(fakeStore.commits).toEqual([]);
+  });
+
+  it("reparses the same file and commits positive rows only", async () => {
+    const preview = await validPreview();
+
+    const result = await service.commit({
+      actorId: "admin-1",
+      fileName: "期初库存.xlsx",
+      buffer: validBuffer,
+      previewToken: preview.previewToken!,
+      financeReviewer: "财务甲",
+      confirmed: true,
+    });
+
+    expect(fakeStore.commits[0]).toMatchObject({
+      operatorId: "admin-1",
+      financeReviewer: "财务甲",
+      positiveRowCount: 1,
+      zeroRowCount: 242,
+    });
+    expect(fakeStore.commits[0]!.rows).toHaveLength(1);
+    expect(result.inventoryRowCount).toBe(243);
+  });
+
+  it("rejects changed file bytes", async () => {
+    const preview = await validPreview();
+    const changedBuffer = Buffer.concat([validBuffer, Buffer.from([0])]);
+
+    await expect(
+      service.commit({
+        actorId: "admin-1",
+        fileName: "期初库存.xlsx",
+        buffer: changedBuffer,
+        previewToken: preview.previewToken!,
+        financeReviewer: "财务甲",
+        confirmed: true,
+      }),
+    ).rejects.toMatchObject({
+      message: "期初库存文件或系统状态已变化，请重新预览",
+      statusCode: 409,
+    });
+    expect(fakeStore.commits).toEqual([]);
+  });
+
+  it("rejects a token owned by another actor", async () => {
+    const preview = await validPreview();
+
+    await expect(
+      service.commit({
+        actorId: "admin-2",
+        fileName: "期初库存.xlsx",
+        buffer: validBuffer,
+        previewToken: preview.previewToken!,
+        financeReviewer: "财务甲",
+        confirmed: true,
+      }),
+    ).rejects.toMatchObject({
+      message: "期初库存文件或系统状态已变化，请重新预览",
+      statusCode: 409,
+    });
+    expect(fakeStore.commits).toEqual([]);
+  });
+
+  it("rejects an expired preview", async () => {
+    const preview = await validPreview();
+    currentTime = new Date("2026-08-24T08:30:00.001Z");
+
+    await expect(
+      service.commit({
+        actorId: "admin-1",
+        fileName: "期初库存.xlsx",
+        buffer: validBuffer,
+        previewToken: preview.previewToken!,
+        financeReviewer: "财务甲",
+        confirmed: true,
+      }),
+    ).rejects.toMatchObject({
+      message: "期初库存文件或系统状态已变化，请重新预览",
+      statusCode: 409,
+    });
+    expect(fakeStore.commits).toEqual([]);
+  });
+
+  it("rejects a batch conflict introduced after preview", async () => {
+    const preview = await validPreview();
+    fakeStore.snapshot.items.push({
+      id: "item-1",
+      code: "BJ0001",
+      name: "测试物品 BJ0001",
+      unit: "个",
+      categoryId: "category-bj",
+      isActive: true,
+    });
+    fakeStore.snapshot.existingBatchKeys.push(
+      "warehouse-1\u0000item-1\u0000OPEN-20260824-WH01-BJ0001",
+    );
+
+    await expect(
+      service.commit({
+        actorId: "admin-1",
+        fileName: "期初库存.xlsx",
+        buffer: validBuffer,
+        previewToken: preview.previewToken!,
+        financeReviewer: "财务甲",
+        confirmed: true,
+      }),
+    ).rejects.toMatchObject({
+      message: "期初库存文件或系统状态已变化，请重新预览",
+      statusCode: 409,
+    });
+    expect(fakeStore.commits).toEqual([]);
+  });
+
+  it("rejects a parser error introduced after preview", async () => {
+    const preview = await validPreview();
+    const parse = parser.parse.bind(parser);
+    vi.spyOn(parser, "parse").mockImplementationOnce(async (input) => {
+      const parsed = await parse(input);
+      return {
+        ...parsed,
+        issues: [
+          ...parsed.issues,
+          {
+            severity: "ERROR" as const,
+            code: "QUANTITY_REQUIRED",
+            sheet: "期初库存",
+            row: 3,
+            field: "实盘数量",
+            message: "实盘数量未填写",
+          },
+        ],
+      };
+    });
+
+    await expect(
+      service.commit({
+        actorId: "admin-1",
+        fileName: "期初库存.xlsx",
+        buffer: validBuffer,
+        previewToken: preview.previewToken!,
+        financeReviewer: "财务甲",
+        confirmed: true,
+      }),
+    ).rejects.toMatchObject({
+      message: "期初库存文件或系统状态已变化，请重新预览",
+      statusCode: 409,
+    });
+    expect(fakeStore.commits).toEqual([]);
   });
 });

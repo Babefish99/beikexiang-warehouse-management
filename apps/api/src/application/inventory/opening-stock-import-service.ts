@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
 
+import { BusinessRuleError } from "../errors/business-rule-error.js";
 import type { AccountingPeriodStore } from "../periods/period-close-service.js";
 import { CANONICAL_ITEM_CATEGORIES } from "../../domain/items/item-category.js";
 import type {
   OpeningStockImportIssue,
+  OpeningStockImportCommitDraft,
   OpeningStockImportPreview,
   OpeningStockImportPreviewRow,
+  OpeningStockImportResult,
   OpeningStockImportStatus,
   OpeningStockImportStore,
   OpeningStockMasterDataSnapshot,
@@ -19,6 +22,7 @@ const EXPECTED_WAREHOUSES = new Map([
   ["WH-02", "内区1号仓库"],
   ["WH-03", "1区车库后仓库"],
 ]);
+const STALE_PREVIEW_MESSAGE = "期初库存文件或系统状态已变化，请重新预览";
 
 export interface OpeningStockMasterDataValidation {
   issues: OpeningStockImportIssue[];
@@ -217,6 +221,76 @@ export class OpeningStockImportService {
       issues: evaluation.issues,
       rows: evaluation.rows,
     };
+  }
+
+  async commit(input: {
+    actorId: string;
+    fileName: string;
+    buffer: Buffer;
+    previewToken: string;
+    financeReviewer: string;
+    confirmed: boolean;
+  }): Promise<OpeningStockImportResult> {
+    const financeReviewer = input.financeReviewer.trim();
+    if (financeReviewer === "") throw new BusinessRuleError("财务复核人不能为空", 400);
+    if (financeReviewer.length > 100) {
+      throw new BusinessRuleError("财务复核人不能超过 100 个字符", 400);
+    }
+    if (!input.confirmed) throw new BusinessRuleError("请确认已与财务共同复核", 400);
+
+    const fileSha256 = createHash("sha256").update(input.buffer).digest("hex");
+    try {
+      this.tokenService.verify(input.previewToken, { actorId: input.actorId, fileSha256 });
+    } catch {
+      throw new BusinessRuleError(STALE_PREVIEW_MESSAGE, 409);
+    }
+
+    const evaluation = await this.evaluate(input);
+    if (!evaluation.canCommit || !evaluation.parsed.baselineDate) {
+      throw new BusinessRuleError(STALE_PREVIEW_MESSAGE, 409);
+    }
+    const rows = evaluation.parsed.rows
+      .filter((row) => row.disposition === "IMPORT")
+      .map((row) => {
+        if (!row.batchNo || row.quantity === undefined || row.unitCost === undefined || !row.amount) {
+          throw new BusinessRuleError(STALE_PREVIEW_MESSAGE, 409);
+        }
+        return {
+          sheetRow: row.sheetRow,
+          warehouseCode: row.warehouseCode,
+          itemCode: row.itemCode,
+          batchNo: row.batchNo,
+          quantity: row.quantity,
+          unitCost: row.unitCost,
+          amount: row.amount,
+          remark: row.remark,
+        };
+      });
+    const draft: OpeningStockImportCommitDraft = {
+      id: "INITIAL_OPENING_STOCK",
+      fileSha256,
+      sourceFileName: input.fileName,
+      baselineDate: evaluation.parsed.baselineDate,
+      operatorId: input.actorId,
+      financeReviewer,
+      itemCount: evaluation.parsed.summary.itemCount,
+      createdItemCount: evaluation.newItemCount,
+      inventoryRowCount: evaluation.parsed.summary.inventoryRowCount,
+      positiveRowCount: evaluation.parsed.summary.positiveRowCount,
+      zeroRowCount: evaluation.parsed.summary.zeroRowCount,
+      totalQuantity: evaluation.parsed.summary.totalQuantity,
+      totalAmount: evaluation.parsed.summary.totalAmount,
+      items: evaluation.parsed.items,
+      rows,
+    };
+    try {
+      return await this.store.commit(draft);
+    } catch (error) {
+      if (error instanceof BusinessRuleError && error.statusCode === 409) {
+        throw new BusinessRuleError(STALE_PREVIEW_MESSAGE, 409);
+      }
+      throw error;
+    }
   }
 
   private async evaluate(input: {

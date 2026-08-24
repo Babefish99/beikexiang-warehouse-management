@@ -1,4 +1,5 @@
 import type { InventoryLedgerEntry } from "../../domain/inventory/ledger.js";
+import type { OpeningStockImportResult } from "./opening-stock-import-contract.js";
 
 export interface InventoryBatchState {
   id: string;
@@ -82,6 +83,7 @@ export interface InventoryMemoryState {
   returnedQuantities: Map<string, string>;
   stocktakeAdjustments: InventoryStocktakeAdjustmentState[];
   stockEntrySequence: number;
+  openingStockImport?: OpeningStockImportResult;
 }
 
 export function inventoryBalanceKey(warehouseId: string, batchId: string): string {
