@@ -56,6 +56,7 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
       await migrationClient.query(readFileSync(resolve(process.cwd(), "prisma/migrations/20260811163000_production_persistence/migration.sql"), "utf8"));
       await migrationClient.query(readFileSync(resolve(process.cwd(), "prisma/migrations/20260811171500_stocktake_quantity_snapshots/migration.sql"), "utf8"));
       await migrationClient.query(readFileSync(resolve(process.cwd(), "prisma/migrations/20260814110000_inbound_batch_sequences/migration.sql"), "utf8"));
+      await migrationClient.query(readFileSync(resolve(process.cwd(), "prisma/migrations/20260824170000_opening_stock_import/migration.sql"), "utf8"));
     } finally {
       migrationClient.release();
       await migrationPool.end();
@@ -85,6 +86,7 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
   });
 
   beforeEach(async () => {
+    await prisma.openingStockImport.deleteMany();
     await prisma.returnLine.deleteMany();
     await prisma.returnOrder.deleteMany();
     await prisma.inventoryLedgerEntry.deleteMany();

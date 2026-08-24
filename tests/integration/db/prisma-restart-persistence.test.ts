@@ -7,6 +7,7 @@ import { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { buildServer } from "../../../apps/api/src/server.js";
+import { PrismaOpeningStockImportStore } from "../../../apps/api/src/infrastructure/db/prisma-opening-stock-import-store.js";
 import { seedStructuralData } from "../../../prisma/seed.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -81,6 +82,7 @@ describe.skipIf(!databaseUrl)("Prisma application restart persistence", () => {
         "prisma/migrations/20260811163000_production_persistence/migration.sql",
         "prisma/migrations/20260811171500_stocktake_quantity_snapshots/migration.sql",
         "prisma/migrations/20260814110000_inbound_batch_sequences/migration.sql",
+        "prisma/migrations/20260824170000_opening_stock_import/migration.sql",
       ]) {
         await migrationClient.query(readFileSync(resolve(process.cwd(), migration), "utf8"));
       }
@@ -145,17 +147,64 @@ describe.skipIf(!databaseUrl)("Prisma application restart persistence", () => {
       expect(itemResponse.statusCode).toBe(201);
       itemId = itemResponse.json<{ id: string }>().id;
 
-      const openingResponse = await firstApp.inject({
-        method: "POST",
-        url: "/admin/opening-stock",
-        headers: { cookie },
-        payload: {
-          verifiedBy: "local-admin",
-          rows: [{ warehouseId: "warehouse-1", itemId, batchNo: "TASK4-OPENING", quantity: "20", unitCost: "10", remark: "restart acceptance" }],
-        },
+      await Promise.all([
+        fixturePrisma.warehouse.update({
+          where: { id: "warehouse-1" },
+          data: { name: "集团二楼仓库", isPlaceholder: false },
+        }),
+        fixturePrisma.warehouse.update({
+          where: { id: "warehouse-2" },
+          data: { name: "内区1号仓库", isPlaceholder: false },
+        }),
+        fixturePrisma.warehouse.update({
+          where: { id: "warehouse-3" },
+          data: { name: "1区车库后仓库", isPlaceholder: false },
+        }),
+      ]);
+      const baselineDate = `${periodCode}-01`;
+      await new PrismaOpeningStockImportStore(fixturePrisma).commit({
+        id: "INITIAL_OPENING_STOCK",
+        fileSha256: "a".repeat(64),
+        sourceFileName: "task4-opening.xlsx",
+        baselineDate,
+        operatorId: "local-admin",
+        financeReviewer: "task4-finance",
+        itemCount: 1,
+        createdItemCount: 0,
+        inventoryRowCount: 1,
+        positiveRowCount: 1,
+        zeroRowCount: 0,
+        totalQuantity: "20",
+        totalAmount: "200.00",
+        items: [
+          {
+            sheetRow: 2,
+            code: "BJ-TASK4",
+            name: "Task 4 durable item",
+            categoryLabel: "白酒",
+            categoryPrefix: "BJ",
+            unit: "box",
+            referenceUnitCost: "10",
+          },
+        ],
+        rows: [
+          {
+            sheetRow: 2,
+            warehouseCode: "WH-01",
+            itemCode: "BJ-TASK4",
+            batchNo: "TASK4-OPENING",
+            quantity: "20",
+            unitCost: "10",
+            amount: "200.00",
+            remark: "restart acceptance",
+          },
+        ],
       });
-      expect(openingResponse.statusCode).toBe(201);
-      batchId = openingResponse.json<{ batchIds: string[] }>().batchIds[0]!;
+      batchId = (
+        await fixturePrisma.procurementBatch.findFirstOrThrow({
+          where: { batchNo: "TASK4-OPENING" },
+        })
+      ).id;
 
       await fixturePrisma.user.upsert({
         where: { id: "task4-applicant" },
@@ -306,6 +355,9 @@ describe.skipIf(!databaseUrl)("Prisma application restart persistence", () => {
 
     await expect(fixturePrisma.item.findUnique({ where: { id: itemId } })).resolves.toMatchObject({ code: "BJ-TASK4" });
     await expect(fixturePrisma.accountingPeriod.findUnique({ where: { periodCode } })).resolves.toMatchObject({ status: "CLOSED" });
+    await expect(
+      fixturePrisma.openingStockImport.findUnique({ where: { id: "INITIAL_OPENING_STOCK" } }),
+    ).resolves.toBeTruthy();
     await expect(fixturePrisma.inventoryLedgerEntry.count({ where: { itemId } })).resolves.toBe(6);
     expect((await fixturePrisma.stockBalance.aggregate({ where: { itemId }, _sum: { remainingQuantity: true } }))._sum.remainingQuantity?.toString()).toBe("16");
   });
