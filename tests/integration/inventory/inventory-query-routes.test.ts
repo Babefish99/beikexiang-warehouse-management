@@ -44,21 +44,26 @@ describe("inventory query report routes", () => {
       expect(createdItem.statusCode).toBe(201);
       const itemId = createdItem.json<{ id: string }>().id;
 
-      const openingStock = await app.inject({
+      const stockEntry = await app.inject({
         method: "POST",
-        url: "/admin/opening-stock",
+        url: "/admin/inbound",
         headers: { cookie },
         payload: {
-          verifiedBy: "admin",
-          rows: [{ warehouseId: "warehouse-1", itemId, batchNo: "B-001", quantity: "8", unitCost: "20", remark: "opening count" }],
+          warehouseId: "warehouse-1",
+          itemId,
+          quantity: "8",
+          unitCost: "20",
+          purchasedAt: "2026-08-24",
+          purchaser: "admin",
+          remark: "inventory query fixture",
         },
       });
-      expect(openingStock.statusCode).toBe(201);
-      const batchId = openingStock.json<{ batchIds: string[] }>().batchIds[0];
+      expect(stockEntry.statusCode).toBe(201);
+      const { batchIds: [batchId], batchNo } = stockEntry.json<{ batchIds: string[]; batchNo: string }>();
 
       const response = await app.inject({
         method: "GET",
-        url: "/admin/reports/inventory-search?query=B-001&warehouseId=all",
+        url: "/admin/reports/inventory-search?query=TEA-0001&warehouseId=all",
         headers: { cookie },
       });
 
@@ -77,7 +82,7 @@ describe("inventory query report routes", () => {
               warehouseId: "warehouse-1",
               warehouseName: "待配置仓库一",
               batchId,
-              batchNo: "B-001",
+              batchNo,
               quantity: "8",
               unitCost: "20",
               amount: "160.00",

@@ -6,7 +6,6 @@ import { OpeningStockService } from "../../../apps/api/src/application/inventory
 import { InMemoryItemRepository, ItemService } from "../../../apps/api/src/application/items/item-service.js";
 import { InMemoryWarehouseRepository, WarehouseService } from "../../../apps/api/src/application/warehouses/warehouse-service.js";
 import { registerInboundRoutes } from "../../../apps/api/src/routes/admin/inbound.js";
-import { registerOpeningStockRoutes } from "../../../apps/api/src/routes/admin/opening-stock.js";
 
 async function createFixture() {
   const itemService = new ItemService(new InMemoryItemRepository());
@@ -21,9 +20,9 @@ async function createFixture() {
   const store = new InMemoryInventoryEntryStore();
   const app = Fastify();
   registerInboundRoutes(app, { inboundService: new InboundService(store, { warehouseService, itemService }) });
-  registerOpeningStockRoutes(app, { openingStockService: new OpeningStockService(store, { warehouseService, itemService }) });
+  const openingStockService = new OpeningStockService(store, { warehouseService, itemService });
 
-  return { app, store, activeItem, inactiveItem };
+  return { app, store, activeItem, inactiveItem, openingStockService };
 }
 
 describe("inventory master data validation", () => {
@@ -49,24 +48,18 @@ describe("inventory master data validation", () => {
     await app.close();
   });
 
-  it("rejects inactive warehouses and forged items for opening stock", async () => {
-    const { app, store, activeItem } = await createFixture();
+  it("rejects inactive warehouses and forged items in the opening stock service", async () => {
+    const { app, store, activeItem, openingStockService } = await createFixture();
 
-    const inactiveWarehouse = await app.inject({
-      method: "POST",
-      url: "/admin/opening-stock",
-      payload: { verifiedBy: "admin-1", rows: [{ warehouseId: "wh-inactive", itemId: activeItem.id, batchNo: "OPEN-01", quantity: "1", unitCost: "10" }] },
-    });
-    expect(inactiveWarehouse.statusCode).toBe(400);
-    expect(inactiveWarehouse.json()).toEqual({ error: "warehouse is inactive or not found" });
+    await expect(openingStockService.create({
+      verifiedBy: "admin-1",
+      rows: [{ warehouseId: "wh-inactive", itemId: activeItem.id, batchNo: "OPEN-01", quantity: "1", unitCost: "10" }],
+    })).rejects.toThrow("warehouse is inactive or not found");
 
-    const forgedItem = await app.inject({
-      method: "POST",
-      url: "/admin/opening-stock",
-      payload: { verifiedBy: "admin-1", rows: [{ warehouseId: "wh-1", itemId: "item-forged", batchNo: "OPEN-02", quantity: "1", unitCost: "10" }] },
-    });
-    expect(forgedItem.statusCode).toBe(400);
-    expect(forgedItem.json()).toEqual({ error: "item is inactive or not found" });
+    await expect(openingStockService.create({
+      verifiedBy: "admin-1",
+      rows: [{ warehouseId: "wh-1", itemId: "item-forged", batchNo: "OPEN-02", quantity: "1", unitCost: "10" }],
+    })).rejects.toThrow("item is inactive or not found");
     expect(store.batches()).toHaveLength(0);
     await app.close();
   });

@@ -282,6 +282,7 @@ export function OpeningStockPage() {
                   ["盘点", preview.summary.inventoryRowCount],
                   ["写入", preview.summary.positiveRowCount],
                   ["零库存", preview.summary.zeroRowCount],
+                  ["总数量", preview.summary.totalQuantity],
                   ["总金额", preview.summary.totalAmount],
                 ].map(([label, value]) => (
                   <div className="panel opening-import-summary__card" key={label}>
@@ -316,7 +317,7 @@ export function OpeningStockPage() {
                 ) : (
                   <ul className="opening-import-issue-list">
                     {filteredIssues.map((issue, index) => (
-                      <li key={`${issue.code}-${issue.sheet ?? "global"}-${issue.row ?? index}`}>
+                      <li key={`${issue.code}-${issue.sheet ?? "global"}-${issue.row ?? "global"}-${issue.field ?? "global"}-${index}`}>
                         <span className={`opening-import-pill opening-import-pill--${issue.severity.toLowerCase()}`}>
                           {issue.severity === "ERROR" ? "错误" : "警告"}
                         </span>

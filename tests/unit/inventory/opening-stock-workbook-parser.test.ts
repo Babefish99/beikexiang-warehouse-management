@@ -45,6 +45,22 @@ describe("ExcelOpeningStockWorkbookParser workbook contract", () => {
     );
   });
 
+  it("rejects data in an unnamed extra business column", async () => {
+    const buffer = await buildOpeningStockWorkbook((workbook) => {
+      workbook.getWorksheet("物品资料")!.getCell("I2").value = "未声明的额外数据";
+    });
+
+    const result = await parser.parse({ fileName: "期初库存.xlsx", buffer });
+
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({
+        code: "WORKSHEET_HEADERS_INVALID",
+        sheet: "物品资料",
+        severity: "ERROR",
+      }),
+    );
+  });
+
   it("ignores styled blank rows outside the fixed business ranges", async () => {
     const buffer = await buildOpeningStockWorkbook((workbook) => {
       workbook.getWorksheet("物品资料")!.getRow(1000).height = 18;

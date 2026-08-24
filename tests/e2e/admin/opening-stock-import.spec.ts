@@ -149,6 +149,7 @@ test("preserves reviewer and confirmation when commit returns a conflict", async
     ["盘点", "243"],
     ["写入", "1"],
     ["零库存", "242"],
+    ["总数量", "2"],
     ["总金额", "20.00"],
   ] as const) {
     const card = summary.locator(".opening-import-summary__card").filter({ hasText: label });

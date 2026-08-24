@@ -160,7 +160,7 @@ describe("shared inventory memory state", () => {
     } finally { await app.close(); }
   });
 
-  it("shows a synchronized approved approval in outbound pending and reuses opening stock in transfer, stocktake, and outbound options", async () => {
+  it("shows a synchronized approved approval in outbound pending and reuses available stock in transfer, stocktake, and outbound options", async () => {
     mockApprovalDetail(approvalDetail());
     const app = buildServer();
 
@@ -174,16 +174,22 @@ describe("shared inventory memory state", () => {
         weComOptionKey: "opt-tea",
       });
 
-      const openingStock = await app.inject({
+      const stockEntry = await app.inject({
         method: "POST",
-        url: "/admin/opening-stock",
+        url: "/admin/inbound",
         headers: { cookie },
         payload: {
-          verifiedBy: "admin",
-          rows: [{ warehouseId: "warehouse-1", itemId: item.id, batchNo: "OPEN-01", quantity: "8", unitCost: "20", remark: "opening count" }],
+          warehouseId: "warehouse-1",
+          itemId: item.id,
+          quantity: "8",
+          unitCost: "20",
+          purchasedAt: "2026-08-24",
+          purchaser: "admin",
+          remark: "shared state fixture",
         },
       });
-      expect(openingStock.statusCode).toBe(201);
+      expect(stockEntry.statusCode).toBe(201);
+      const batchId = stockEntry.json<{ batchIds: string[] }>().batchIds[0];
 
       const resync = await app.inject({
         method: "POST",
@@ -211,19 +217,19 @@ describe("shared inventory memory state", () => {
       ]);
       expect(transfers.json()).toEqual({
         balances: [
-          { warehouseId: "warehouse-1", itemId: item.id, batchId: openingStock.json<{ batchIds: string[] }>().batchIds[0], remainingQuantity: "8", unitCost: "20" },
+          { warehouseId: "warehouse-1", itemId: item.id, batchId, remainingQuantity: "8", unitCost: "20" },
         ],
       });
       expect(stocktake.json()).toEqual({
         balances: [
-          { warehouseId: "warehouse-1", itemId: item.id, batchId: openingStock.json<{ batchIds: string[] }>().batchIds[0], bookQuantity: "8", unitCost: "20" },
+          { warehouseId: "warehouse-1", itemId: item.id, batchId, bookQuantity: "8", unitCost: "20" },
         ],
       });
       expect(outboundOptions.statusCode).toBe(200);
       expect(outboundOptions.json()).toEqual({
         approvalId,
         batches: [
-          { batchId: openingStock.json<{ batchIds: string[] }>().batchIds[0], warehouseId: "warehouse-1", itemId: item.id, remainingQuantity: "8", unitCost: "20" },
+          { batchId, warehouseId: "warehouse-1", itemId: item.id, remainingQuantity: "8", unitCost: "20" },
         ],
       });
     } finally {
@@ -245,16 +251,22 @@ describe("shared inventory memory state", () => {
         weComOptionKey: "opt-tea",
       });
 
-      const openingStock = await app.inject({
+      const stockEntry = await app.inject({
         method: "POST",
-        url: "/admin/opening-stock",
+        url: "/admin/inbound",
         headers: { cookie },
         payload: {
-          verifiedBy: "admin",
-          rows: [{ warehouseId: "warehouse-1", itemId: item.id, batchNo: "OPEN-01", quantity: "8", unitCost: "20", remark: "opening count" }],
+          warehouseId: "warehouse-1",
+          itemId: item.id,
+          quantity: "8",
+          unitCost: "20",
+          purchasedAt: "2026-08-24",
+          purchaser: "admin",
+          remark: "return options fixture",
         },
       });
-      const batchId = openingStock.json<{ batchIds: string[] }>().batchIds[0];
+      expect(stockEntry.statusCode).toBe(201);
+      const batchId = stockEntry.json<{ batchIds: string[] }>().batchIds[0];
       const resync = await app.inject({
         method: "POST",
         url: "/admin/approvals/202607230021/resync",

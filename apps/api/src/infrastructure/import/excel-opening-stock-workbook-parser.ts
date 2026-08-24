@@ -147,11 +147,15 @@ function validateHeaders(
     const value = headerRow.getCell(index + 1).value;
     return !isFormulaValue(value) && plainCellText(headerRow.getCell(index + 1), value ?? null) === header;
   });
-  let hasUnexpectedHeader = false;
-  headerRow.eachCell({ includeEmpty: false }, (cell, column) => {
-    if (column > expectedHeaders.length && isNonBlankValue(cell.value)) hasUnexpectedHeader = true;
+  let hasUnexpectedBusinessColumn = false;
+  sheet.eachRow((row) => {
+    row.eachCell({ includeEmpty: false }, (cell, column) => {
+      if (column > expectedHeaders.length && isNonBlankValue(cell.value)) {
+        hasUnexpectedBusinessColumn = true;
+      }
+    });
   });
-  if (!headersMatch || hasUnexpectedHeader) {
+  if (!headersMatch || hasUnexpectedBusinessColumn) {
     addIssue(issues, {
       severity: "ERROR",
       code: "WORKSHEET_HEADERS_INVALID",

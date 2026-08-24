@@ -44,16 +44,21 @@ describe("report export integration", () => {
       });
       const itemId = createdItem.json<{ id: string }>().id;
 
-      const openingStock = await app.inject({
+      const stockEntry = await app.inject({
         method: "POST",
-        url: "/admin/opening-stock",
+        url: "/admin/inbound",
         headers: { cookie },
         payload: {
-          verifiedBy: "admin",
-          rows: [{ warehouseId: "warehouse-1", itemId, batchNo: "B-001", quantity: "8", unitCost: "20", remark: "opening count" }],
+          warehouseId: "warehouse-1",
+          itemId,
+          quantity: "8",
+          unitCost: "20",
+          purchasedAt: "2026-08-24",
+          purchaser: "admin",
+          remark: "report fixture",
         },
       });
-      expect(openingStock.statusCode).toBe(201);
+      expect(stockEntry.statusCode).toBe(201);
 
       const summary = await app.inject({
         method: "GET",
@@ -83,16 +88,21 @@ describe("report export integration", () => {
       const itemId = createdItem.json<{ id: string }>().id;
 
       vi.setSystemTime(new Date("2026-07-31T10:00:00.000Z"));
-      const openingStock = await app.inject({
+      const initialStock = await app.inject({
         method: "POST",
-        url: "/admin/opening-stock",
+        url: "/admin/inbound",
         headers: { cookie },
         payload: {
-          verifiedBy: "admin",
-          rows: [{ warehouseId: "warehouse-1", itemId, batchNo: "JULY-OPEN", quantity: "8", unitCost: "20", remark: "opening count" }],
+          warehouseId: "warehouse-1",
+          itemId,
+          quantity: "8",
+          unitCost: "20",
+          purchasedAt: "2026-07-31",
+          purchaser: "admin",
+          remark: "prior-period report fixture",
         },
       });
-      expect(openingStock.statusCode).toBe(201);
+      expect(initialStock.statusCode).toBe(201);
 
       vi.setSystemTime(new Date("2026-08-02T10:00:00.000Z"));
       const inbound = await app.inject({
@@ -148,15 +158,21 @@ describe("report export integration", () => {
       });
       const itemId = createdItem.json<{ id: string }>().id;
 
-      await app.inject({
+      const stockEntry = await app.inject({
         method: "POST",
-        url: "/admin/opening-stock",
+        url: "/admin/inbound",
         headers: { cookie },
         payload: {
-          verifiedBy: "admin",
-          rows: [{ warehouseId: "warehouse-1", itemId, batchNo: "B-001", quantity: "8", unitCost: "20", remark: "opening count" }],
+          warehouseId: "warehouse-1",
+          itemId,
+          quantity: "8",
+          unitCost: "20",
+          purchasedAt: "2026-08-24",
+          purchaser: "admin",
+          remark: "export fixture",
         },
       });
+      expect(stockEntry.statusCode).toBe(201);
 
       const response = await app.inject({
         method: "GET",
