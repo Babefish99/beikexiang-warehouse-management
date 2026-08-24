@@ -4,7 +4,7 @@ import { apiUrl, loginAs } from "./mobile-test-helpers";
 const desktopOnlyRoutes = [
   { path: "/admin/items", title: "标准物品库", request: "/admin/items?includeInactive=true" },
   { path: "/admin/warehouses", title: "仓库设置", request: "/admin/warehouses?includeInactive=true" },
-  { path: "/admin/opening-stock", title: "录入期初库存", request: "/admin/warehouses" },
+  { path: "/admin/opening-stock", title: "期初库存导入", request: "/admin/opening-stock/import/status" },
   { path: "/admin/transfers", title: "仓库调拨", request: "/admin/transfers/options" },
   { path: "/admin/returns", title: "办理退库", request: "/admin/returns/options" },
   { path: "/admin/stocktake", title: "月度盘点", request: "/admin/stocktake/options" },
@@ -48,13 +48,12 @@ test.describe("desktop route preservation above the mobile breakpoint", () => {
         await page.route(apiUrl(routeCase.request), async (route) => {
           await route.fulfill({
             contentType: "application/json",
-            body: routeCase.path === "/admin/transfers" ? '{"balances":[]}' : "[]",
+            body: routeCase.path === "/admin/transfers"
+              ? '{"balances":[]}'
+              : routeCase.path === "/admin/opening-stock"
+                ? '{"availability":"AVAILABLE"}'
+                : "[]",
           });
-        });
-      }
-      if (routeCase.path === "/admin/opening-stock") {
-        await page.route(apiUrl("/admin/items"), async (route) => {
-          await route.fulfill({ contentType: "application/json", body: "[]" });
         });
       }
 

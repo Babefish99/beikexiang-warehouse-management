@@ -43,10 +43,12 @@ describe("production deployment configuration", () => {
 
     expect(Object.keys(dependencies).sort()).toEqual([
       "@fastify/cors",
+      "@fastify/multipart",
       "@prisma/adapter-pg",
       "@prisma/client",
       "decimal.js",
       "dotenv",
+      "exceljs",
       "fastify",
       "pg",
     ]);

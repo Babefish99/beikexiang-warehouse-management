@@ -78,6 +78,29 @@ test("821px mounts only desktop navigation", async ({ page }) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 });
 
+test("opening stock stays isolated on mobile and mounts its import status at 821px", async ({ page }) => {
+  let importRequestCount = 0;
+  await page.route(/\/admin\/opening-stock\/import\//, async (route) => {
+    importRequestCount += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ availability: "AVAILABLE" }),
+    });
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await loginAs(page, "/admin/opening-stock", "ADMIN");
+  await expect(page.getByRole("heading", { name: "请在电脑端处理" })).toBeVisible();
+  await expect(page.locator('input[type="file"]')).toHaveCount(0);
+  expect(importRequestCount).toBe(0);
+
+  await page.setViewportSize({ width: 821, height: 844 });
+  await expect(page.getByRole("heading", { name: "期初库存导入" })).toBeVisible();
+  await expect(page.locator('input[type="file"]')).toBeVisible();
+  await expect.poll(() => importRequestCount).toBeGreaterThan(0);
+});
+
 test("inbound draft and long values survive the 820 to 821 presentation boundary", async ({ page }) => {
   await page.setViewportSize({ width: 820, height: 900 });
   await openInbound(page);
