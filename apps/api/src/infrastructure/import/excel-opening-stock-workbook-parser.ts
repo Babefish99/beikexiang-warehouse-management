@@ -1,8 +1,10 @@
 import ExcelJS from "exceljs";
+import { Decimal } from "decimal.js";
 
 import { BusinessRuleError } from "../../application/errors/business-rule-error.js";
 import type {
   OpeningStockImportIssue,
+  OpeningStockWorkbookSummary,
   OpeningStockWorkbookParser,
   ParsedOpeningStockItem,
   ParsedOpeningStockRow,
@@ -57,6 +59,10 @@ const INVENTORY_LAST_ROW = 244;
 const ITEM_AUTHORITATIVE_COLUMNS = [1, 2, 3, 4, 5, 6] as const;
 const INVENTORY_AUTHORITATIVE_COLUMNS = [1, 3, 9, 10, 12] as const;
 const ITEM_CODE_PATTERN = /^(BJ|HJ|CY|WP)\d{4}$/;
+const DECIMAL_INPUT_PATTERN = /^-?\d+(?:\.\d+)?$/;
+const DECIMAL_18_4_MAX = new Decimal("99999999999999.9999");
+const DECIMAL_18_2_MAX = new Decimal("9999999999999999.99");
+const FIXED_WAREHOUSE_CODES = ["WH-01", "WH-02", "WH-03"] as const;
 
 type CategoryPrefix = ParsedOpeningStockItem["categoryPrefix"];
 
@@ -325,7 +331,7 @@ function parseItems(
     if (!allowedLabels || !(allowedLabels as readonly string[]).includes(categoryLabel)) {
       addIssue(issues, {
         severity: "ERROR",
-        code: "ITEM_CATEGORY_LABEL_INVALID",
+        code: "ITEM_CATEGORY_INVALID",
         sheet: sheet.name,
         row,
         field: "类别",
@@ -411,6 +417,262 @@ function parseInventoryRows(
   return rows;
 }
 
+export function openingStockBatchNo(baselineDate: string, warehouseCode: string, itemCode: string): string {
+  return `OPEN-${baselineDate.replaceAll("-", "")}-${warehouseCode.replaceAll("-", "")}-${itemCode}`;
+}
+
+type InventoryNumericField = "QUANTITY" | "UNIT_COST";
+
+function parseInventoryDecimal(
+  rawValue: string,
+  numericField: InventoryNumericField,
+  row: number,
+  issues: OpeningStockImportIssue[],
+): Decimal | undefined {
+  const field = numericField === "QUANTITY" ? "实盘数量" : "确认单价";
+  const fieldName = numericField === "QUANTITY" ? "实盘数量" : "确认单价";
+  if (!DECIMAL_INPUT_PATTERN.test(rawValue)) {
+    addIssue(issues, {
+      severity: "ERROR",
+      code: `${numericField}_FORMAT_INVALID`,
+      sheet: "期初库存",
+      row,
+      field,
+      message: `${fieldName}必须是普通十进制数字，不能使用指数记法`,
+    });
+    return undefined;
+  }
+  const fractionLength = rawValue.split(".")[1]?.length ?? 0;
+  if (fractionLength > 4) {
+    addIssue(issues, {
+      severity: "ERROR",
+      code: `${numericField}_PRECISION_INVALID`,
+      sheet: "期初库存",
+      row,
+      field,
+      message: `${fieldName}最多保留四位小数`,
+    });
+    return undefined;
+  }
+
+  const value = new Decimal(rawValue);
+  if (value.lt(0)) {
+    addIssue(issues, {
+      severity: "ERROR",
+      code: `${numericField}_NEGATIVE`,
+      sheet: "期初库存",
+      row,
+      field,
+      message: `${fieldName}不能为负数`,
+    });
+    return undefined;
+  }
+  if (value.gt(DECIMAL_18_4_MAX)) {
+    addIssue(issues, {
+      severity: "ERROR",
+      code: `${numericField}_OUT_OF_RANGE`,
+      sheet: "期初库存",
+      row,
+      field,
+      message: `${fieldName}超出 Decimal(18,4) 可保存范围`,
+    });
+    return undefined;
+  }
+  return value;
+}
+
+function combinationKey(warehouseCode: string, itemCode: string): string {
+  return `${warehouseCode}\u0000${itemCode}`;
+}
+
+function rowHasBlockingIssue(issues: OpeningStockImportIssue[], row: number): boolean {
+  return issues.some(
+    (issue) => issue.severity === "ERROR" && issue.sheet === "期初库存" && issue.row === row,
+  );
+}
+
+function normalizeInventoryRows(input: {
+  baselineDate?: string;
+  items: ParsedOpeningStockItem[];
+  rows: ParsedOpeningStockRow[];
+  issues: OpeningStockImportIssue[];
+}): { rows: ParsedOpeningStockRow[]; summary: OpeningStockWorkbookSummary } {
+  const { baselineDate, items, rows, issues } = input;
+  const knownItemCodes = new Set(items.map((item) => item.code).filter((code) => code !== ""));
+  const knownWarehouseCodes = new Set<string>(FIXED_WAREHOUSE_CODES);
+  const combinationCounts = new Map<string, number>();
+  for (const row of rows) {
+    const key = combinationKey(row.warehouseCode, row.itemCode);
+    combinationCounts.set(key, (combinationCounts.get(key) ?? 0) + 1);
+  }
+
+  for (const row of rows) {
+    const key = combinationKey(row.warehouseCode, row.itemCode);
+    if ((combinationCounts.get(key) ?? 0) > 1) {
+      addIssue(issues, {
+        severity: "ERROR",
+        code: "INVENTORY_COMBINATION_DUPLICATE",
+        sheet: "期初库存",
+        row: row.sheetRow,
+        message: `仓库 ${row.warehouseCode} 与物料 ${row.itemCode} 的组合重复`,
+      });
+    }
+  }
+  for (const itemCode of knownItemCodes) {
+    for (const warehouseCode of FIXED_WAREHOUSE_CODES) {
+      if ((combinationCounts.get(combinationKey(warehouseCode, itemCode)) ?? 0) === 0) {
+        addIssue(issues, {
+          severity: "ERROR",
+          code: "INVENTORY_COMBINATION_MISSING",
+          sheet: "期初库存",
+          message: `缺少仓库 ${warehouseCode} 与物料 ${itemCode} 的盘点组合`,
+        });
+      }
+    }
+  }
+
+  let positiveRowCount = 0;
+  let zeroRowCount = 0;
+  let totalQuantity = new Decimal(0);
+  let totalAmount = new Decimal(0);
+  const normalizedRows: ParsedOpeningStockRow[] = [];
+
+  for (const row of rows) {
+    if (!knownWarehouseCodes.has(row.warehouseCode)) {
+      addIssue(issues, {
+        severity: "ERROR",
+        code: "INVENTORY_WAREHOUSE_UNKNOWN",
+        sheet: "期初库存",
+        row: row.sheetRow,
+        field: "仓库编码",
+        message: `仓库编码 ${row.warehouseCode || "（空）"} 不在固定仓库清单中`,
+      });
+    }
+    if (!knownItemCodes.has(row.itemCode)) {
+      addIssue(issues, {
+        severity: "ERROR",
+        code: "INVENTORY_ITEM_UNKNOWN",
+        sheet: "期初库存",
+        row: row.sheetRow,
+        field: "物料编号",
+        message: `物料编号 ${row.itemCode || "（空）"} 不在物品资料中`,
+      });
+    }
+
+    let quantity: Decimal | undefined;
+    if (row.quantity === undefined) {
+      addIssue(issues, {
+        severity: "ERROR",
+        code: "QUANTITY_REQUIRED",
+        sheet: "期初库存",
+        row: row.sheetRow,
+        field: "实盘数量",
+        message: "实盘数量未填写",
+      });
+    } else {
+      quantity = parseInventoryDecimal(row.quantity, "QUANTITY", row.sheetRow, issues);
+    }
+
+    let unitCost: Decimal | undefined;
+    if (quantity?.gt(0) && row.unitCost === undefined) {
+      addIssue(issues, {
+        severity: "ERROR",
+        code: "UNIT_COST_REQUIRED",
+        sheet: "期初库存",
+        row: row.sheetRow,
+        field: "确认单价",
+        message: "正库存行必须填写确认单价",
+      });
+    } else if (row.unitCost !== undefined) {
+      unitCost = parseInventoryDecimal(row.unitCost, "UNIT_COST", row.sheetRow, issues);
+    }
+
+    if (quantity?.gt(0) && unitCost?.eq(0) && !row.remark) {
+      addIssue(issues, {
+        severity: "ERROR",
+        code: "ZERO_COST_REMARK_REQUIRED",
+        sheet: "期初库存",
+        row: row.sheetRow,
+        field: "备注",
+        message: "正库存的零成本行必须填写原因备注",
+      });
+    }
+
+    let amount: string | undefined;
+    if (quantity?.eq(0)) {
+      amount = "0.00";
+    } else if (quantity?.gt(0) && unitCost) {
+      amount = quantity.mul(unitCost).toFixed(2);
+      if (new Decimal(amount).gt(DECIMAL_18_2_MAX)) {
+        addIssue(issues, {
+          severity: "ERROR",
+          code: "AMOUNT_OUT_OF_RANGE",
+          sheet: "期初库存",
+          row: row.sheetRow,
+          field: "金额",
+          message: "服务端重算金额超出 Decimal(18,2) 可保存范围",
+        });
+      }
+    }
+
+    const batchNo =
+      baselineDate && row.warehouseCode !== "" && row.itemCode !== ""
+        ? openingStockBatchNo(baselineDate, row.warehouseCode, row.itemCode)
+        : undefined;
+    let disposition: ParsedOpeningStockRow["disposition"];
+    if (!rowHasBlockingIssue(issues, row.sheetRow) && baselineDate && quantity && amount !== undefined) {
+      disposition = quantity.eq(0) ? "SKIP_ZERO" : "IMPORT";
+    }
+
+    const normalizedRow: ParsedOpeningStockRow = {
+      ...row,
+      quantity: quantity?.toString() ?? row.quantity,
+      unitCost: unitCost?.toString() ?? row.unitCost,
+      batchNo,
+      amount,
+      disposition,
+    };
+    normalizedRows.push(normalizedRow);
+
+    if (disposition === "IMPORT") {
+      positiveRowCount += 1;
+      totalQuantity = totalQuantity.plus(quantity!);
+      totalAmount = totalAmount.plus(amount!);
+    } else if (disposition === "SKIP_ZERO") {
+      zeroRowCount += 1;
+    }
+  }
+
+  if (totalQuantity.gt(DECIMAL_18_4_MAX)) {
+    addIssue(issues, {
+      severity: "ERROR",
+      code: "TOTAL_QUANTITY_OUT_OF_RANGE",
+      sheet: "期初库存",
+      message: "期初库存总数量超出 Decimal(18,4) 可保存范围",
+    });
+  }
+  if (totalAmount.gt(DECIMAL_18_2_MAX)) {
+    addIssue(issues, {
+      severity: "ERROR",
+      code: "TOTAL_AMOUNT_OUT_OF_RANGE",
+      sheet: "期初库存",
+      message: "期初库存总金额超出 Decimal(18,2) 可保存范围",
+    });
+  }
+
+  return {
+    rows: normalizedRows,
+    summary: {
+      itemCount: items.length,
+      inventoryRowCount: rows.length,
+      positiveRowCount,
+      zeroRowCount,
+      totalQuantity: totalQuantity.toString(),
+      totalAmount: totalAmount.toFixed(2),
+    },
+  };
+}
+
 export class ExcelOpeningStockWorkbookParser implements OpeningStockWorkbookParser {
   async parse(input: { fileName: string; buffer: Buffer }): Promise<ParsedOpeningStockWorkbook> {
     const workbook = new ExcelJS.Workbook();
@@ -448,11 +710,17 @@ export class ExcelOpeningStockWorkbookParser implements OpeningStockWorkbookPars
       issues,
     );
 
+    const baselineDate = normalizeBaselineDate(workbook.getWorksheet("填写说明"), issues);
+    const items = parseItems(itemsSheet, issues);
+    const parsedRows = parseInventoryRows(inventorySheet, issues);
+    const normalized = normalizeInventoryRows({ baselineDate, items, rows: parsedRows, issues });
+
     return {
-      baselineDate: normalizeBaselineDate(workbook.getWorksheet("填写说明"), issues),
-      items: parseItems(itemsSheet, issues),
-      rows: parseInventoryRows(inventorySheet, issues),
+      baselineDate,
+      items,
+      rows: normalized.rows,
       issues,
+      summary: normalized.summary,
     };
   }
 }

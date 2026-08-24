@@ -32,11 +32,21 @@ export interface ParsedOpeningStockRow {
   disposition?: "IMPORT" | "SKIP_ZERO";
 }
 
+export interface OpeningStockWorkbookSummary {
+  itemCount: number;
+  inventoryRowCount: number;
+  positiveRowCount: number;
+  zeroRowCount: number;
+  totalQuantity: string;
+  totalAmount: string;
+}
+
 export interface ParsedOpeningStockWorkbook {
   baselineDate?: string;
   items: ParsedOpeningStockItem[];
   rows: ParsedOpeningStockRow[];
   issues: OpeningStockImportIssue[];
+  summary: OpeningStockWorkbookSummary;
 }
 
 export interface OpeningStockWorkbookParser {

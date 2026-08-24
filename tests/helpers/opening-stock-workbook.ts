@@ -84,8 +84,8 @@ export async function buildOpeningStockWorkbook(
   const inventorySheet = workbook.addWorksheet(WORKSHEET_NAMES[3]);
   inventorySheet.addRow([...WORKSHEET_HEADERS.期初库存]);
   let inventoryIndex = 0;
-  for (const warehouse of WAREHOUSES) {
-    for (const code of ITEM_CODES) {
+  for (const code of ITEM_CODES) {
+    for (const warehouse of WAREHOUSES) {
       inventorySheet.addRow([
         warehouse.code,
         warehouse.name,
