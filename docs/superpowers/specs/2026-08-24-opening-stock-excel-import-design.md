@@ -217,6 +217,7 @@ multipart 字段：
 interface OpeningStockImportPreview {
   canCommit: boolean;
   previewToken?: string;
+  previewExpiresAt?: string;
   fileSha256: string;
   baselineDate?: string;
   summary: {
@@ -246,7 +247,7 @@ interface OpeningStockImportPreview {
 
 文件无法作为工作簿解析或超过安全限制时返回 400/413。能够解析但存在业务错误时仍返回 200 和完整问题列表。
 
-只有 `canCommit=true` 时才签发预览凭证。凭证使用域隔离 HMAC，绑定管理员 ID、文件 SHA-256、签发时间和过期时间，默认有效期 30 分钟；凭证不包含业务明细。
+只有 `canCommit=true` 时才签发预览凭证并返回 `previewExpiresAt`。凭证使用域隔离 HMAC，绑定管理员 ID、文件 SHA-256、签发时间和过期时间，默认有效期 30 分钟；凭证不包含业务明细。
 
 ### 6.3 正式提交
 
@@ -357,7 +358,7 @@ model OpeningStockImport {
 3. 问题列表和 243 行规范化预览，可筛选错误、提醒、写入行和跳过行；
 4. 正式确认区：财务复核人、共同复核勾选框和正式导入按钮。
 
-正式按钮只在无错误、文件未变化、凭证有效、复核人非空且已勾选确认时启用。
+正式按钮只在无错误、文件未变化、当前时间早于 `previewExpiresAt`、复核人非空且已勾选确认时启用。
 
 ### 9.2 失败状态
 
