@@ -202,12 +202,12 @@ printf 'first=%s\nsecond=%s\n' "$first_release" "$second_release"
 }
 
 function runPackagedValidationWithLinuxSh(
-  archiveDirectory: string,
+  archivePath: string,
 ): ReturnType<typeof spawnSync> {
   const fixture = String.raw`
 set -eu
 mkdir -p /workspace /tmp/bin
-tar -xzf /bundle/warehouse-release.tar.gz -C /workspace
+tar -xzf - -C /workspace
 cat > /workspace/deploy/.env.production <<'ENV'
 COMPOSE_PROJECT_NAME=warehouse-linux
 IMAGE_PREFIX=warehouse-test
@@ -234,16 +234,15 @@ VALIDATE_ONLY=1 \
       "run",
       "--rm",
       "-i",
-      "-v",
-      `${archiveDirectory}:/bundle:ro`,
       "node:24-alpine",
       "/bin/sh",
-      "-s",
+      "-c",
+      fixture,
     ],
     {
       cwd: repositoryRoot,
       encoding: "utf8",
-      input: fixture,
+      input: readFileSync(archivePath),
       timeout: 30_000,
     },
   );
@@ -286,7 +285,7 @@ describe("production deployment scripts", () => {
         `stdout:\n${packageResult.stdout}\nstderr:\n${packageResult.stderr}`,
       ).toBe(0);
 
-      const result = runPackagedValidationWithLinuxSh(archiveDirectory);
+      const result = runPackagedValidationWithLinuxSh(archivePath);
 
       expect(result.error).toBeUndefined();
       expect(result.status, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`).toBe(0);

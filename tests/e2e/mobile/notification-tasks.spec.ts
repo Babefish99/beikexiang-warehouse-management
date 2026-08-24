@@ -65,7 +65,9 @@ test("an internal notification link consumes its sentinel before navigation", as
   const center = await openMobileNotificationCenter(page);
   await center.getByRole("link", { name: /待出库审批/ }).click();
   await expect(page).toHaveURL(/\/admin\/outbound$/);
-  await expect(page.getByRole("heading", { name: "选择待办" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "办理出库" })).toBeVisible();
+  await expect(page.getByText("当前没有待出库审批")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "选择待办" })).toHaveCount(0);
   expect(await page.evaluate(() => history.length)).toBe(sourceHistoryLength + 1);
 
   await page.goBack();
