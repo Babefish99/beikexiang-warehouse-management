@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import multipart from "@fastify/multipart";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
@@ -11,7 +12,8 @@ import { InboundService } from "./application/inventory/inbound-service.js";
 import { AlertService } from "./application/inventory/alert-service.js";
 import { InventoryQueryService } from "./application/inventory/inventory-query-service.js";
 import { NotificationService } from "./application/inventory/notification-service.js";
-import { OpeningStockService } from "./application/inventory/opening-stock-service.js";
+import { OpeningStockImportService } from "./application/inventory/opening-stock-import-service.js";
+import { OpeningStockPreviewTokenService } from "./application/inventory/opening-stock-preview-token-service.js";
 import { OutboundService } from "./application/inventory/outbound-service.js";
 import { ReturnService } from "./application/inventory/return-service.js";
 import { StocktakeService } from "./application/inventory/stocktake-service.js";
@@ -21,6 +23,7 @@ import { InventoryReportService, TransactionReportService } from "./application/
 import { WarehouseService } from "./application/warehouses/warehouse-service.js";
 import { ApprovalSyncService } from "./application/wecom/approval-sync-service.js";
 import { createPersistenceAdapters, readServerConfig } from "./infrastructure/db/runtime.js";
+import { ExcelOpeningStockWorkbookParser } from "./infrastructure/import/excel-opening-stock-workbook-parser.js";
 import { HttpApprovalGateway } from "./infrastructure/wecom/approval-gateway.js";
 import { ApprovalParser } from "./infrastructure/wecom/approval-parser.js";
 import { WeComOAuthClient } from "./infrastructure/wecom/oauth-client.js";
@@ -29,6 +32,7 @@ import { registerApprovalResyncRoute } from "./routes/admin/approvals-resync.js"
 import "./routes/admin/admin-request-context.js";
 import { registerInboundRoutes } from "./routes/admin/inbound.js";
 import { registerItemRoutes } from "./routes/admin/items.js";
+import { registerOpeningStockImportRoutes } from "./routes/admin/opening-stock-import.js";
 import { registerOpeningStockRoutes } from "./routes/admin/opening-stock.js";
 import { registerNotificationRoutes } from "./routes/admin/notifications.js";
 import { registerOutboundRoutes } from "./routes/admin/outbound.js";
@@ -88,6 +92,15 @@ export function buildServer(options: BuildServerOptions = {}) {
   });
 
   void app.register(cors, { origin: config.webBaseUrl, credentials: true });
+  void app.register(multipart, {
+    limits: {
+      files: 1,
+      fields: 3,
+      parts: 4,
+      fieldSize: 4096,
+      fileSize: 5 * 1024 * 1024,
+    },
+  });
 
   const sessionService = new SessionService(config.sessionSecret);
   const identityService = persistence.identityService;
@@ -116,7 +129,12 @@ export function buildServer(options: BuildServerOptions = {}) {
   const warehouseService = new WarehouseService(persistence.repositories.warehouses);
   const inventoryEntryStore = inventoryPersistence.entryStore;
   const inboundService = new InboundService(inventoryEntryStore, { warehouseService, itemService }, assertCurrentPeriodOpen);
-  const openingStockService = new OpeningStockService(inventoryEntryStore, { warehouseService, itemService }, assertCurrentPeriodOpen);
+  const openingStockImportService = new OpeningStockImportService(
+    new ExcelOpeningStockWorkbookParser(),
+    inventoryPersistence.openingStockImportStore,
+    new OpeningStockPreviewTokenService(config.sessionSecret),
+    periodStore,
+  );
   const inventoryQueryService = new InventoryQueryService({
     listItems: () => itemService.list(true),
     listWarehouses: () => warehouseService.listActive(),
@@ -187,6 +205,18 @@ export function buildServer(options: BuildServerOptions = {}) {
     const businessError = classifyAdminBusinessError(error);
     if (businessError) {
       return reply.code(businessError.statusCode).send({ error: businessError.message });
+    }
+    const errorCode = typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+      ? error.code
+      : undefined;
+    if (errorCode && [
+      "ERR_STREAM_PREMATURE_CLOSE",
+      "FST_FILES_LIMIT",
+      "FST_FIELDS_LIMIT",
+      "FST_PARTS_LIMIT",
+      "FST_INVALID_MULTIPART_CONTENT_TYPE",
+    ].includes(errorCode)) {
+      return reply.code(400).send({ error: "上传请求格式无效" });
     }
     const statusCode = typeof error === "object" && error !== null && "statusCode" in error && typeof error.statusCode === "number"
       ? error.statusCode
@@ -294,7 +324,8 @@ export function buildServer(options: BuildServerOptions = {}) {
   registerItemRoutes(app, { itemService });
   registerWarehouseRoutes(app, { warehouseService });
   registerInboundRoutes(app, { inboundService });
-  registerOpeningStockRoutes(app, { openingStockService });
+  registerOpeningStockRoutes(app);
+  registerOpeningStockImportRoutes(app, { openingStockImportService });
   registerNotificationRoutes(app, { notificationService });
   registerOutboundRoutes(app, { outboundService });
   registerTransferRoutes(app, { transferService });

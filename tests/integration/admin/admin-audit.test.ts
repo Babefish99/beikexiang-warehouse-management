@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAccountingPeriod } from "../../../apps/api/src/domain/periods/accounting-period.js";
 import { buildServer } from "../../../apps/api/src/server.js";
 import { InMemoryAuditService } from "../../../apps/api/src/infrastructure/audit/audit-service.js";
+import { multipartPayload } from "../../helpers/multipart.js";
+import { buildOpeningStockWorkbook } from "../../helpers/opening-stock-workbook.js";
 
 async function createAdminSessionCookie(app: ReturnType<typeof buildServer>): Promise<string> {
   const response = await app.inject({
@@ -22,6 +24,22 @@ async function createSessionCookie(app: ReturnType<typeof buildServer>, role: "A
     headers: { host: "localhost:3001" },
   });
   return response.headers["set-cookie"] as string;
+}
+
+async function configureFormalWarehouses(app: ReturnType<typeof buildServer>, cookie: string): Promise<void> {
+  for (const [id, name] of [
+    ["warehouse-1", "集团二楼仓库"],
+    ["warehouse-2", "内区1号仓库"],
+    ["warehouse-3", "1区车库后仓库"],
+  ] as const) {
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/admin/warehouses/${id}`,
+      headers: { cookie },
+      payload: { name, isActive: true },
+    });
+    expect(response.statusCode).toBe(200);
+  }
 }
 
 describe("admin mutation audit", () => {
@@ -227,6 +245,137 @@ describe("admin mutation audit", () => {
       expect(periodStore.get).toHaveBeenCalledWith(currentPeriodCode);
       expect(periodStore.getOrCreate).not.toHaveBeenCalled();
       expect(periodStore.save).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("audits one successful opening-stock import without workbook or token data", async () => {
+    const app = buildServer();
+
+    try {
+      const cookie = await createAdminSessionCookie(app);
+      await configureFormalWarehouses(app, cookie);
+      const file = await buildOpeningStockWorkbook();
+      const previewBody = multipartPayload({
+        file: {
+          fileName: "期初库存.xlsx",
+          contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          buffer: file,
+        },
+      });
+      const preview = await app.inject({
+        method: "POST",
+        url: "/admin/opening-stock/import/preview",
+        headers: { cookie, ...previewBody.headers },
+        payload: previewBody.payload,
+      });
+      const commitBody = multipartPayload({
+        fields: {
+          previewToken: preview.json<{ previewToken: string }>().previewToken,
+          financeReviewer: "财务甲",
+          confirmed: "true",
+        },
+        file: {
+          fileName: "期初库存.xlsx",
+          contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          buffer: file,
+        },
+      });
+
+      const commit = await app.inject({
+        method: "POST",
+        url: "/admin/opening-stock/import/commit",
+        headers: { cookie, ...commitBody.headers },
+        payload: commitBody.payload,
+      });
+
+      expect(commit.statusCode).toBe(201);
+      const events = (
+        (app as unknown as { auditService?: InMemoryAuditService }).auditService?.events ?? []
+      ).filter((event) => event.action === "OPENING_STOCK_IMPORTED");
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        actorUserId: "local-admin",
+        action: "OPENING_STOCK_IMPORTED",
+        entityType: "OPENING_STOCK_IMPORT",
+        entityId: "INITIAL_OPENING_STOCK",
+        status: "SUCCEEDED",
+        afterData: {
+          id: "INITIAL_OPENING_STOCK",
+          fileSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+          itemCount: 81,
+          inventoryRowCount: 243,
+          positiveRowCount: 1,
+          zeroRowCount: 242,
+          totalAmount: "20.00",
+        },
+      });
+      const serialized = JSON.stringify(events[0]!.afterData);
+      expect(serialized).not.toContain("previewToken");
+      expect(serialized).not.toContain("PK");
+      expect(serialized).not.toContain("测试物品 BJ0001");
+      expect(serialized).not.toContain(file.toString("base64").slice(0, 24));
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("audits a failed opening-stock commit without sensitive multipart data", async () => {
+    const app = buildServer();
+
+    try {
+      const cookie = await createAdminSessionCookie(app);
+      await configureFormalWarehouses(app, cookie);
+      const file = await buildOpeningStockWorkbook();
+      const previewBody = multipartPayload({
+        file: {
+          fileName: "期初库存.xlsx",
+          contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          buffer: file,
+        },
+      });
+      const preview = await app.inject({
+        method: "POST",
+        url: "/admin/opening-stock/import/preview",
+        headers: { cookie, ...previewBody.headers },
+        payload: previewBody.payload,
+      });
+      const commitBody = multipartPayload({
+        fields: {
+          previewToken: preview.json<{ previewToken: string }>().previewToken,
+          financeReviewer: "财务甲",
+          confirmed: "true",
+        },
+        file: {
+          fileName: "期初库存.xlsx",
+          contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          buffer: Buffer.concat([file, Buffer.from([0])]),
+        },
+      });
+
+      const commit = await app.inject({
+        method: "POST",
+        url: "/admin/opening-stock/import/commit",
+        headers: { cookie, ...commitBody.headers },
+        payload: commitBody.payload,
+      });
+
+      expect(commit.statusCode).toBe(409);
+      const events = (
+        (app as unknown as { auditService?: InMemoryAuditService }).auditService?.events ?? []
+      ).filter((event) => event.action === "OPENING_STOCK_IMPORTED");
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        entityType: "OPENING_STOCK_IMPORT",
+        status: "FAILED",
+        errorMessage: "期初库存文件或系统状态已变化，请重新预览",
+      });
+      const serialized = JSON.stringify(events[0]!.afterData ?? null);
+      expect(serialized).not.toContain("previewToken");
+      expect(serialized).not.toContain("PK");
+      expect(serialized).not.toContain("测试物品 BJ0001");
+      expect(serialized).not.toContain(file.toString("base64").slice(0, 24));
     } finally {
       await app.close();
     }

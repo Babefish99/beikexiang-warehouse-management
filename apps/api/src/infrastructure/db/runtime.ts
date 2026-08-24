@@ -6,6 +6,7 @@ import { parseConfiguredWeComUserIds, type AuthenticatedUser, type UserRole } fr
 import { InMemoryItemRepository, type ItemRepository } from "../../application/items/item-service.js";
 import { InMemoryInventoryEntryStore, type InventoryEntryStore, type StoredBatch } from "../../application/inventory/inbound-service.js";
 import { createInventoryMemoryState } from "../../application/inventory/inventory-memory-state.js";
+import type { OpeningStockImportStore } from "../../application/inventory/opening-stock-import-contract.js";
 import { InMemoryOutboundStore, type OutboundStore } from "../../application/inventory/outbound-service.js";
 import { InMemoryMovementStore, type MovementStore } from "../../application/inventory/transfer-service.js";
 import { InMemoryStocktakeStore, type StocktakeStore } from "../../application/inventory/stocktake-service.js";
@@ -14,6 +15,7 @@ import type { ReportEntry } from "../../application/reports/report-query-service
 import { InMemoryWarehouseRepository, type WarehouseRepository } from "../../application/warehouses/warehouse-service.js";
 import { InMemoryApprovalSyncStore, type ApprovalSyncStore } from "../../application/wecom/approval-sync-service.js";
 import type { ItemDefinition } from "../../domain/items/item.js";
+import { CANONICAL_ITEM_CATEGORIES } from "../../domain/items/item-category.js";
 import type { WarehouseDefinition } from "../../domain/warehouses/warehouse.js";
 import { InMemoryAuditService, type AuditEvent, type AuditService } from "../audit/audit-service.js";
 import { decodeWeComEncodingAesKey } from "../wecom/signature-verifier.js";
@@ -21,6 +23,8 @@ import { PrismaAccountingPeriodStore } from "./prisma-accounting-period-store.js
 import { PrismaApprovalSyncStore } from "./prisma-approval-sync-store.js";
 import { PrismaInventoryEntryStore } from "./prisma-inventory-entry-store.js";
 import { PrismaMovementStore } from "./prisma-movement-store.js";
+import { InMemoryOpeningStockImportStore } from "./in-memory-opening-stock-import-store.js";
+import { PrismaOpeningStockImportStore } from "./prisma-opening-stock-import-store.js";
 import { PrismaOutboundStore } from "./prisma-outbound-store.js";
 import { PrismaReportSource } from "./prisma-report-source.js";
 import { PrismaStocktakeStore } from "./prisma-stocktake-store.js";
@@ -82,6 +86,7 @@ export interface InventoryReadSource {
 
 export interface InventoryPersistence {
   entryStore: InventoryEntryStore;
+  openingStockImportStore: OpeningStockImportStore;
   outboundStore: OutboundStore;
   movementStore: MovementStore;
   stocktakeStore: StocktakeStore;
@@ -472,13 +477,17 @@ export function createPersistenceAdapters(options: { driver: "memory" } | { driv
       onRecordStockEntry: ({ itemId }) => items.markLedgerActivity(itemId),
     });
     const periodStore = new InMemoryAccountingPeriodStore();
+    const warehouses = new InMemoryWarehouseRepository(DEFAULT_WAREHOUSES);
+    const categories = new InMemoryCoreEntityRepository(
+      CANONICAL_ITEM_CATEGORIES.map((category) => ({ ...category })),
+    );
     return {
       driver: "memory",
       repositories: {
         roles,
         users,
-        warehouses: new InMemoryWarehouseRepository(DEFAULT_WAREHOUSES),
-        categories: new InMemoryCoreEntityRepository(),
+        warehouses,
+        categories,
         items,
         approvals: new InMemoryCoreEntityRepository(),
         batches: new InMemoryCoreEntityRepository(),
@@ -500,6 +509,14 @@ export function createPersistenceAdapters(options: { driver: "memory" } | { driv
       auditService: new InMemoryAuditService(),
       inventory: {
         entryStore,
+        openingStockImportStore: new InMemoryOpeningStockImportStore(
+          items,
+          warehouses,
+          categories,
+          state,
+          entryStore,
+          periodStore,
+        ),
         outboundStore: new InMemoryOutboundStore(state),
         movementStore: new InMemoryMovementStore(state),
         stocktakeStore: new InMemoryStocktakeStore(state),
@@ -522,6 +539,7 @@ export function createPersistenceAdapters(options: { driver: "memory" } | { driv
 
   const prisma = options.prisma ?? createPrismaClient(options.connectionString ?? "");
   const reportSource = new PrismaReportSource(prisma);
+  const periodStore = new PrismaAccountingPeriodStore(prisma);
 
   return {
     driver: "prisma",
@@ -545,10 +563,11 @@ export function createPersistenceAdapters(options: { driver: "memory" } | { driv
     auditService: new PrismaAuditService(prisma),
     inventory: {
       entryStore: new PrismaInventoryEntryStore(prisma),
+      openingStockImportStore: new PrismaOpeningStockImportStore(prisma),
       outboundStore: new PrismaOutboundStore(prisma),
       movementStore: new PrismaMovementStore(prisma),
       stocktakeStore: new PrismaStocktakeStore(prisma),
-      periodStore: new PrismaAccountingPeriodStore(prisma),
+      periodStore,
       approvalSyncStore: new PrismaApprovalSyncStore(prisma),
       readSource: reportSource,
     },
