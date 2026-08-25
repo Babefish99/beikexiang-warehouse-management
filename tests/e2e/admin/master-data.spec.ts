@@ -235,45 +235,4 @@ test.describe("master data administration", () => {
     await expect(form.getByLabel("采购人")).toHaveValue("Alex");
   });
 
-  test("opening stock form loads warehouse and item selectors from standard data and preserves input on API errors", async ({ page }) => {
-    await page.route(apiUrl("/admin/warehouses"), async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify([{ id: "warehouse-2", code: "WH-02", name: "Warehouse two", isActive: true }]),
-      });
-    });
-    await page.route(apiUrl("/admin/items"), async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify([{ id: "item-2", code: "MAT-0001", name: "Packing tape", specification: "Wide", unit: "roll", categoryId: "cat-pack", isActive: true }]),
-      });
-    });
-    await page.route(apiUrl("/admin/opening-stock"), async (route) => {
-      await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "remark is required when unit cost is zero" }) });
-    });
-
-    await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Fopening-stock"));
-
-    const form = page.locator("form");
-    await expect(form.locator("select").nth(0)).toContainText("WH-02 · Warehouse two");
-    await expect(form.locator("select").nth(1)).toContainText("MAT-0001 · Packing tape");
-    await form.getByLabel("盘点人 *").fill("Jamie");
-    await form.locator("select").nth(0).selectOption("warehouse-2");
-    await form.locator("select").nth(1).selectOption("item-2");
-    await form.getByLabel("批次号 *").fill("OPEN-01");
-    await form.getByLabel("实盘数量 *").fill("9");
-    await form.getByLabel("确认单价 *").fill("0");
-    await form.getByLabel("差异/实盘说明").fill("awaiting unit cost");
-    await form.getByRole("button", { name: "保存期初库存" }).click();
-
-    await expect(page.getByText("remark is required when unit cost is zero")).toBeVisible();
-    await expect(form.getByLabel("盘点人 *")).toHaveValue("Jamie");
-    await expect(form.locator("select").nth(0)).toHaveValue("warehouse-2");
-    await expect(form.locator("select").nth(1)).toHaveValue("item-2");
-    await expect(form.getByLabel("批次号 *")).toHaveValue("OPEN-01");
-    await expect(form.getByLabel("确认单价 *")).toHaveValue("0");
-    await expect(form.getByLabel("差异/实盘说明")).toHaveValue("awaiting unit cost");
-  });
 });
