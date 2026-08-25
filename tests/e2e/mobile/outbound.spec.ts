@@ -78,7 +78,7 @@ test("guides allocation across batches, restores a draft, revalidates, and submi
   await loginAs(page, "/admin/outbound", "ADMIN");
   await expect(page.getByRole("heading", { name: "选择待办" })).toBeVisible();
   await expect(page.getByText("2 个物品 · 待出库", { exact: true })).toBeVisible();
-  await expect(page.getByText("PENDING_OUTBOUND", { exact: true })).toHaveCount(0);
+  await expect(page.locator("body")).not.toContainText("PENDING_OUTBOUND");
   await page.getByRole("button", { name: "办理出库" }).click();
   await expect(page.getByRole("heading", { name: "分配库存" })).toBeVisible();
 

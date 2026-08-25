@@ -14,6 +14,8 @@ describe("inventory status label", () => {
     ["REJECTED", "已拒绝"],
     ["REVOKED", "已撤回"],
     ["CANCELED", "已取消"],
+    ["DELETED", "已删除"],
+    ["UNKNOWN", "状态未知"],
   ])("renders %s as %s", (status, label) => {
     expect(inventoryStatusLabel(status)).toBe(label);
   });

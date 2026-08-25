@@ -433,7 +433,7 @@ Task 8 首轮完整 E2E 曾为 75 passed、29 failed；29 个失败全部来自�
 - 在隔离工作树 `.worktrees/ui-consistency-audit`、分支 `codex/ui-consistency-audit` 上按批准范围和 TDD 完成，设计与实施计划分别为 `docs/superpowers/specs/2026-08-25-ui-consistency-audit-design.md`、`docs/superpowers/plans/2026-08-25-ui-consistency-audit.md`，实现提交为 `d6bc5bc`。本批次没有扩大到全量 CSS 设计令牌重构、历史后端英文错误清理，也保留物品维护专用宽弹窗。
 - 中文与业务表述：新增统一库存状态展示映射，桌面/手机出库、调拨和退库结果不再直接显示 `PENDING_OUTBOUND`、`COMPLETED`、`PARTIALLY_ISSUED` 等内部枚举；手机出库“服务端 ID”改为“业务编号”，物品页“企业微信选项 key”改为“企业微信选项标识”。未知状态使用稳定中文兜底，不改变服务端枚举或 API 契约。
 - 视觉与可访问性：期初库存失败重试按钮改用既有次要按钮样式；仅把成功提示、弹窗副标题和期初导入区标题/说明收敛到已确认字号；表单错误补充 `role="alert"`，成功反馈补充 `role="status"`。没有改变业务提交、权限、数据库或手机端导航行为。
-- TDD RED 先确认状态映射模块缺失，并在隔离仓库端口上确认原页面仍显示英文枚举、旧技术字段、缺失 alert/status 语义、字号差异和无变体重试按钮；GREEN 后状态映射单元测试 11/11、Web 单元测试 58/58、受影响的 6 个 Playwright spec 40/40 通过。默认完整 Vitest 为 55 个文件通过、4 个条件跳过，352 个测试通过、25 个跳过；跳过项需要显式 `TEST_DATABASE_URL`，本轮没有连接数据库。
+- TDD RED 先确认状态映射模块缺失，并在隔离仓库端口上确认原页面仍显示英文枚举、旧技术字段、缺失 alert/status 语义、字号差异和无变体重试按钮；GREEN 后状态映射单元测试 13/13、Web 单元测试 60/60、受影响的 6 个 Playwright spec 40/40 通过。默认完整 Vitest 为 55 个文件通过、4 个条件跳过，354 个测试通过、25 个跳过；跳过项需要显式 `TEST_DATABASE_URL`，本轮没有连接数据库。
 - API/Web 类型检查和生产构建均通过，Web 构建转换 1615 个模块；`git diff --check` 无错误。E2E 显式使用隔离 API `127.0.0.1:3413`、Web `127.0.0.1:5376`、memory persistence 和 local-auth，避免复用默认 3001 端口上的固定资产服务。
 - 该功能分支尚未合回 `feat/warehouse-system`，未 Push、未部署，未操作生产数据库、Secret 或企业微信配置；根工作区 `stash@{0}`、原有未跟踪计划/演示资料及其他 worktree 均未改动。服务器继续运行 `3f61393` 发布版本。
 
