@@ -51,6 +51,7 @@ describe.skipIf(!databaseUrl)("Prisma master-data and identity persistence", () 
     expect(await prisma.itemCategory.findMany({ orderBy: { prefix: "asc" }, select: { id: true, code: true, prefix: true } })).toEqual([
       { id: "category-bj", code: "CATEGORY_BJ", prefix: "BJ" },
       { id: "category-cy", code: "CATEGORY_CY", prefix: "CY" },
+      { id: "category-hj", code: "CATEGORY_HJ", prefix: "HJ" },
       { id: "category-wp", code: "CATEGORY_WP", prefix: "WP" },
     ]);
   });
@@ -161,6 +162,7 @@ describe.skipIf(!databaseUrl)("Prisma master-data and identity persistence", () 
       await expect(upgradePrisma.itemCategory.findMany({ orderBy: { code: "asc" }, select: { id: true, code: true } })).resolves.toEqual([
         { id: "category-bj", code: "CATEGORY_BJ" },
         { id: "category-cy", code: "CATEGORY_CY" },
+        { id: "category-hj", code: "CATEGORY_HJ" },
         { id: "category-wp", code: "CATEGORY_WP" },
       ]);
       await expect(upgradePrisma.warehouse.findMany({ orderBy: { code: "asc" }, select: { id: true, code: true } })).resolves.toEqual([
