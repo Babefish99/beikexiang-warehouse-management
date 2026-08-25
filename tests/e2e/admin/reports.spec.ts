@@ -75,7 +75,7 @@ test("reports page filters transaction details and keeps filters after a server 
 
   await form.locator("select").selectOption("transfers");
 
-  await expect(page.getByText("report query unavailable")).toBeVisible();
+  await expect(page.locator('.form-error[role="alert"]')).toHaveText("report query unavailable");
   await expect(form.locator('input[type="month"]')).toHaveValue("2026-08");
   await expect(form.locator("select")).toHaveValue("transfers");
 });

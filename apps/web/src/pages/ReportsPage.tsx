@@ -168,8 +168,8 @@ export function ReportsPage({ warehouseId }: { warehouseId: string }) {
           </label>
         </div>
 
-        {error ? <div className="form-error report-feedback">{error}</div> : null}
-        {exportError ? <div className="form-error report-feedback">{exportError}</div> : null}
+        {error ? <div className="form-error report-feedback" role="alert">{error}</div> : null}
+        {exportError ? <div className="form-error report-feedback" role="alert">{exportError}</div> : null}
       </section>
 
       {loading ? <section className="panel report-loading-panel"><div className="notice">正在查询……</div></section> : (

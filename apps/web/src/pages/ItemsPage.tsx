@@ -290,7 +290,7 @@ export function ItemsPage() {
               <label><span>规格</span><input value={createForm.specification} onChange={(event) => setCreateForm({ ...createForm, specification: event.target.value })} /></label>
               <label><span>单位</span><input required value={createForm.unit} onChange={(event) => setCreateForm({ ...createForm, unit: event.target.value })} /></label>
               <label><span>分类</span><input required value={createForm.categoryId} onChange={(event) => setCreateForm({ ...createForm, categoryId: event.target.value })} /></label>
-              <label><span>企业微信选项 key</span><input value={createForm.weComOptionKey} onChange={(event) => setCreateForm({ ...createForm, weComOptionKey: event.target.value })} /></label>
+              <label><span>企业微信选项标识</span><input value={createForm.weComOptionKey} onChange={(event) => setCreateForm({ ...createForm, weComOptionKey: event.target.value })} /></label>
               <label><span>最低库存</span><input value={createForm.minimumStock} onChange={(event) => setCreateForm({ ...createForm, minimumStock: event.target.value })} /></label>
               {error ? <div className="form-grid__wide form-error modal-dialog__error" role="alert" aria-live="assertive">{error}</div> : null}
               <div className="form-grid__wide form-actions form-actions--split">
@@ -317,7 +317,7 @@ export function ItemsPage() {
               <label><span>名称</span><input required value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })} /></label>
               <label><span>规格</span><input value={editForm.specification} onChange={(event) => setEditForm({ ...editForm, specification: event.target.value })} /></label>
               <label><span>单位</span><input required value={editForm.unit} onChange={(event) => setEditForm({ ...editForm, unit: event.target.value })} /></label>
-              <label><span>企业微信选项 key</span><input value={editForm.weComOptionKey} onChange={(event) => setEditForm({ ...editForm, weComOptionKey: event.target.value })} /></label>
+              <label><span>企业微信选项标识</span><input value={editForm.weComOptionKey} onChange={(event) => setEditForm({ ...editForm, weComOptionKey: event.target.value })} /></label>
               <label><span>最低库存</span><input value={editForm.minimumStock} onChange={(event) => setEditForm({ ...editForm, minimumStock: event.target.value })} /></label>
               {error ? <div className="form-grid__wide form-error modal-dialog__error" role="alert" aria-live="assertive">{error}</div> : null}
               <div className="form-grid__wide form-actions form-actions--split">
@@ -337,13 +337,13 @@ export function ItemsPage() {
               aria-label="物品搜索"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="搜索编码、名称或选项 key"
+              placeholder="搜索编码、名称或选项标识"
             />
           </label>
           <span className="toolbar-count">共 {filteredItems.length} 项</span>
         </div>
-        {message ? <div className="success-notice">{message}</div> : null}
-        {error && !editingItemId && !createModalOpen ? <div className="form-error">{error}</div> : null}
+        {message ? <div className="success-notice" role="status">{message}</div> : null}
+        {error && !editingItemId && !createModalOpen ? <div className="form-error" role="alert">{error}</div> : null}
         {loading ? <div className="notice">正在加载物品……</div> : (
           <div className="table-wrap">
             <table>

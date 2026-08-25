@@ -44,6 +44,9 @@ test.describe("master data administration", () => {
 
     await row.getByRole("button", { name: "启用", exact: true }).click();
     await expect(row.getByRole("button", { name: "停用", exact: true })).toBeVisible();
+    const success = page.locator('.success-notice[role="status"]');
+    await expect(success).toHaveText("物品已启用");
+    await expect(success).toHaveCSS("font-size", "13px");
   });
 
   test("item page opens the edit modal and preserves edit input when the API rejects an immutable code change", async ({ page }) => {
@@ -69,6 +72,7 @@ test.describe("master data administration", () => {
     });
 
     await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Fitems"));
+    await expect(page.getByLabel("物品搜索")).toHaveAttribute("placeholder", "搜索编码、名称或选项标识");
 
     const initialRow = page.locator("tbody tr").first();
     await expect(initialRow.getByText("Tea leaves", { exact: true })).toBeVisible();
@@ -82,6 +86,7 @@ test.describe("master data administration", () => {
     await page.getByRole("button", { name: "新增物品", exact: true }).click();
     const createDialog = page.getByRole("dialog", { name: "新增物品" });
     await expect(createDialog).toBeVisible();
+    await expect(createDialog.locator(".modal-dialog__header small")).toHaveCSS("font-size", "13px");
     const form = createDialog.locator("form");
     await form.getByLabel("编码").fill("TEA-0002");
     await form.getByLabel("分类前缀").fill("TEA");
@@ -89,7 +94,7 @@ test.describe("master data administration", () => {
     await form.getByLabel("规格").fill("Spring");
     await form.getByLabel("单位").fill("bag");
     await form.getByLabel("分类", { exact: true }).fill("cat-green");
-    await form.getByLabel("企业微信选项 key").fill("opt-green");
+    await form.getByLabel("企业微信选项标识").fill("opt-green");
     await form.getByLabel("最低库存").fill("5");
     await form.getByRole("button", { name: "新增物品" }).click();
 
@@ -102,6 +107,7 @@ test.describe("master data administration", () => {
     await expect(dialog.getByLabel("分类", { exact: true })).toHaveCount(0);
     await expect(page.locator(".master-data-form-panel")).toHaveCount(0);
     const editForm = dialog.locator("form");
+    await expect(editForm.getByLabel("企业微信选项标识")).toHaveValue("opt-tea");
     await editForm.getByLabel("编码").fill("TEA-0099");
     await editForm.getByLabel("名称").fill("Tea leaves premium");
     await editForm.getByRole("button", { name: "保存修改" }).click();

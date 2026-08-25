@@ -114,7 +114,23 @@ test("shows row errors and keeps formal import disabled", async ({ page }) => {
   await page.getByRole("button", { name: "预览校验" }).click();
 
   await expect(page.getByText("期初库存 · 第 3 行 · 实盘数量")).toBeVisible();
+  const issueHeading = page.locator(".opening-import-section-heading").filter({ hasText: "校验问题" });
+  await expect(issueHeading.locator("h2")).toHaveCSS("font-size", "18px");
+  await expect(issueHeading.locator("p")).toHaveCSS("font-size", "13px");
   await expect(page.getByRole("button", { name: "正式导入" })).toBeDisabled();
+});
+
+test("uses the shared secondary button when status loading fails", async ({ page }) => {
+  await page.route(apiUrl("/admin/opening-stock/import/status"), (route) => route.fulfill({
+    status: 500,
+    contentType: "application/json",
+    body: JSON.stringify({ error: "期初库存状态读取失败" }),
+  }));
+
+  await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Fopening-stock"));
+
+  await expect(page.getByRole("alert")).toContainText("期初库存状态读取失败");
+  await expect(page.getByRole("button", { name: "重新加载" })).toHaveClass(/button--secondary/);
 });
 
 test("preserves reviewer and confirmation when commit returns a conflict", async ({ page }) => {

@@ -30,6 +30,8 @@ test("outbound page allocates a batch and submits the actual issue", async ({ pa
   });
 
   await loginAs(page, "/admin/outbound", "ADMIN");
+  await expect(page.locator(".status-pill")).toHaveText("待出库");
+  await expect(page.getByText("PENDING_OUTBOUND", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "办理出库" }).click();
   const form = page.locator("form");
   await form.locator("select").nth(1).selectOption("wh-1");
@@ -38,7 +40,10 @@ test("outbound page allocates a batch and submits the actual issue", async ({ pa
   await expect(form.getByText(/审批数量 4\.000，实际出库 4\.000，预计金额 80\.00/)).toBeVisible();
   await form.getByRole("button", { name: "确认实际出库" }).click();
 
-  await expect(page.getByText("outbound-1")).toBeVisible();
+  const result = page.locator('.success-notice[role="status"]');
+  await expect(result).toContainText("outbound-1");
+  await expect(result).toContainText("已完成");
+  await expect(result).not.toContainText("COMPLETED");
 });
 
 test("outbound page shows server errors and preserves allocation input", async ({ page }) => {
@@ -65,7 +70,7 @@ test("outbound page shows server errors and preserves allocation input", async (
   await form.locator("textarea").fill("保留错误现场");
   await form.getByRole("button", { name: "确认实际出库" }).click();
 
-  await expect(page.getByText("batch balance cannot become negative")).toBeVisible();
+  await expect(form.locator('.form-error[role="alert"]')).toHaveText("batch balance cannot become negative");
   await expect(form.locator("select").nth(1)).toHaveValue("wh-1");
   await expect(form.locator("select").nth(2)).toHaveValue("batch-1");
   await expect(form.locator('input[type="number"]')).toHaveValue("4");

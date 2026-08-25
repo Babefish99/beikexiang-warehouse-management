@@ -77,6 +77,8 @@ test("guides allocation across batches, restores a draft, revalidates, and submi
 
   await loginAs(page, "/admin/outbound", "ADMIN");
   await expect(page.getByRole("heading", { name: "选择待办" })).toBeVisible();
+  await expect(page.getByText("2 个物品 · 待出库", { exact: true })).toBeVisible();
+  await expect(page.getByText("PENDING_OUTBOUND", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "办理出库" }).click();
   await expect(page.getByRole("heading", { name: "分配库存" })).toBeVisible();
 
@@ -109,7 +111,11 @@ test("guides allocation across batches, restores a draft, revalidates, and submi
   const submit = page.getByRole("dialog").getByRole("button", { name: "确认提交" });
   await submit.dblclick();
   await expect(page.getByRole("heading", { name: "出库完成" })).toBeVisible();
-  await expect(page.getByText("outbound-1")).toBeVisible();
+  const completed = page.locator(".outbound-review");
+  await expect(completed).toContainText("业务编号");
+  await expect(completed).toContainText("outbound-1");
+  await expect(completed).toContainText("部分出库");
+  await expect(completed).not.toContainText("PARTIALLY_ISSUED");
   expect(optionReads).toBeGreaterThanOrEqual(3);
   expect(confirmPosts).toBe(1);
   await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage).filter((key) => key.startsWith("warehouse.outbound.v1.")).length)).toBe(0);

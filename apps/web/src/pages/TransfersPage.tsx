@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, RefreshCw } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
+import { inventoryStatusLabel } from "../features/inventory/inventory-status-label";
 
 type TransferBalance = { warehouseId: string; itemId: string; batchId: string; remainingQuantity: string; unitCost: string };
 
@@ -60,7 +61,7 @@ export function TransfersPage() {
       return;
     }
     const payload = await response.json() as { transferId: string; unitCost: string; status: string };
-    setResult(`调拨已完成：${payload.transferId}（状态 ${payload.status}，单价 ${payload.unitCost}）`);
+    setResult(`调拨已完成：${payload.transferId}（状态 ${inventoryStatusLabel(payload.status)}，单价 ${payload.unitCost}）`);
     await loadOptions();
   };
 
@@ -113,8 +114,8 @@ export function TransfersPage() {
             <button className="button button--primary" type="submit" disabled={loading || !balances.length}>提交调拨</button>
           </div>
         </form>
-        {result ? <div className="success-notice"><CheckCircle2 size={18} />{result}</div> : null}
-        {error ? <div className="form-error">{error}</div> : null}
+        {result ? <div className="success-notice" role="status"><CheckCircle2 size={18} />{result}</div> : null}
+        {error ? <div className="form-error" role="alert">{error}</div> : null}
       </section>
     </div>
   );

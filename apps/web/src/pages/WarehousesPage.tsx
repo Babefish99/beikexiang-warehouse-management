@@ -90,8 +90,8 @@ export function WarehousesPage() {
           </form>
         </section>
       ) : null}
-      {message ? <div className="success-notice">{message}</div> : null}
-      {error ? <div className="form-error">{error}</div> : null}
+      {message ? <div className="success-notice" role="status">{message}</div> : null}
+      {error ? <div className="form-error" role="alert">{error}</div> : null}
       <section className="warehouse-card-grid">
         {loading ? <div className="panel notice">正在加载仓库……</div> : warehouses.map((warehouse) => (
           <article className="panel warehouse-card" key={warehouse.id}>

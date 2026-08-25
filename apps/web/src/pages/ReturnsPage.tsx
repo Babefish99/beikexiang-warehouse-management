@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { CheckCircle2, RefreshCw } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
+import { inventoryStatusLabel } from "../features/inventory/inventory-status-label";
 
 type ReturnAllocation = { id: string; outboundOrderId: string; warehouseId: string; itemId: string; batchId: string; issuedQuantity: string; remainingReturnableQuantity: string; unitCost: string };
 
@@ -54,7 +55,7 @@ export function ReturnsPage() {
       return;
     }
     const payload = await response.json() as { returnId: string; unitCost: string; status: string };
-    setResult(`退库已完成：${payload.returnId}（状态 ${payload.status}，单价 ${payload.unitCost}）`);
+    setResult(`退库已完成：${payload.returnId}（状态 ${inventoryStatusLabel(payload.status)}，单价 ${payload.unitCost}）`);
     await loadOptions();
   };
 
@@ -86,8 +87,8 @@ export function ReturnsPage() {
             <button className="button button--primary" type="submit" disabled={loading || !allocations.length}>提交退库</button>
           </div>
         </form>
-        {result ? <div className="success-notice"><CheckCircle2 size={18} />{result}</div> : null}
-        {error ? <div className="form-error">{error}</div> : null}
+        {result ? <div className="success-notice" role="status"><CheckCircle2 size={18} />{result}</div> : null}
+        {error ? <div className="form-error" role="alert">{error}</div> : null}
       </section>
     </div>
   );

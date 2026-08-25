@@ -129,8 +129,8 @@ export function StocktakePage() {
             <button className="button button--primary" type="submit" disabled={loading || !balances.length}>提交盘点</button>
           </div>
         </form>
-        {result ? <div className="success-notice"><CheckCircle2 size={18} />{result}</div> : null}
-        {error ? <div className="form-error">{error}</div> : null}
+        {result ? <div className="success-notice" role="status"><CheckCircle2 size={18} />{result}</div> : null}
+        {error ? <div className="form-error" role="alert">{error}</div> : null}
       </section>
     </div>
   );

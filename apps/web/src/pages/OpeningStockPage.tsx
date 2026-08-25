@@ -224,7 +224,7 @@ export function OpeningStockPage() {
       {!status && busy !== "status" ? (
         <section className="panel opening-import-state">
           <strong>暂时无法读取期初库存状态</strong>
-          <button className="button" type="button" onClick={() => void loadStatus()}>重新加载</button>
+          <button className="button button--secondary" type="button" onClick={() => void loadStatus()}>重新加载</button>
         </section>
       ) : null}
 
