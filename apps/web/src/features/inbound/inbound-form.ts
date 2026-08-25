@@ -10,7 +10,7 @@ export type InboundDraft = {
   remark: string;
 };
 
-export type InboundFieldErrors = Partial<Record<keyof InboundDraft, string>>;
+export type InboundFieldErrors = Partial<Record<keyof InboundDraft | "batchNo", string>>;
 
 export type InboundServerError = {
   message: string;
@@ -23,7 +23,10 @@ const decimalFormatError = "必须为最多 14 位整数和 4 位小数的普通
 
 export function mapInboundServerError(serverMessage: string): InboundServerError {
   if (serverMessage === "batch number already exists") {
-    return { message: "批次号自动生成冲突，请稍后重试", fieldErrors: {} };
+    return {
+      message: "批次号自动生成冲突，请稍后重试",
+      fieldErrors: { batchNo: "批次号自动生成冲突，请稍后重试" },
+    };
   }
   return { message: serverMessage, fieldErrors: {} };
 }

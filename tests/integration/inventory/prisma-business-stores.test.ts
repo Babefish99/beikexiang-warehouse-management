@@ -220,9 +220,28 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
 
     const orderCount = await prisma.inboundOrder.count();
     const ledgerCount = await prisma.inventoryLedgerEntry.count();
-    await expect(recordStock({ batchNo: "TASK3-INBOUND" })).rejects.toThrow();
+    await expect(recordStock({ batchNo: "TASK3-INBOUND" })).rejects.toMatchObject({
+      message: "batch number already exists",
+      statusCode: 409,
+    });
     await expect(prisma.inboundOrder.count()).resolves.toBe(orderCount);
     await expect(prisma.inventoryLedgerEntry.count()).resolves.toBe(ledgerCount);
+  });
+
+  it("returns the stable batch conflict after automatic batch retries are exhausted", async () => {
+    await recordStock({ batchNo: "20260811-001" });
+    await prisma.inboundBatchSequence.create({
+      data: { purchasedDate: "20260811", lastSequence: 0 },
+    });
+
+    await expect(recordStock({ autoGenerateBatchNo: true })).rejects.toMatchObject({
+      message: "batch number already exists",
+      statusCode: 409,
+    });
+    await expect(prisma.inboundBatchSequence.findUnique({
+      where: { purchasedDate: "20260811" },
+      select: { lastSequence: true },
+    })).resolves.toEqual({ lastSequence: 0 });
   });
 
   it("rolls back the complete opening-stock request when row two conflicts", async () => {
@@ -240,7 +259,10 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
         { warehouseId: "warehouse-1", itemId, batchNo: "TASK3-OPENING-ROW-1", quantity: "4", unitCost: "2" },
         { warehouseId: "warehouse-2", itemId, batchNo: "TASK3-OPENING-DUPLICATE", quantity: "6", unitCost: "3" },
       ],
-    })).rejects.toThrow();
+    })).rejects.toMatchObject({
+      message: "batch number already exists",
+      statusCode: 409,
+    });
 
     await expect(prisma.inboundOrder.count()).resolves.toBe(before.orders);
     await expect(prisma.procurementBatch.count()).resolves.toBe(before.batches);

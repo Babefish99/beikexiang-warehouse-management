@@ -133,7 +133,7 @@ test("mobile inbound is grouped, confirms an exact amount, and restores a failed
   expect(await page.evaluate(() => sessionStorage.getItem("warehouse.inbound.v1.local-admin"))).toBeNull();
 });
 
-test("automatic batch conflicts stay in the dialog without discarding the other inputs", async ({ page }) => {
+test("automatic batch conflicts mark the generated batch field without discarding the other inputs", async ({ page }) => {
   await page.route(apiUrl("/admin/inbound"), (route) => route.fulfill({
     status: 409,
     json: { error: "batch number already exists" },
@@ -146,10 +146,18 @@ test("automatic batch conflicts stay in the dialog without discarding the other 
   await dialog.getByRole("button", { name: "确认入库", exact: true }).click();
 
   await expect(dialog.getByRole("alert")).toHaveText("批次号自动生成冲突，请稍后重试");
-  await expect(page.getByLabel("批次号（系统生成）")).toHaveValue("20260813-001");
+  const batchField = page.getByLabel("批次号（系统生成）");
+  await expect(batchField).toHaveValue("20260813-001");
+  await expect(batchField).toHaveAttribute("aria-invalid", "true");
+  await expect(batchField.locator("xpath=following-sibling::*[1]")).toHaveText("批次号自动生成冲突，请稍后重试");
   await expect(page.getByLabel("采购人")).toHaveValue("仓库管理员");
   await expect(page.getByLabel("入库数量 *")).toHaveValue("0.1");
   await expect(dialog).toBeVisible();
+
+  await dialog.getByRole("button", { name: "取消" }).click();
+  await page.getByLabel("采购日期 *").fill("2026-08-14");
+  await expect(batchField).not.toHaveAttribute("aria-invalid", "true");
+  await expect(batchField.locator("xpath=following-sibling::*[1]")).toHaveCount(0);
 });
 
 test("old manual-batch drafts are ignored and leave the page usable", async ({ page }) => {

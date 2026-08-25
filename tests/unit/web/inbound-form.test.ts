@@ -134,10 +134,10 @@ describe("inbound form", () => {
     });
   });
 
-  it("keeps automatic batch conflicts as dialog-only errors", () => {
+  it("maps automatic batch conflicts to the generated batch field", () => {
     expect(mapInboundServerError("batch number already exists")).toEqual({
       message: "批次号自动生成冲突，请稍后重试",
-      fieldErrors: {},
+      fieldErrors: { batchNo: "批次号自动生成冲突，请稍后重试" },
     });
   });
 

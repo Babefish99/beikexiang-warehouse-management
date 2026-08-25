@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { Decimal } from "decimal.js";
 
+import { BusinessRuleError } from "../../application/errors/business-rule-error.js";
 import { nextInboundBatchNo } from "../../application/inventory/batch-number.js";
 import type { InventoryEntryStore } from "../../application/inventory/inbound-service.js";
 import { assertPrismaPeriodOpen, RetryableInventoryTransactionError, runInventoryTransaction, type InventoryTransactionClient } from "./prisma-inventory-transaction.js";
@@ -92,7 +93,9 @@ export class PrismaInventoryEntryStore implements InventoryEntryStore {
         });
         return { orderId, batchId, batchNo };
       } catch (error) {
-        if (!input.autoGenerateBatchNo || !isRetryableBatchNumberError(error) || attempt === 2) throw error;
+        if (input.autoGenerateBatchNo && isRetryableBatchNumberError(error) && attempt < 2) continue;
+        if (isBatchAllocationConflict(error)) throw duplicateBatchError();
+        throw error;
       }
     }
 
@@ -119,40 +122,45 @@ export class PrismaInventoryEntryStore implements InventoryEntryStore {
       unitCost: new Decimal(row.unitCost),
     }));
 
-    await runInventoryTransaction(this.prisma, async (transaction) => {
-      await assertPrismaPeriodOpen(transaction, receivedAt);
-      for (const [warehouseId, orderId] of orderIdsByWarehouse) {
-        await transaction.inboundOrder.create({
-          data: { id: orderId, warehouseId, orderNo: `OPEN-${orderId}`, source: "OPENING_STOCK", receivedAt, operatorId: input.operatorId },
-        });
-      }
-      for (const { row, orderId, batchId, lineId, ledgerId, quantity, unitCost } of rows) {
-        await transaction.procurementBatch.create({
-          data: {
-            id: batchId,
-            warehouseId: row.warehouseId,
-            itemId: row.itemId,
-            batchNo: row.batchNo,
-            quantity: quantity.toString(),
-            remainingQuantity: quantity.toString(),
-            unitCost: unitCost.toString(),
-            purchasedAt: new Date(row.purchasedAt),
-            productionDate: row.productionDate ? new Date(row.productionDate) : undefined,
-            expiryDate: row.expiryDate ? new Date(row.expiryDate) : undefined,
-            purchaser: row.purchaser,
-          },
-        });
-        await transaction.stockBalance.create({
-          data: { warehouseId: row.warehouseId, itemId: row.itemId, batchId, remainingQuantity: quantity.toString(), unitCost: unitCost.toString() },
-        });
-        await transaction.inboundLine.create({
-          data: { id: lineId, inboundOrderId: orderId, itemId: row.itemId, batchId, quantity: quantity.toString(), unitCost: unitCost.toString(), amount: quantity.mul(unitCost).toFixed(2) },
-        });
-        await transaction.inventoryLedgerEntry.create({
-          data: { id: ledgerId, warehouseId: row.warehouseId, itemId: row.itemId, batchId, type: "OPENING_BALANCE", quantity: quantity.toString(), unitCost: unitCost.toString(), amount: quantity.mul(unitCost).toFixed(2), referenceType: "OPENING_STOCK", referenceId: orderId, occurredAt: receivedAt },
-        });
-      }
-    });
+    try {
+      await runInventoryTransaction(this.prisma, async (transaction) => {
+        await assertPrismaPeriodOpen(transaction, receivedAt);
+        for (const [warehouseId, orderId] of orderIdsByWarehouse) {
+          await transaction.inboundOrder.create({
+            data: { id: orderId, warehouseId, orderNo: `OPEN-${orderId}`, source: "OPENING_STOCK", receivedAt, operatorId: input.operatorId },
+          });
+        }
+        for (const { row, orderId, batchId, lineId, ledgerId, quantity, unitCost } of rows) {
+          await transaction.procurementBatch.create({
+            data: {
+              id: batchId,
+              warehouseId: row.warehouseId,
+              itemId: row.itemId,
+              batchNo: row.batchNo,
+              quantity: quantity.toString(),
+              remainingQuantity: quantity.toString(),
+              unitCost: unitCost.toString(),
+              purchasedAt: new Date(row.purchasedAt),
+              productionDate: row.productionDate ? new Date(row.productionDate) : undefined,
+              expiryDate: row.expiryDate ? new Date(row.expiryDate) : undefined,
+              purchaser: row.purchaser,
+            },
+          });
+          await transaction.stockBalance.create({
+            data: { warehouseId: row.warehouseId, itemId: row.itemId, batchId, remainingQuantity: quantity.toString(), unitCost: unitCost.toString() },
+          });
+          await transaction.inboundLine.create({
+            data: { id: lineId, inboundOrderId: orderId, itemId: row.itemId, batchId, quantity: quantity.toString(), unitCost: unitCost.toString(), amount: quantity.mul(unitCost).toFixed(2) },
+          });
+          await transaction.inventoryLedgerEntry.create({
+            data: { id: ledgerId, warehouseId: row.warehouseId, itemId: row.itemId, batchId, type: "OPENING_BALANCE", quantity: quantity.toString(), unitCost: unitCost.toString(), amount: quantity.mul(unitCost).toFixed(2), referenceType: "OPENING_STOCK", referenceId: orderId, occurredAt: receivedAt },
+          });
+        }
+      });
+    } catch (error) {
+      if (isProcurementBatchConflict(error)) throw duplicateBatchError();
+      throw error;
+    }
 
     return { orderIds: [...orderIdsByWarehouse.values()], batchIds: rows.map(({ batchId }) => batchId) };
   }
@@ -184,5 +192,24 @@ async function claimInboundBatchNo(transaction: InventoryTransactionClient, purc
 
 function isRetryableBatchNumberError(error: unknown): boolean {
   return error instanceof RetryableInventoryTransactionError
-    || (typeof error === "object" && error !== null && "code" in error && error.code === "P2002");
+    || isBatchAllocationConflict(error);
+}
+
+function isPrismaUniqueConstraintForModel(error: unknown, modelName: string): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "P2002") return false;
+  if (!("meta" in error) || typeof error.meta !== "object" || error.meta === null) return false;
+  return "modelName" in error.meta && error.meta.modelName === modelName;
+}
+
+function isProcurementBatchConflict(error: unknown): boolean {
+  return isPrismaUniqueConstraintForModel(error, "ProcurementBatch");
+}
+
+function isBatchAllocationConflict(error: unknown): boolean {
+  return isProcurementBatchConflict(error)
+    || isPrismaUniqueConstraintForModel(error, "InboundBatchSequence");
+}
+
+function duplicateBatchError(): BusinessRuleError {
+  return new BusinessRuleError("batch number already exists", 409);
 }
