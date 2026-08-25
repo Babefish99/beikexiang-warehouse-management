@@ -4,7 +4,7 @@
 > 用途：作为后续 Codex 任务、人工开发、测试和部署的统一交接入口。开始新任务时先读本文件，再检查 Git、服务器和企业微信的实时状态。
 > 安全：本文不保存 Secret、数据库密码、会话密钥、回调 Token 或 EncodingAESKey。
 > 摘要交接：日常验收与运维请先读 [项目状态与发布交接](docs/项目状态与发布交接.md)，完整时间线和证据仍以本文件为准。
-> 对话状态：截至 2026-08-25，已完成分支整合、授权发布、企业微信管理员映射配置、本地三仓期初库存 Excel 模板，以及预览/一次性事务导入实现、自动化验收和本地集成；重复批次错误统一已由 `codex/duplicate-batch-conflict@9eadaa1` 仅快进合回本地 `feat/warehouse-system`。聚焦式 P1 界面一致性修正已在隔离分支 `codex/ui-consistency-audit` 完成实现、本地门禁和评审修正，代码与测试验证截止 `64711f2`，合并目标为该分支实际 `HEAD`，尚未合回集成分支。以上本地变更均未 Push 或部署，真实实盘数据填写、财务复核、生产发布和数据库导入仍未开始。
+> 对话状态：截至 2026-08-25，已完成分支整合、授权发布、企业微信管理员映射配置、本地三仓期初库存 Excel 模板，以及预览/一次性事务导入实现、自动化验收和本地集成；重复批次错误统一已由 `codex/duplicate-batch-conflict@9eadaa1` 仅快进合回本地 `feat/warehouse-system`。聚焦式 P1 界面一致性修正也已由 `codex/ui-consistency-audit@2adf2c8` 以 `--ff-only` 快进合入本地集成分支，并通过合入后复验。以上本地变更均未 Push 或部署，真实实盘数据填写、财务复核、生产发布和数据库导入仍未开始。
 
 ## 1. 当前结论
 
@@ -435,7 +435,13 @@ Task 8 首轮完整 E2E 曾为 75 passed、29 failed；29 个失败全部来自�
 - 视觉与可访问性：期初库存失败重试按钮改用既有次要按钮样式；仅把成功提示、弹窗副标题和期初导入区标题/说明收敛到已确认字号；表单错误补充 `role="alert"`，成功反馈补充 `role="status"`。没有改变业务提交、权限、数据库或手机端导航行为。
 - TDD RED 先确认状态映射模块缺失，并在隔离仓库端口上确认原页面仍显示英文枚举、旧技术字段、缺失 alert/status 语义、字号差异和无变体重试按钮；GREEN 后状态映射单元测试 13/13、Web 单元测试 60/60、受影响的 6 个 Playwright spec 40/40 通过。默认完整 Vitest 为 55 个文件通过、4 个条件跳过，354 个测试通过、25 个跳过；跳过项需要显式 `TEST_DATABASE_URL`，本轮没有连接数据库。
 - API/Web 类型检查和生产构建均通过，Web 构建转换 1615 个模块；`git diff --check` 无错误。E2E 显式使用隔离 API `127.0.0.1:3413`、Web `127.0.0.1:5376`、memory persistence 和 local-auth，避免复用默认 3001 端口上的固定资产服务。
-- 该功能分支尚未合回 `feat/warehouse-system`，未 Push、未部署，未操作生产数据库、Secret 或企业微信配置；根工作区 `stash@{0}`、原有未跟踪计划/演示资料及其他 worktree 均未改动。服务器继续运行 `3f61393` 发布版本。
+- 该功能分支完成时尚未合回 `feat/warehouse-system`；后续本地快进集成与复验见 10.22。全过程未 Push、未部署，未操作生产数据库、Secret 或企业微信配置；根工作区 `stash@{0}`、原有未跟踪计划/演示资料及其他 worktree 均未改动。服务器继续运行 `3f61393` 发布版本。
+
+### 10.22 聚焦式 P1 界面修正本地集成（2026-08-25）
+
+- 根工作区实际起点为 `feat/warehouse-system@70d7764`，只有既有未跟踪计划、演示和输出资料；`git merge-base --is-ancestor` 确认它是 `codex/ui-consistency-audit@2adf2c8` 的祖先后，以 `git merge --ff-only codex/ui-consistency-audit` 无冲突快进，本地集成分支更新为 `2adf2c8`。
+- 合入后在根集成工作区执行默认完整 Vitest：55 个文件通过、4 个文件条件跳过，354 个测试通过、25 个跳过；受影响的 6 个 Playwright spec 在隔离 API `3413`、Web `5376`、memory/local-auth 下为 40/40。API/Web 类型检查、生产构建（Web 1615 modules transformed）和 `git diff --check 70d7764..HEAD` 均 exit 0。
+- 本次仅完成本地快进和验证，未 Push、未创建 PR、未部署、未操作生产数据库、Secret 或企业微信配置。`stash@{0}`、原有未跟踪资料、`.worktrees/codex-opening-stock-excel-import`、`.worktrees/production-deployment` 均保持原样；服务器仍是 `3f61393` 发布版本。
 
 ## 11. 文档维护规则
 
