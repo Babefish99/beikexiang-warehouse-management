@@ -457,6 +457,7 @@ Task 8 首轮完整 E2E 曾为 75 passed、29 failed；29 个失败全部来自�
 - 修正后的新鲜本地门禁：PostgreSQL 16 迁移 5/5；完整串行 Vitest 60 个文件、383/383；完整 Chromium Playwright 140/140；API/Web 根 typecheck 通过；生产 build 通过（Web 1615 modules transformed）；基线提交范围 `git diff --check` 通过。评审后复验还发现错配 preview token 测试只改 base64url 尾字符时可能保留同一解码字节，已改为篡改签名主体首字符，消除随机 201。测试使用一次性本地容器和隔离端口 API `3301`、Web `5474`，未导入正式数据。
 - 当前仅为本地实现，尚未 Push、创建 PR、运行真实 GitHub Actions、合并或配置分支保护。远端 `quality` 与 `e2e` 同一提交首次全绿后，才可另行授权配置分支保护；Push、PR、合并与保护规则变更仍分别需要授权。旧 `ddafb7b`、原工作区 `stash@{0}`、未跟踪资料和其他 worktree 均未改动。
 - 2026-08-31 经授权 Push 并创建 CI-only PR #13 后，首轮 `quality` 在完整 Vitest 中发现 Windows/Ubuntu ICU 对同优先级中文通知标题的 `localeCompare` 顺序不同。产品返回的通知集合与优先级均正确；测试已改为验证完整集合及 `[1,1,1,2,3]` 优先级序列，不再把环境相关的同级中文排序当作契约。该修复只调整测试，不改变产品逻辑。
+- PR #13 第二轮远端 `e2e` 已 140/140 通过；`quality` 暴露旧 `bootstrap.test.ts` 依赖本机 `localhost:3001` 上已有服务，在干净 Ubuntu runner 上返回 `ECONNREFUSED`。启动契约现改为构建当前 API 并通过 Fastify `inject` 自包含验证 `/health`，同时显式关闭实例；定向 1/1、完整串行 Vitest 60 文件且 383/383 通过，消除了端口占用与外部进程造成的假阳性。
 
 ## 11. 文档维护规则
 
