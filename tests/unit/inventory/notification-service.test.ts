@@ -12,7 +12,11 @@ describe("inventory notification service", () => {
       getAnomalyCount: async () => 1,
     });
 
-    await expect(service.list()).resolves.toEqual([
+    const notifications = await service.list();
+
+    expect(notifications).toHaveLength(5);
+    expect(notifications.map((notification) => notification.priority)).toEqual([1, 1, 1, 2, 3]);
+    expect(notifications).toEqual(expect.arrayContaining([
       {
         id: "pending-outbound",
         kind: "PENDING_OUTBOUND",
@@ -53,7 +57,7 @@ describe("inventory notification service", () => {
         href: "/admin/period-close",
         priority: 3,
       },
-    ]);
+    ]));
   });
 
   it("returns no notices when every source is empty or closed", async () => {
