@@ -456,6 +456,7 @@ Task 8 首轮完整 E2E 曾为 75 passed、29 failed；29 个失败全部来自�
 - TDD RED 的 YAML 数据契约测试先以工作流缺失为原因 4/4 失败；GREEN 后 4/4 通过。首次完整 Vitest 因新工作树缺少 Prisma Client/工作区链接而在收集阶段失败，补充完整安装和显式 `prisma generate`；第二次发现命令中的额外 `--` 令串行参数未生效且全局 Prisma 模式污染普通测试，改为有效的 `pnpm test --no-file-parallelism --maxWorkers=1`，并用 `TEST_DATABASE_URL` 只启用数据库专用测试。
 - 修正后的新鲜本地门禁：PostgreSQL 16 迁移 5/5；完整串行 Vitest 60 个文件、383/383；完整 Chromium Playwright 140/140；API/Web 根 typecheck 通过；生产 build 通过（Web 1615 modules transformed）；基线提交范围 `git diff --check` 通过。评审后复验还发现错配 preview token 测试只改 base64url 尾字符时可能保留同一解码字节，已改为篡改签名主体首字符，消除随机 201。测试使用一次性本地容器和隔离端口 API `3301`、Web `5474`，未导入正式数据。
 - 当前仅为本地实现，尚未 Push、创建 PR、运行真实 GitHub Actions、合并或配置分支保护。远端 `quality` 与 `e2e` 同一提交首次全绿后，才可另行授权配置分支保护；Push、PR、合并与保护规则变更仍分别需要授权。旧 `ddafb7b`、原工作区 `stash@{0}`、未跟踪资料和其他 worktree 均未改动。
+- 2026-08-31 经授权 Push 并创建 CI-only PR #13 后，首轮 `quality` 在完整 Vitest 中发现 Windows/Ubuntu ICU 对同优先级中文通知标题的 `localeCompare` 顺序不同。产品返回的通知集合与优先级均正确；测试已改为验证完整集合及 `[1,1,1,2,3]` 优先级序列，不再把环境相关的同级中文排序当作契约。该修复只调整测试，不改变产品逻辑。
 
 ## 11. 文档维护规则
 
