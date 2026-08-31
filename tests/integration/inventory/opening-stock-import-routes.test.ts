@@ -335,10 +335,11 @@ describe("opening-stock import routes", () => {
       fields: { previewToken: token, financeReviewer: "财务甲", confirmed: "true" },
       ...workbookPart(Buffer.concat([file, Buffer.from([0])])),
     });
-    const replacement = token.endsWith("x") ? "y" : "x";
+    const signatureStart = token.lastIndexOf(".") + 1;
+    const replacement = token[signatureStart] === "x" ? "y" : "x";
     const mismatchedCommit = multipartPayload({
       fields: {
-        previewToken: `${token.slice(0, -1)}${replacement}`,
+        previewToken: `${token.slice(0, signatureStart)}${replacement}${token.slice(signatureStart + 1)}`,
         financeReviewer: "财务甲",
         confirmed: "true",
       },

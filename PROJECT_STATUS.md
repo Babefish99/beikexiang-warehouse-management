@@ -1,6 +1,6 @@
 # 集团仓库管理系统项目状态
 
-> 最后更新：2026-08-25（Asia/Shanghai；本地三仓期初库存模板、Excel 导入、重复批次错误统一及聚焦式 P1 界面一致性修正截至 2026-08-25，线上发布、共享前门与企业微信校验文件核验仍截至 2026-08-22）
+> 最后更新：2026-08-31（Asia/Shanghai；GitHub Actions CI 本地实现与完整门禁截至 2026-08-31，线上发布、共享前门与企业微信校验文件核验仍截至 2026-08-22）
 > 用途：作为后续 Codex 任务、人工开发、测试和部署的统一交接入口。开始新任务时先读本文件，再检查 Git、服务器和企业微信的实时状态。
 > 安全：本文不保存 Secret、数据库密码、会话密钥、回调 Token 或 EncodingAESKey。
 > 摘要交接：日常验收与运维请先读 [项目状态与发布交接](docs/项目状态与发布交接.md)，完整时间线和证据仍以本文件为准。
@@ -448,6 +448,14 @@ Task 8 首轮完整 E2E 曾为 75 passed、29 failed；29 个失败全部来自�
 - 审计确认现有 `AppShell`、`InventoryQueryPage` 和库存查询服务已经实现目标行为：全局搜索按编码、名称、批次或仓库查询，结果同时展示仓库、批次、数量与金额；点击结果会携带物品编码进入库存查询页。当前仓库范围由顶栏统一管理并传给搜索、首页指标和报表；切换范围时通过请求版本和取消控制避免旧结果覆盖。
 - 现有自动化已覆盖集团全部仓库范围 `warehouseId=all`、单仓 `warehouse-2`、搜索结果跳转、切换后清除陈旧结果、筛选持久化与无效值回退。定向 Vitest 为库存查询服务/路由 2 个文件、5/5 通过；隔离 API `3421`、Web `5381`、memory/local-auth 下的 `workspace-tools` 与 `dashboard` Playwright 为 10/10 通过。
 - 本项是既有能力的证据收口，没有修改产品代码或测试，也不需要另行 TDD 实现。仅更新交接状态；未 Push、未部署、未操作生产数据库、Secret 或企业微信配置，保留所有 stash、未跟踪资料和其他 worktree。
+
+### 10.24 GitHub Actions CI 本地实现（2026-08-31）
+
+- 按 GitHub Issue #3，在同步基线 `feat/warehouse-system@bc9d6fd4caaa10cfb3a1562eec422c34134d56cf` 创建本地分支 `codex/github-actions-ci`。新增一个 CI workflow，提供独立的 `quality` 与 `e2e` 门禁，只触发于面向/更新 `feat/warehouse-system` 的 Pull Request、push 及手动运行；没有 `main`、部署 Job、生产 Secret 或写权限。
+- 两个 Job 固定 `ubuntu-24.04`、Node `24.19.0`、pnpm `11.20.0` 和各自隔离的 `postgres:16-alpine` 服务；第三方 Action 均固定到官方发布标签对应的 40 位提交 SHA。工作流包含 pnpm store 缓存、Docker 基础镜像预拉取、Prisma 生成与迁移、完整串行 Vitest、根 typecheck/build、提交范围 `git diff --check`、完整 Chromium E2E、失败产物、并发取消、超时与只读权限。
+- TDD RED 的 YAML 数据契约测试先以工作流缺失为原因 4/4 失败；GREEN 后 4/4 通过。首次完整 Vitest 因新工作树缺少 Prisma Client/工作区链接而在收集阶段失败，补充完整安装和显式 `prisma generate`；第二次发现命令中的额外 `--` 令串行参数未生效且全局 Prisma 模式污染普通测试，改为有效的 `pnpm test --no-file-parallelism --maxWorkers=1`，并用 `TEST_DATABASE_URL` 只启用数据库专用测试。
+- 修正后的新鲜本地门禁：PostgreSQL 16 迁移 5/5；完整串行 Vitest 60 个文件、383/383；完整 Chromium Playwright 140/140；API/Web 根 typecheck 通过；生产 build 通过（Web 1615 modules transformed）；基线提交范围 `git diff --check` 通过。评审后复验还发现错配 preview token 测试只改 base64url 尾字符时可能保留同一解码字节，已改为篡改签名主体首字符，消除随机 201。测试使用一次性本地容器和隔离端口 API `3301`、Web `5474`，未导入正式数据。
+- 当前仅为本地实现，尚未 Push、创建 PR、运行真实 GitHub Actions、合并或配置分支保护。远端 `quality` 与 `e2e` 同一提交首次全绿后，才可另行授权配置分支保护；Push、PR、合并与保护规则变更仍分别需要授权。旧 `ddafb7b`、原工作区 `stash@{0}`、未跟踪资料和其他 worktree 均未改动。
 
 ## 11. 文档维护规则
 

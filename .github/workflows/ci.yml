@@ -1,0 +1,173 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - feat/warehouse-system
+  push:
+    branches:
+      - feat/warehouse-system
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: warehouse_ci_quality
+          POSTGRES_USER: warehouse_ci
+          POSTGRES_PASSWORD: warehouse_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U warehouse_ci -d warehouse_ci_quality"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://warehouse_ci:warehouse_ci@127.0.0.1:5432/warehouse_ci_quality
+      TEST_DATABASE_URL: postgresql://warehouse_ci:warehouse_ci@127.0.0.1:5432/warehouse_ci_quality
+      PERSISTENCE_DRIVER: memory
+      LOCAL_AUTH_BYPASS: "true"
+      SESSION_SECRET: harmless-ci-quality-session-secret
+    steps:
+      # actions/checkout v4.2.2
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # pnpm/action-setup v4.1.0
+      - name: Set up pnpm
+        uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d
+        with:
+          version: "11.20.0"
+          run_install: false
+      # actions/setup-node v4.4.0
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24.19.0"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Generate Prisma Client
+        run: pnpm exec prisma generate
+      - name: Pre-pull Docker verification images
+        run: |
+          docker pull postgres:16-alpine
+          docker pull node:24-alpine
+          docker pull caddy:2.10-alpine
+      - name: Apply database migrations
+        run: pnpm exec prisma migrate deploy
+      - name: Run complete serial Vitest suite
+        run: pnpm test --no-file-parallelism --maxWorkers=1
+      - name: Type-check all packages
+        run: pnpm typecheck
+      - name: Build production packages
+        run: pnpm build
+      - name: Check submitted commit range for whitespace errors
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          EVENT_HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            base_sha=$PR_BASE_SHA
+            head_sha=$PR_HEAD_SHA
+          elif [ "$EVENT_NAME" = "push" ] && [ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            base_sha=$PUSH_BEFORE_SHA
+            head_sha=$EVENT_HEAD_SHA
+          else
+            base_sha=$(git hash-object -t tree /dev/null)
+            head_sha=$EVENT_HEAD_SHA
+          fi
+          git diff --check "$base_sha" "$head_sha"
+
+  e2e:
+    name: e2e
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: warehouse_ci_e2e
+          POSTGRES_USER: warehouse_ci
+          POSTGRES_PASSWORD: warehouse_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U warehouse_ci -d warehouse_ci_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://warehouse_ci:warehouse_ci@127.0.0.1:5432/warehouse_ci_e2e
+      PERSISTENCE_DRIVER: prisma
+      LOCAL_AUTH_BYPASS: "true"
+      SESSION_SECRET: harmless-ci-e2e-session-secret
+      API_BASE_URL: http://127.0.0.1:3301
+      WEB_BASE_URL: http://127.0.0.1:5474
+    steps:
+      # actions/checkout v4.2.2
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # pnpm/action-setup v4.1.0
+      - name: Set up pnpm
+        uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d
+        with:
+          version: "11.20.0"
+          run_install: false
+      # actions/setup-node v4.4.0
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24.19.0"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Generate Prisma Client
+        run: pnpm exec prisma generate
+      - name: Pre-pull Docker verification images
+        run: |
+          docker pull postgres:16-alpine
+          docker pull node:24-alpine
+          docker pull caddy:2.10-alpine
+      - name: Apply database migrations
+        run: pnpm exec prisma migrate deploy
+      - name: Install Chromium and system dependencies
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run complete Chromium E2E suite
+        run: pnpm test:e2e -- --project=chromium
+      # actions/upload-artifact v4.6.2
+      - name: Upload Playwright failure evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: playwright-failure-${{ github.run_id }}
+          path: "playwright-report\ntest-results"
+          if-no-files-found: ignore
+          retention-days: 7
