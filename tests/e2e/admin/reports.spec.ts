@@ -1,6 +1,10 @@
 ﻿import { test, expect } from "@playwright/test";
 import { apiUrl, apiUrlPattern } from "../mobile/mobile-test-helpers";
 
+test.beforeEach(async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-08-15T12:00:00.000Z"));
+});
+
 test("report APIs require a finance or administrator session", async ({ request }) => {
   const response = await request.get(apiUrl("/admin/reports/summary?period=2026-08"));
 

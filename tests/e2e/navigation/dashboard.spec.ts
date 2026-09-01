@@ -2,6 +2,8 @@ import { test, expect } from "@playwright/test";
 import { apiUrl, apiUrlPattern, loginAs, webBaseUrl } from "../mobile/mobile-test-helpers";
 
 test("dashboard quick actions open the corresponding operation pages", async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-08-15T12:00:00.000Z"));
+
   const dashboardItemsWarehouseIds: Array<string | null> = [];
   const dashboardPendingWarehouseIds: Array<string | null> = [];
   const dashboardInboundWarehouseIds: Array<string | null> = [];

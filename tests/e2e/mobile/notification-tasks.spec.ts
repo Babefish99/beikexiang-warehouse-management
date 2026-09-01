@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { apiUrl, loginAs } from "./mobile-test-helpers";
+import { apiUrl, apiUrlPattern, loginAs } from "./mobile-test-helpers";
 
 const tasks = [
   { id: "pending-outbound", kind: "PENDING_OUTBOUND", title: "待出库审批", description: "1 条审批待确认出库。", href: "/admin/outbound", priority: 1 },
@@ -185,16 +185,22 @@ test("business completion bypasses an older request and resolved tasks stay remo
 
 test("dashboard notification metrics follow the shared live task snapshot", async ({ page }) => {
   let requestCount = 0;
+  let tasksResolved = false;
+  await page.route(apiUrlPattern("/admin/items.*"), (route) => route.fulfill({ json: [] }));
+  await page.route(apiUrlPattern("/admin/outbound/pending.*"), (route) => route.fulfill({ json: [] }));
+  await page.route(apiUrlPattern("/admin/reports/transactions.*"), (route) => route.fulfill({ json: [] }));
   await page.route(apiUrl("/admin/notifications"), async (route) => {
     requestCount += 1;
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify(requestCount === 1 ? tasks : []) });
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(tasksResolved ? [] : tasks) });
   });
   await loginAs(page, "/", "ADMIN");
   const overview = page.getByRole("region", { name: "今日概览" });
   await expect(overview.getByText("通知").locator("..").getByText("5")).toBeVisible();
 
+  const requestsBeforeCompletion = requestCount;
+  tasksResolved = true;
   await page.evaluate(() => window.dispatchEvent(new Event("warehouse:business-completed")));
-  await expect.poll(() => requestCount).toBeGreaterThanOrEqual(2);
+  await expect.poll(() => requestCount).toBeGreaterThan(requestsBeforeCompletion);
   await expect(overview.getByText("通知").locator("..").getByText("0")).toBeVisible();
 });
 
