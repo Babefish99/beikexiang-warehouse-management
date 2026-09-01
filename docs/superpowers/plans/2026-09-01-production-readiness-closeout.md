@@ -64,9 +64,11 @@
 - Produces: callback notification enabled for the `招待品领用` template.
 
 - [x] Inspect the WeCom Approval API callback-template settings.
-- [ ] Immediately before the notification subscription is saved, obtain the browser-required action-time confirmation.
+- [x] Immediately before the notification subscription is saved, obtain the browser-required action-time confirmation.
 - [ ] Select only `招待品领用`, save, and verify the saved state.
-- [ ] Verify the production callback endpoint remains reachable without exposing callback credentials.
+- [x] Verify the production callback endpoint remains reachable without exposing callback credentials.
+
+**Evidence:** The target template was checked and the save action was submitted after action-time confirmation. The WeCom administrator session then expired and redirected to QR-code login before the saved server state could be read back, so the saved-state checkbox remains open. The production callback route is externally reachable and rejects an unsigned request with HTTP 403 as expected.
 
 ### Task 4: Install and verify automatic database backups
 
@@ -85,8 +87,9 @@
 - [x] Install and enable the timer, then verify `systemctl is-enabled` and `systemctl list-timers`.
 - [x] Start the oneshot service once and verify a new non-empty backup plus manifest.
 - [x] Validate the backup gzip stream and SQL header; do not overwrite the production database.
+- [x] Restore the latest backup into an isolated temporary PostgreSQL container, verify restored structure and key counts, then remove only that temporary container.
 
-**Evidence:** Commit `ae4bd80ef66445d9da0c44e0dfd2fc1b1ec5465f` is deployed as `20260901T090016Z-ae4bd80ef664-3056372`. The timer is active in `Asia/Shanghai`; backup `warehouse-20260901T092006Z-3074723.sql.gz` and its manifest are non-empty, `root:root 600`, and pass gzip/SHA-256 validation. An isolated restore drill is intentionally separate and still requires action-time confirmation.
+**Evidence:** Commit `ae4bd80ef66445d9da0c44e0dfd2fc1b1ec5465f` is deployed as `20260901T090016Z-ae4bd80ef664-3056372`. The timer is active in `Asia/Shanghai`; backup `warehouse-20260901T092006Z-3074723.sql.gz` and its manifest are non-empty, `root:root 600`, and pass gzip/SHA-256 validation. The same backup restored successfully into a no-network, no-volume, no-published-port PostgreSQL container with 26 public base tables, 1 item, 1 approval, 0 outbound orders, and 2 historical ledger rows. The temporary container count is 0 after cleanup; production Web, API, and PostgreSQL remain healthy.
 
 ### Task 5: Refresh repository and readiness evidence
 
