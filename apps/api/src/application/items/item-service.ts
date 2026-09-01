@@ -49,14 +49,14 @@ export class InMemoryItemRepository implements ItemRepository {
 }
 
 export class ItemService {
-  private readonly optionIndex = new Map<string, string>();
+  private readonly approvalReferenceIndex = new Map<string, ItemDefinition>();
 
   constructor(private readonly repository: ItemRepository) {}
 
   async loadPersistedOptionIndex(): Promise<void> {
-    this.optionIndex.clear();
+    this.approvalReferenceIndex.clear();
     for (const item of await this.repository.list(true)) {
-      if (item.weComOptionKey) this.optionIndex.set(item.weComOptionKey, item.id);
+      this.indexApprovalReferences(item);
     }
   }
 
@@ -80,7 +80,7 @@ export class ItemService {
       isActive: true,
     };
     await this.repository.save(item);
-    if (item.weComOptionKey) this.optionIndex.set(item.weComOptionKey, item.id);
+    this.indexApprovalReferences(item);
     return item;
   }
 
@@ -94,8 +94,9 @@ export class ItemService {
     assertItemDefinitionInput({ ...input, code: nextCode });
     const updated: ItemDefinition = { ...current, ...input, code: nextCode, name: input.name.trim(), unit: input.unit.trim(), categoryId: input.categoryId.trim(), specification: input.specification?.trim() || undefined, weComOptionKey: input.weComOptionKey?.trim() || undefined };
     await this.repository.save(updated);
-    if (current.weComOptionKey) this.optionIndex.delete(current.weComOptionKey);
-    if (updated.weComOptionKey) this.optionIndex.set(updated.weComOptionKey, updated.id);
+    this.approvalReferenceIndex.delete(current.code);
+    if (current.weComOptionKey) this.approvalReferenceIndex.delete(current.weComOptionKey);
+    this.indexApprovalReferences(updated);
     return updated;
   }
 
@@ -110,7 +111,7 @@ export class ItemService {
     if (!item) throw new Error(`item not found: ${itemId}`);
     const activated = { ...item, isActive: true };
     await this.repository.save(activated);
-    if (activated.weComOptionKey) this.optionIndex.set(activated.weComOptionKey, activated.id);
+    this.indexApprovalReferences(activated);
     return activated;
   }
 
@@ -118,8 +119,14 @@ export class ItemService {
     return this.repository.list(includeInactive);
   }
 
-  resolveByWeComOptionKey(optionKey: string): { id: string } | undefined {
-    const itemId = this.optionIndex.get(optionKey);
-    return itemId ? { id: itemId } : undefined;
+  resolveByWeComOptionKey(reference: string): Pick<ItemDefinition, "id" | "code" | "name" | "unit" | "weComOptionKey"> | undefined {
+    const item = this.approvalReferenceIndex.get(reference.trim());
+    if (!item) return undefined;
+    return { id: item.id, code: item.code, name: item.name, unit: item.unit, weComOptionKey: item.weComOptionKey };
+  }
+
+  private indexApprovalReferences(item: ItemDefinition): void {
+    this.approvalReferenceIndex.set(item.code, item);
+    if (item.weComOptionKey) this.approvalReferenceIndex.set(item.weComOptionKey, item);
   }
 }

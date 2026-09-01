@@ -39,4 +39,21 @@ describe("item service", () => {
 
     await expect(service.update(item.id, { ...input, code: "CY-0002" })).rejects.toThrow("item code cannot change after ledger activity");
   });
+
+  it("resolves persisted approval items by item code with their unit", async () => {
+    const repository = new InMemoryItemRepository();
+    const writer = new ItemService(repository);
+    const item = await writer.create({ ...input, code: "ACCEPT-61AD5B0-01", weComOptionKey: "acceptance-option" });
+    const reader = new ItemService(repository);
+
+    await reader.loadPersistedOptionIndex();
+
+    expect(reader.resolveByWeComOptionKey("ACCEPT-61AD5B0-01")).toEqual({
+      id: item.id,
+      code: "ACCEPT-61AD5B0-01",
+      name: "茶叶",
+      unit: "盒",
+      weComOptionKey: "acceptance-option",
+    });
+  });
 });
