@@ -1,4 +1,4 @@
-import type { WeComApprovalPayload } from "./approval-parser.js";
+import type { WeComApprovalField, WeComApprovalPayload, WeComApprovalTable } from "./approval-parser.js";
 
 export interface ApprovalGateway {
   fetchDetail(spNo: string): Promise<WeComApprovalPayload>;
@@ -8,6 +8,54 @@ interface ApprovalGatewayOptions {
   corpId: string;
   secret: string;
   fetcher?: typeof fetch;
+}
+
+interface LocalizedText {
+  text?: string;
+  lang?: string;
+}
+
+type RawApprovalContent =
+  | Omit<WeComApprovalField, "title"> & { title?: string | LocalizedText[] }
+  | Omit<WeComApprovalTable, "title"> & { title?: string | LocalizedText[] };
+
+interface RawApprovalInfo {
+  sp_no: string;
+  template_id?: string;
+  sp_status: number | string;
+  apply_time: number | string;
+  applyer: { userid: string; name?: string; partyid?: string | number; department?: string };
+  department?: string;
+  contents?: RawApprovalContent[];
+  apply_data?: { contents?: RawApprovalContent[] };
+}
+
+function localizedTitle(title?: string | LocalizedText[]): string | undefined {
+  if (typeof title === "string") return title;
+  return title?.find((entry) => entry.lang === "zh_CN")?.text?.trim()
+    || title?.find((entry) => entry.text?.trim())?.text?.trim();
+}
+
+function normalizeContent(content: RawApprovalContent): WeComApprovalField | WeComApprovalTable {
+  return { ...content, title: localizedTitle(content.title) } as WeComApprovalField | WeComApprovalTable;
+}
+
+function normalizeDetail(info: RawApprovalInfo): WeComApprovalPayload {
+  const department = info.department ?? info.applyer.department
+    ?? (info.applyer.partyid === undefined ? undefined : String(info.applyer.partyid));
+  return {
+    sp_no: info.sp_no,
+    template_id: info.template_id,
+    sp_status: info.sp_status,
+    apply_time: info.apply_time,
+    applyer: {
+      userid: info.applyer.userid,
+      name: info.applyer.name?.trim() || info.applyer.userid,
+      department,
+    },
+    department,
+    contents: (info.contents ?? info.apply_data?.contents ?? []).map(normalizeContent),
+  };
 }
 
 export class HttpApprovalGateway implements ApprovalGateway {
@@ -33,8 +81,8 @@ export class HttpApprovalGateway implements ApprovalGateway {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ sp_no: spNo }),
     });
-    const detailData = await detailResponse.json() as { info?: WeComApprovalPayload; sp_no?: string; sp_status?: number | string };
+    const detailData = await detailResponse.json() as { info?: RawApprovalInfo };
     if (!detailResponse.ok || !detailData.info?.sp_no) throw new Error("enterprise WeChat approval detail request failed");
-    return detailData.info;
+    return normalizeDetail(detailData.info);
   }
 }
