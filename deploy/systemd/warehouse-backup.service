@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily warehouse PostgreSQL backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/beikexiang-warehouse
+ExecStart=/usr/bin/env BACKUP_REASON=scheduled /opt/beikexiang-warehouse/deploy/scripts/backup.sh

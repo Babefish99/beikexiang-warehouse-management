@@ -215,4 +215,19 @@ describe("production deployment configuration", () => {
     expect(scripts).not.toMatch(/\beval\b/);
     expect(scripts).not.toMatch(/down\s+(?:[^\n]*\s)?-v|volume\s+(?:rm|prune)|docker\s+system\s+prune/);
   });
+
+  it("ships the production daily-backup systemd units", async () => {
+    const service = await readText("deploy/systemd/warehouse-backup.service");
+    const timer = await readText("deploy/systemd/warehouse-backup.timer");
+
+    expect(service).toContain("WorkingDirectory=/opt/beikexiang-warehouse");
+    expect(service).toContain(
+      "ExecStart=/usr/bin/env BACKUP_REASON=scheduled /opt/beikexiang-warehouse/deploy/scripts/backup.sh",
+    );
+    expect(timer).toContain("OnCalendar=*-*-* 02:30:00");
+    expect(timer).toContain("Persistent=true");
+    expect(timer).toContain("RandomizedDelaySec=10m");
+    expect(timer).toContain("Unit=warehouse-backup.service");
+    expect(timer).toContain("WantedBy=timers.target");
+  });
 });
