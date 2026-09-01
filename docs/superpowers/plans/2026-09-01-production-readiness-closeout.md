@@ -99,5 +99,7 @@
 - Produces: current, non-stale operational handoff.
 
 - [x] Record exact completed evidence and remaining human-owned business inputs.
-- [ ] Run focused tests, type checks, build, `git diff --check`, production health, and database state checks.
-- [ ] Commit and push the closeout documentation and implementation branch.
+- [x] Run focused tests, type checks, build, `git diff --check`, production health, and database state checks.
+- [x] Commit and push the closeout documentation and implementation branch.
+
+**Evidence:** Vitest passed 362 tests with 25 environment-gated skips; Chromium E2E passed 140/140. Lint, type checking, production build, and `git diff --check` passed. Public production health returned HTTP 200, and database checks confirmed the approved request remains `PENDING_OUTBOUND` with zero outbound and ledger records. Branch `codex/production-readiness` is pushed to origin; integration into protected branch `feat/warehouse-system` must proceed through CI-only PR checks.
