@@ -166,7 +166,10 @@ export function buildServer(options: BuildServerOptions = {}) {
   });
   const approvalParser = new ApprovalParser((optionKey) => itemService.resolveByWeComOptionKey(optionKey));
   const approvalSyncService = new ApprovalSyncService({
-    gateway: new HttpApprovalGateway({ corpId: process.env.WE_COM_CORP_ID ?? "", secret: process.env.WE_COM_SECRET ?? "" }),
+    gateway: new HttpApprovalGateway({
+      corpId: process.env.WE_COM_CORP_ID ?? "",
+      secret: config.approvalSecret ?? process.env.WE_COM_SECRET ?? "",
+    }),
     parser: {
       async parse(detail) {
         await itemService.loadPersistedOptionIndex();

@@ -32,6 +32,8 @@ describe("report export integration", () => {
   });
 
   it("wires the report summary to the current in-memory stock ledger", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-08-24T10:00:00.000Z"));
     const app = buildServer();
 
     try {
@@ -146,6 +148,8 @@ describe("report export integration", () => {
   });
 
   it("downloads an Excel-compatible UTF-8 BOM CSV export when workbook libraries are unavailable", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-08-24T10:00:00.000Z"));
     const app = buildServer();
 
     try {

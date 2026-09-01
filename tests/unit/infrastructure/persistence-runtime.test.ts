@@ -21,6 +21,7 @@ describe("server runtime configuration", () => {
     WE_COM_CORP_ID: "corp-id",
     WE_COM_AGENT_ID: "1000001",
     WE_COM_SECRET: "secret",
+    WE_COM_APPROVAL_SECRET: "approval-secret",
     WE_COM_ADMIN_IDS: "warehouse-admin",
     WE_COM_CALLBACK_TOKEN: "callback-token",
     WE_COM_ENCODING_AES_KEY: validEncodingAesKey,
@@ -151,7 +152,15 @@ describe("server runtime configuration", () => {
       localAuthEnabled: false,
       apiBaseUrl: "https://warehouse.example.com",
       webBaseUrl: "https://warehouse.example.com",
+      approvalSecret: "approval-secret",
     });
+  });
+
+  it("keeps the separate approval secret optional for an authorized custom app", () => {
+    expect(readServerConfig({
+      ...productionEnvironment,
+      WE_COM_APPROVAL_SECRET: "",
+    })).toMatchObject({ approvalSecret: undefined });
   });
 
   it("reports that PostgreSQL is not required in memory mode", async () => {

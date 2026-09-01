@@ -176,7 +176,9 @@ describe("production deployment configuration", () => {
     expect(example).toContain("NODE_ENV=production");
     expect(example).toContain("API_BASE_URL=https://warehouse.example.com");
     expect(example).toContain("WE_COM_ADMIN_IDS=replace-with-production-admin-userid");
+    expect(example).toContain("WE_COM_APPROVAL_SECRET=replace-with-wecom-approval-secret");
     expect(example).toContain("WE_COM_APPROVAL_TEMPLATE_ID=replace-with-approved-template-id");
+    expect(compose).toContain("WE_COM_APPROVAL_SECRET: ${WE_COM_APPROVAL_SECRET:-}");
     expect(compose).toContain("WE_COM_APPROVAL_TEMPLATE_ID: ${WE_COM_APPROVAL_TEMPLATE_ID:-}");
     expect(example).not.toMatch(/106\.14\.224\.213|i-uf6ig2xdl67rqerk67l1/);
   });
@@ -212,5 +214,20 @@ describe("production deployment configuration", () => {
     expect(scripts).not.toMatch(/(?:^|\n)\s*(?:source|\.)\s+["']?\$ENV_FILE\b/);
     expect(scripts).not.toMatch(/\beval\b/);
     expect(scripts).not.toMatch(/down\s+(?:[^\n]*\s)?-v|volume\s+(?:rm|prune)|docker\s+system\s+prune/);
+  });
+
+  it("ships the production daily-backup systemd units", async () => {
+    const service = await readText("deploy/systemd/warehouse-backup.service");
+    const timer = await readText("deploy/systemd/warehouse-backup.timer");
+
+    expect(service).toContain("WorkingDirectory=/opt/beikexiang-warehouse");
+    expect(service).toContain(
+      "ExecStart=/usr/bin/env BACKUP_REASON=scheduled /opt/beikexiang-warehouse/deploy/scripts/backup.sh",
+    );
+    expect(timer).toContain("OnCalendar=*-*-* 02:30:00");
+    expect(timer).toContain("Persistent=true");
+    expect(timer).toContain("RandomizedDelaySec=10m");
+    expect(timer).toContain("Unit=warehouse-backup.service");
+    expect(timer).toContain("WantedBy=timers.target");
   });
 });

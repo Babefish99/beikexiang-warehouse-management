@@ -39,6 +39,40 @@ const makeDetail = (status = 2): WeComApprovalPayload => ({
 });
 
 describe("enterprise WeChat approval parser", () => {
+  it("parses the live fixed-text item fields and resolves an item by its embedded code", () => {
+    const detail: WeComApprovalPayload = {
+      sp_no: "202609010007",
+      sp_status: 2,
+      apply_time: 1788224760,
+      applyer: { userid: "zhangxinzhe8884", name: "张信哲", department: "行政和人资中心" },
+      contents: [
+        { control: "Text", title: "用途", value: { text: "系统上线联调测试，请审批后勿实际出库" } },
+        { control: "Text", title: "物品1 名称", value: { text: "生产库现有联调物品 ACCEPT-61AD5B0-01" } },
+        { control: "Text", title: "物品1 数量及单位", value: { text: "1" } },
+        { control: "Text", title: "物品2 名称（如有）", value: { text: "无" } },
+        { control: "Text", title: "物品2 数量及单位", value: { text: "无" } },
+        { control: "Text", title: "物品3名称（如有）", value: { text: "无" } },
+        { control: "Text", title: "物品3数量及单位", value: { text: "无" } },
+      ],
+    };
+    const parser = new ApprovalParser((reference) => reference === "ACCEPT-61AD5B0-01"
+      ? { id: "item-acceptance", code: reference, name: "生产库现有联调物品", unit: "件" }
+      : undefined);
+
+    expect(parser.parse(detail)).toMatchObject({
+      weComSpNo: "202609010007",
+      status: "APPROVED",
+      purpose: "系统上线联调测试，请审批后勿实际出库",
+      lines: [{
+        itemId: "item-acceptance",
+        itemOptionKey: "ACCEPT-61AD5B0-01",
+        itemName: "生产库现有联调物品 ACCEPT-61AD5B0-01",
+        requestedQuantity: "1",
+        unit: "件",
+      }],
+    });
+  });
+
   it("extracts applicant, purpose, and up to five item rows by option key", () => {
     const parser = new ApprovalParser((optionKey) => ({
       "opt-powder": { id: "item-1" },

@@ -50,6 +50,13 @@ export interface ParsedApproval {
   lines: ParsedApprovalLine[];
 }
 
+interface ResolvedApprovalItem {
+  id: string;
+  code?: string;
+  name?: string;
+  unit?: string;
+}
+
 function parseStatus(value: number | string): ParsedApprovalStatus {
   switch (String(value).toLowerCase()) {
     case "1":
@@ -86,7 +93,7 @@ function toSubmittedAt(value: number | string): string {
 }
 
 export class ApprovalParser {
-  constructor(private readonly resolveItemByOptionKey: (optionKey: string) => { id: string } | undefined) {}
+  constructor(private readonly resolveItem: (reference: string) => ResolvedApprovalItem | undefined) {}
 
   parse(detail: WeComApprovalPayload): ParsedApproval {
     const table = detail.contents.find((content): content is WeComApprovalTable => content.control === "Table");
@@ -95,7 +102,7 @@ export class ApprovalParser {
 
     const purposeField = detail.contents.find((content): content is WeComApprovalField => content.control !== "Table" && content.title === "用途");
     const purpose = purposeField?.value?.text?.trim() ?? "";
-    const lines = rows.map((row) => this.parseLine(row));
+    const lines = rows.length > 0 ? rows.map((row) => this.parseLine(row)) : this.parseFixedTextLines(detail.contents);
     return {
       weComSpNo: detail.sp_no,
       status: parseStatus(detail.sp_status),
@@ -120,8 +127,48 @@ export class ApprovalParser {
       throw new Error(`approval quantity is invalid for item option key: ${itemOptionKey}`);
     }
     if (!unit) throw new Error(`approval unit is required for item option key: ${itemOptionKey}`);
-    const item = this.resolveItemByOptionKey(itemOptionKey);
+    const item = this.resolveItem(itemOptionKey);
     if (!item) throw new Error(`unknown item option key: ${itemOptionKey}`);
     return { itemId: item.id, itemOptionKey, itemName: selector?.value?.trim() ?? "", requestedQuantity, unit };
+  }
+
+  private parseFixedTextLines(contents: Array<WeComApprovalField | WeComApprovalTable>): ParsedApprovalLine[] {
+    const fields = contents.filter((content): content is WeComApprovalField => content.control !== "Table");
+    const names = fields.flatMap((field) => {
+      const match = field.title?.match(/^物品(\d+)\s*名称/);
+      return match ? [{ index: Number(match[1]), value: field.value?.text?.trim() ?? "" }] : [];
+    });
+    if (names.length > 5) throw new Error("approval cannot contain more than five item rows");
+
+    return names
+      .filter(({ value }) => value !== "" && value !== "无")
+      .map(({ index, value: itemName }) => {
+        const quantityField = fields.find((field) => field.title?.match(new RegExp(`^物品${index}\\s*数量及单位`)));
+        const rawQuantity = quantityField?.value?.text?.trim() ?? "";
+        const quantityMatch = rawQuantity.match(/^([0-9]+(?:\.[0-9]+)?)\s*(.*)$/);
+        if (!quantityMatch || Number(quantityMatch[1]) <= 0) throw new Error(`approval quantity is invalid for item: ${itemName}`);
+
+        const references = [itemName, ...(itemName.match(/[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+/g) ?? []).reverse()];
+        let reference = "";
+        let item: ResolvedApprovalItem | undefined;
+        for (const candidate of references) {
+          item = this.resolveItem(candidate);
+          if (item) {
+            reference = item.code ?? candidate;
+            break;
+          }
+        }
+        if (!item) throw new Error(`unknown approval item: ${itemName}`);
+        const unit = quantityMatch[2]?.trim() || item.unit?.trim() || "";
+        if (!unit) throw new Error(`approval unit is required for item: ${itemName}`);
+
+        return {
+          itemId: item.id,
+          itemOptionKey: reference,
+          itemName,
+          requestedQuantity: quantityMatch[1],
+          unit,
+        };
+      });
   }
 }
