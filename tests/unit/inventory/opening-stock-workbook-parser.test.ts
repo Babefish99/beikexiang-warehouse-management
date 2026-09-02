@@ -15,6 +15,31 @@ describe("ExcelOpeningStockWorkbookParser workbook contract", () => {
     expect(result.issues.filter((issue) => issue.severity === "ERROR")).toEqual([]);
   });
 
+  it("accepts only the non-empty item and inventory rows without requiring every warehouse combination", async () => {
+    const buffer = await buildOpeningStockWorkbook((workbook) => {
+      const itemsSheet = workbook.getWorksheet("物品资料")!;
+      for (let row = 3; row <= 82; row += 1) {
+        for (const column of [1, 2, 3, 4, 5, 6]) itemsSheet.getRow(row).getCell(column).value = null;
+      }
+      const inventorySheet = workbook.getWorksheet("期初库存")!;
+      for (let row = 4; row <= 244; row += 1) {
+        for (const column of [1, 3, 9, 10, 12]) inventorySheet.getRow(row).getCell(column).value = null;
+      }
+    });
+
+    const result = await parser.parse({ fileName: "期初库存.xlsx", buffer });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.rows).toHaveLength(2);
+    expect(result.summary).toMatchObject({
+      itemCount: 1,
+      inventoryRowCount: 2,
+      positiveRowCount: 1,
+      zeroRowCount: 1,
+    });
+    expect(result.issues.filter((issue) => issue.severity === "ERROR")).toEqual([]);
+  });
+
   it("reports a missing sheet without throwing away other issues", async () => {
     const buffer = await buildOpeningStockWorkbook((workbook) =>
       workbook.removeWorksheet(workbook.getWorksheet("物品资料")!.id),
@@ -42,6 +67,28 @@ describe("ExcelOpeningStockWorkbookParser workbook contract", () => {
         "ITEM_ROW_COUNT_INVALID",
         "INVENTORY_ROW_COUNT_INVALID",
       ]),
+    );
+  });
+
+  it("rejects authoritative rows outside the template range even when the in-range data is sparse", async () => {
+    const buffer = await buildOpeningStockWorkbook((workbook) => {
+      const itemsSheet = workbook.getWorksheet("物品资料")!;
+      for (let row = 3; row <= 82; row += 1) {
+        for (const column of [1, 2, 3, 4, 5, 6]) itemsSheet.getRow(row).getCell(column).value = null;
+      }
+      itemsSheet.getCell("A83").value = "BJ9999";
+
+      const inventorySheet = workbook.getWorksheet("期初库存")!;
+      for (let row = 3; row <= 244; row += 1) {
+        for (const column of [1, 3, 9, 10, 12]) inventorySheet.getRow(row).getCell(column).value = null;
+      }
+      inventorySheet.getCell("A245").value = "WH-01";
+    });
+
+    const result = await parser.parse({ fileName: "期初库存.xlsx", buffer });
+
+    expect(result.issues.map((issue) => issue.code)).toEqual(
+      expect.arrayContaining(["ITEM_ROW_COUNT_INVALID", "INVENTORY_ROW_COUNT_INVALID"]),
     );
   });
 
@@ -210,16 +257,17 @@ describe("ExcelOpeningStockWorkbookParser workbook contract", () => {
     );
   });
 
-  it("requires each item and warehouse combination exactly once", async () => {
+  it("rejects duplicate warehouse-item combinations without requiring absent combinations", async () => {
     const buffer = await buildOpeningStockWorkbook((workbook) => {
       workbook.getWorksheet("期初库存")!.getCell("A3").value = "WH-01";
     });
 
     const result = await parser.parse({ fileName: "期初库存.xlsx", buffer });
 
-    expect(result.issues.map((issue) => issue.code)).toEqual(
-      expect.arrayContaining(["INVENTORY_COMBINATION_DUPLICATE", "INVENTORY_COMBINATION_MISSING"]),
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({ code: "INVENTORY_COMBINATION_DUPLICATE", severity: "ERROR" }),
     );
+    expect(result.issues).not.toContainEqual(expect.objectContaining({ code: "INVENTORY_COMBINATION_MISSING" }));
   });
 
   it("rejects formulas in authoritative input cells even when they have cached results", async () => {
