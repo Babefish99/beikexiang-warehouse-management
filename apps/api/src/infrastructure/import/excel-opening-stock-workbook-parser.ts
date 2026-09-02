@@ -175,31 +175,32 @@ function rowHasAuthoritativeValue(
   return columns.some((column) => isNonBlankValue(row.getCell(column).value));
 }
 
-function validateFixedBusinessRowCount(
+function validateBusinessRowCapacity(
   sheet: ExcelJS.Worksheet | undefined,
   firstRow: number,
   lastRow: number,
   authoritativeColumns: readonly number[],
-  expectedCount: number,
   issueCode: string,
   issues: OpeningStockImportIssue[],
 ): void {
   if (!sheet) return;
   let businessRowCount = 0;
+  let hasOutOfRangeBusinessData = false;
   for (let row = firstRow; row <= lastRow; row += 1) {
     if (rowHasAuthoritativeValue(sheet, row, authoritativeColumns)) businessRowCount += 1;
   }
   sheet.eachRow((row) => {
     if (row.number > lastRow && authoritativeColumns.some((column) => isNonBlankValue(row.getCell(column).value))) {
-      businessRowCount += 1;
+      hasOutOfRangeBusinessData = true;
     }
   });
-  if (businessRowCount !== expectedCount) {
+  const capacity = lastRow - firstRow + 1;
+  if (businessRowCount < 1 || hasOutOfRangeBusinessData) {
     addIssue(issues, {
       severity: "ERROR",
       code: issueCode,
       sheet: sheet.name,
-      message: `${sheet.name}必须包含 ${expectedCount} 条固定业务行`,
+      message: `${sheet.name}必须包含 1 至 ${capacity} 条业务行，且不能超出模板范围`,
     });
   }
 }
@@ -271,6 +272,7 @@ function parseItems(
   const codeRows = new Map<string, number>();
 
   for (let row = ITEM_FIRST_ROW; row <= ITEM_LAST_ROW; row += 1) {
+    if (!rowHasAuthoritativeValue(sheet, row, ITEM_AUTHORITATIVE_COLUMNS)) continue;
     const codeCell = readAuthoritativeCell(sheet, row, 1, "物料编号", issues);
     const nameCell = readAuthoritativeCell(sheet, row, 2, "物品名称", issues);
     const categoryCell = readAuthoritativeCell(sheet, row, 3, "类别", issues);
@@ -397,6 +399,7 @@ function parseInventoryRows(
   if (!sheet) return [];
   const rows: ParsedOpeningStockRow[] = [];
   for (let row = INVENTORY_FIRST_ROW; row <= INVENTORY_LAST_ROW; row += 1) {
+    if (!rowHasAuthoritativeValue(sheet, row, INVENTORY_AUTHORITATIVE_COLUMNS)) continue;
     const warehouseCell = readAuthoritativeCell(sheet, row, 1, "仓库编码", issues);
     const itemCell = readAuthoritativeCell(sheet, row, 3, "物料编号", issues);
     const quantityCell = readAuthoritativeCell(sheet, row, 9, "实盘数量", issues);
@@ -522,19 +525,6 @@ function normalizeInventoryRows(input: {
       });
     }
   }
-  for (const itemCode of knownItemCodes) {
-    for (const warehouseCode of FIXED_WAREHOUSE_CODES) {
-      if ((combinationCounts.get(combinationKey(warehouseCode, itemCode)) ?? 0) === 0) {
-        addIssue(issues, {
-          severity: "ERROR",
-          code: "INVENTORY_COMBINATION_MISSING",
-          sheet: "期初库存",
-          message: `缺少仓库 ${warehouseCode} 与物料 ${itemCode} 的盘点组合`,
-        });
-      }
-    }
-  }
-
   let positiveRowCount = 0;
   let zeroRowCount = 0;
   let totalQuantity = new Decimal(0);
@@ -695,21 +685,19 @@ export class ExcelOpeningStockWorkbookParser implements OpeningStockWorkbookPars
 
     const itemsSheet = workbook.getWorksheet("物品资料");
     const inventorySheet = workbook.getWorksheet("期初库存");
-    validateFixedBusinessRowCount(
+    validateBusinessRowCapacity(
       itemsSheet,
       ITEM_FIRST_ROW,
       ITEM_LAST_ROW,
       ITEM_AUTHORITATIVE_COLUMNS,
-      81,
       "ITEM_ROW_COUNT_INVALID",
       issues,
     );
-    validateFixedBusinessRowCount(
+    validateBusinessRowCapacity(
       inventorySheet,
       INVENTORY_FIRST_ROW,
       INVENTORY_LAST_ROW,
       INVENTORY_AUTHORITATIVE_COLUMNS,
-      243,
       "INVENTORY_ROW_COUNT_INVALID",
       issues,
     );
