@@ -144,9 +144,32 @@ export function DesktopOutboundTable({ pending, onReloadOptions, onConfirm }: {
     const editor = editors[approval.id];
     if (!editor || editor.submitting || !editor.reviewing || editor.completed || submitLocks.current.has(approval.id) || completedApprovals.current.has(approval.id)) return;
     submitLocks.current.add(approval.id);
+    const epoch = beginOptionsRequest(approval.id);
+    let confirmationStarted = false;
     updateEditor(approval.id, (value) => ({ ...value, submitting: true, error: null, result: null }));
     try {
-      const payload = await onConfirm({ approvalId: approval.id, decisions: normalizeDecisions(editor.draft.decisions, approval) });
+      const latest = await onReloadOptions(approval.id);
+      if (!isCurrentOptionsRequest(approval.id, epoch)) return;
+      const reconciled = reconcileOutboundOptions(editor.draft, latest);
+      const errors = validateDecisionStep(approval, reconciled.draft.decisions, latest);
+      for (const lineId of reconciled.staleSelectedItemLineIds) errors[`line:${lineId}`] = "所选标准物品已失效，请重新选择";
+      for (const allocationId of reconciled.staleAllocationIds) errors[allocationId] = "库存已变化，请重新选择";
+      if (Object.keys(errors).length > 0) {
+        updateEditor(approval.id, (value) => ({
+          ...value,
+          submitting: false,
+          reviewing: false,
+          options: latest,
+          draft: reconciled.draft,
+          errors,
+          error: null,
+        }));
+        return;
+      }
+      updateEditor(approval.id, (value) => ({ ...value, options: latest, draft: reconciled.draft, errors: {} }));
+      confirmationStarted = true;
+      const payload = await onConfirm({ approvalId: approval.id, decisions: normalizeDecisions(reconciled.draft.decisions, approval) });
+      if (!isCurrentOptionsRequest(approval.id, epoch)) return;
       completedApprovals.current.add(approval.id);
       updateEditor(approval.id, (value) => ({
         ...value,
@@ -158,7 +181,13 @@ export function DesktopOutboundTable({ pending, onReloadOptions, onConfirm }: {
         result: `出库已完成：${payload.id}，${inventoryStatusLabel(payload.status)}，实际数量 ${payload.actualQuantity}，金额 ${payload.amount}`,
       }));
     } catch (error) {
-      updateEditor(approval.id, (value) => ({ ...value, submitting: false, error: error instanceof Error ? error.message : "出库提交失败，草稿已保留" }));
+      if (!isCurrentOptionsRequest(approval.id, epoch)) return;
+      updateEditor(approval.id, (value) => ({
+        ...value,
+        submitting: false,
+        reviewing: confirmationStarted ? value.reviewing : false,
+        error: error instanceof Error ? error.message : "出库提交失败，草稿已保留",
+      }));
     } finally {
       submitLocks.current.delete(approval.id);
     }

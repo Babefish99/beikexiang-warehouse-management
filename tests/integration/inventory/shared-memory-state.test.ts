@@ -57,6 +57,7 @@ function approvalDetail(): WeComApprovalPayload {
     apply_time: 1784773140,
     applyer: { userid: "wx-1", name: "Tea Applicant", department: "Operations" },
     contents: [
+      { control: "Text", title: "用途", value: { text: "Field supplies" } },
       {
         control: "Table",
         value: {
@@ -258,9 +259,9 @@ describe("shared inventory memory state", () => {
     }
   });
 
-  it("keeps a configured legacy selector template on the selector parser path", async () => {
-    vi.stubEnv("WE_COM_APPROVAL_TEMPLATE_ID", "tpl-intent-v2");
-    vi.stubEnv("WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS", " tpl-selector-v1, tpl-fixed-v1, tpl-selector-v1 ");
+  it("keeps the old primary selector template on the legacy parser path during the compatible first deployment", async () => {
+    vi.stubEnv("WE_COM_APPROVAL_TEMPLATE_ID", "tpl-selector-v1");
+    vi.stubEnv("WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS", "");
     mockApprovalDetail({ ...approvalDetail(), template_id: "tpl-selector-v1" });
     const app = buildServer();
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { createApprovalParser } from "../../../apps/api/src/server.js";
 import { ApprovalParser, type WeComApprovalPayload } from "../../../apps/api/src/infrastructure/wecom/approval-parser.js";
 
 const makeDetail = (status = 2): WeComApprovalPayload => ({
@@ -95,6 +96,20 @@ describe("enterprise WeChat approval parser", () => {
     });
   });
 
+  it("keeps the primary template on the legacy selector path during the compatible first deployment", () => {
+    const parser = createApprovalParser((optionKey) => ({
+      "opt-powder": { id: "item-1", unit: "包", isActive: true },
+      "opt-tea": { id: "item-2", unit: "盒", isActive: true },
+      "opt-wine": { id: "item-3", unit: "件", isActive: true },
+    }[optionKey]));
+
+    expect(parser.parse(makeDetail()).lines).toMatchObject([
+      { itemId: "item-1", legacyResolutionStatus: "EXACT_LOCKED" },
+      { itemId: "item-2", legacyResolutionStatus: "EXACT_LOCKED" },
+      { itemId: "item-3", legacyResolutionStatus: "EXACT_LOCKED" },
+    ]);
+  });
+
   it("maps non-approved statuses without producing an inventory-ready status", () => {
     const parser = new ApprovalParser(() => ({ id: "item-1" }));
 
@@ -156,6 +171,63 @@ describe("enterprise WeChat approval parser", () => {
     });
   });
 
+  it("rejects an empty or whitespace-only purpose", () => {
+    const detail = makeDetail();
+    const purpose = detail.contents.find((content) => content.control !== "Table" && content.title === "用途");
+    if (!purpose || purpose.control === "Table") throw new Error("fixture purpose missing");
+    purpose.value = { text: "  \u3000 " };
+
+    expect(() => new ApprovalParser(() => undefined).parse(detail)).toThrow("approval purpose is required");
+  });
+
+  it("rejects an intent-shaped row with required fields missing instead of falling back to legacy parsing", () => {
+    const detail: WeComApprovalPayload = {
+      sp_no: "202609040010",
+      template_id: "tpl-new-template",
+      sp_status: 2,
+      apply_time: 1788516000,
+      applyer: { userid: "wx-lisi", name: "李四" },
+      contents: [
+        { control: "Text", title: "用途", value: { text: "客户接待" } },
+        {
+          control: "Table",
+          title: "物品明细",
+          value: { children: [{ list: [
+            { control: "Text", title: "意向物品名称", value: { text: "招待用白酒" } },
+          ] }] },
+        },
+      ],
+    };
+
+    expect(() => new ApprovalParser(() => undefined).parse(detail)).toThrow("approval quantity must be a positive integer");
+  });
+
+  it.each([
+    ["意向物品名称", "approval requested item name is required"],
+    ["审批数量", "approval quantity must be a positive integer"],
+    ["单位", "approval unit is required"],
+  ])("rejects a new intent row missing required field %s", (missingTitle, expectedError) => {
+    const fields = [
+      { control: "Text", title: "意向物品名称", value: { text: "招待用白酒" } },
+      { control: "Number", title: "审批数量", value: { new_number: { value: "2" } } },
+      { control: "Text", title: "单位", value: { text: "瓶" } },
+      { control: "Textarea", title: "补充要求", value: { text: "用于接待" } },
+    ].filter((field) => field.title !== missingTitle);
+    const detail: WeComApprovalPayload = {
+      sp_no: "202609040011",
+      template_id: "tpl-new-template",
+      sp_status: 2,
+      apply_time: 1788516000,
+      applyer: { userid: "wx-lisi", name: "李四" },
+      contents: [
+        { control: "Text", title: "用途", value: { text: "客户接待" } },
+        { control: "Table", title: "物品明细", value: { children: [{ list: fields }] } },
+      ],
+    };
+
+    expect(() => new ApprovalParser(() => undefined).parse(detail)).toThrow(expectedError);
+  });
+
   it("keeps an allow-listed legacy template on the legacy parser path even when field titles resemble intent fields", () => {
     const detail = makeDetail();
     const table = detail.contents.find((content) => content.control === "Table");
@@ -164,10 +236,7 @@ describe("enterprise WeChat approval parser", () => {
     table.value.children[0]!.list[1]!.title = "审批数量";
     table.value.children[0]!.list.push({ control: "Text", title: "单位", value: { text: "包" } });
     table.value.children = [table.value.children[0]!];
-    const parser = new ApprovalParser(
-      () => ({ id: "item-1", unit: "包", isActive: true }),
-      "tpl-intent-v2",
-    );
+    const parser = new ApprovalParser(() => ({ id: "item-1", unit: "包", isActive: true }));
 
     expect(parser.parse(detail).lines).toEqual([{
       itemId: "item-1",
@@ -278,21 +347,24 @@ describe("enterprise WeChat approval parser", () => {
       sp_status: 2,
       apply_time: 1788516000,
       applyer: { userid: "wx-lisi", name: "李四" },
-      contents: [{
-        control: "Table",
-        title: "物品明细",
-        value: {
-          children: [{ list: [
-            { control: "Number", title: "审批数量", value: { new_number: { value: "2" } } },
-            { control: "Text", title: "单位", value: { text: "瓶" } },
-            { control: "Textarea", title: "补充要求", value: { text: "用于接待" } },
-          ] }],
+      contents: [
+        { control: "Text", title: "用途", value: { text: "客户接待" } },
+        {
+          control: "Table",
+          title: "物品明细",
+          value: {
+            children: [{ list: [
+              { control: "Number", title: "审批数量", value: { new_number: { value: "2" } } },
+              { control: "Text", title: "单位", value: { text: "瓶" } },
+              { control: "Textarea", title: "补充要求", value: { text: "用于接待" } },
+            ] }],
+          },
         },
-      }],
+      ],
     };
 
     expect(() => new ApprovalParser(() => {
       throw new Error("intent rows must not resolve an item");
-    }, "tpl-intent-v2").parse(detail)).toThrow("approval requested item name is required");
+    }).parse(detail)).toThrow("approval requested item name is required");
   });
 });

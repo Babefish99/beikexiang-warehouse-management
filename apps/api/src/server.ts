@@ -26,7 +26,7 @@ import { ApprovalSyncQueryService } from "./application/wecom/approval-sync-quer
 import { createPersistenceAdapters, readServerConfig } from "./infrastructure/db/runtime.js";
 import { ExcelOpeningStockWorkbookParser } from "./infrastructure/import/excel-opening-stock-workbook-parser.js";
 import { HttpApprovalGateway } from "./infrastructure/wecom/approval-gateway.js";
-import { ApprovalParser } from "./infrastructure/wecom/approval-parser.js";
+import { ApprovalParser, type ApprovalItemResolver } from "./infrastructure/wecom/approval-parser.js";
 import { WeComOAuthClient } from "./infrastructure/wecom/oauth-client.js";
 import { WeComSignatureVerifier } from "./infrastructure/wecom/signature-verifier.js";
 import { registerApprovalResyncRoute } from "./routes/admin/approvals-resync.js";
@@ -80,6 +80,10 @@ function serializeCookie(name: string, value: string, options: { httpOnly: boole
 
 interface BuildServerOptions {
   periodStore?: AccountingPeriodStore;
+}
+
+export function createApprovalParser(resolveItem: ApprovalItemResolver): ApprovalParser {
+  return new ApprovalParser(resolveItem);
 }
 
 export function buildServer(options: BuildServerOptions = {}) {
@@ -167,10 +171,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     secret: process.env.WE_COM_SECRET ?? "",
     redirectUri: `${config.apiBaseUrl}/auth/wecom/callback`,
   });
-  const approvalParser = new ApprovalParser(
-    (optionKey) => itemService.resolveByWeComOptionKey(optionKey),
-    config.approvalTemplateId,
-  );
+  const approvalParser = createApprovalParser((optionKey) => itemService.resolveByWeComOptionKey(optionKey));
   const approvalSyncService = new ApprovalSyncService({
     gateway: new HttpApprovalGateway({
       corpId: process.env.WE_COM_CORP_ID ?? "",

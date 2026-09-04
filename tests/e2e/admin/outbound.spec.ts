@@ -157,6 +157,155 @@ test("desktop outbound keeps the draft and blocks review when refreshed options 
   expect(confirmationRequests).toBe(0);
 });
 
+test("desktop final submission reloads options and returns stale reconciled input to editing without posting", async ({ page }) => {
+  await mockPending(page);
+  let optionReads = 0;
+  let confirmPosts = 0;
+  const staleOptions = { ...initialOptions, lines: [{ approvalLineId: "line-wine", items: [] }], batches: [] };
+  await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => {
+    optionReads += 1;
+    return route.fulfill({ json: optionReads < 3 ? initialOptions : staleOptions });
+  });
+  await page.route(apiUrl("/admin/outbound/confirm"), (route) => {
+    confirmPosts += 1;
+    return route.fulfill({ status: 201, json: { id: "must-not-submit" } });
+  });
+
+  await loginAs(page, "/admin/outbound", "ADMIN");
+  await page.getByRole("button", { name: "办理出库" }).click();
+  const line = page.getByTestId("outbound-decision-line-line-wine");
+  await line.getByLabel("标准物品").selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("一号仓");
+  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByLabel("实际数量").fill("2");
+  await page.getByRole("button", { name: "复核出库" }).click();
+  await page.getByRole("button", { name: "确认并提交" }).click();
+
+  await expect(page.getByRole("alert")).toContainText("所选标准物品已失效");
+  await expect(page.getByRole("button", { name: "复核出库" })).toBeVisible();
+  await expect(line.getByLabel("标准物品")).toHaveValue("item-maotai");
+  await expect(line.getByLabel("实际数量")).toHaveValue("2");
+  expect(optionReads).toBe(3);
+  expect(confirmPosts).toBe(0);
+});
+
+test("desktop final options reload failure preserves the draft and does not post", async ({ page }) => {
+  await mockPending(page);
+  let optionReads = 0;
+  let confirmPosts = 0;
+  await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => {
+    optionReads += 1;
+    return optionReads < 3
+      ? route.fulfill({ json: initialOptions })
+      : route.fulfill({ status: 503, json: { error: "final reload unavailable" } });
+  });
+  await page.route(apiUrl("/admin/outbound/confirm"), (route) => {
+    confirmPosts += 1;
+    return route.fulfill({ status: 201, json: { id: "must-not-submit" } });
+  });
+
+  await loginAs(page, "/admin/outbound", "ADMIN");
+  await page.getByRole("button", { name: "办理出库" }).click();
+  const line = page.getByTestId("outbound-decision-line-line-wine");
+  await line.getByLabel("标准物品").selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("一号仓");
+  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByLabel("实际数量").fill("2");
+  await page.getByRole("button", { name: "复核出库" }).click();
+  await page.getByRole("button", { name: "确认并提交" }).click();
+
+  await expect(page.getByRole("alert")).toHaveText("final reload unavailable");
+  await expect(page.getByRole("button", { name: "复核出库" })).toBeVisible();
+  await expect(line.getByLabel("实际数量")).toHaveValue("2");
+  expect(optionReads).toBe(3);
+  expect(confirmPosts).toBe(0);
+});
+
+test("desktop final reload ignores double submit and does not post after unmount", async ({ page }) => {
+  await mockPending(page);
+  const finalReload = deferred();
+  let finalReloadStarted!: () => void;
+  const finalReloadRequest = new Promise<void>((resolve) => { finalReloadStarted = resolve; });
+  let optionReads = 0;
+  let confirmPosts = 0;
+  await page.route(apiUrl("/admin/outbound/approval-1/options"), async (route) => {
+    optionReads += 1;
+    if (optionReads < 3) return route.fulfill({ json: initialOptions });
+    finalReloadStarted();
+    await finalReload.promise;
+    return route.fulfill({ json: initialOptions });
+  });
+  await page.route(apiUrl("/admin/outbound/confirm"), (route) => {
+    confirmPosts += 1;
+    return route.fulfill({ status: 201, json: { id: "must-not-submit" } });
+  });
+
+  await loginAs(page, "/admin/outbound", "ADMIN");
+  await page.getByRole("button", { name: "办理出库" }).click();
+  const line = page.getByTestId("outbound-decision-line-line-wine");
+  await line.getByLabel("标准物品").selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("一号仓");
+  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByLabel("实际数量").fill("2");
+  await page.getByRole("button", { name: "复核出库" }).click();
+  await page.getByRole("button", { name: "确认并提交" }).evaluate((button) => {
+    (button as HTMLButtonElement).click();
+    (button as HTMLButtonElement).click();
+  });
+  await finalReloadRequest;
+  await page.getByRole("link", { name: "首页" }).click();
+  finalReload.release();
+  await page.waitForTimeout(100);
+
+  expect(optionReads).toBe(3);
+  expect(confirmPosts).toBe(0);
+});
+
+test("desktop final reload does not post after the approval leaves the current pending set", async ({ page }) => {
+  let pendingReads = 0;
+  let pendingRemoved = false;
+  await page.route(apiUrl("/admin/outbound/pending"), (route) => {
+    pendingReads += 1;
+    return route.fulfill({ json: pendingRemoved ? [] : [intentApproval] });
+  });
+  await page.route(apiUrl("/admin/approvals/sync-failures?limit=20"), (route) => route.fulfill({ json: [] }));
+  const finalReload = deferred();
+  let finalReloadStarted!: () => void;
+  const finalReloadRequest = new Promise<void>((resolve) => { finalReloadStarted = resolve; });
+  let optionReads = 0;
+  let confirmPosts = 0;
+  await page.route(apiUrl("/admin/outbound/approval-1/options"), async (route) => {
+    optionReads += 1;
+    if (optionReads < 3) return route.fulfill({ json: initialOptions });
+    finalReloadStarted();
+    await finalReload.promise;
+    return route.fulfill({ json: initialOptions });
+  });
+  await page.route(apiUrl("/admin/outbound/confirm"), (route) => {
+    confirmPosts += 1;
+    return route.fulfill({ status: 201, json: { id: "must-not-submit" } });
+  });
+
+  await loginAs(page, "/admin/outbound", "ADMIN");
+  await page.getByRole("button", { name: "办理出库" }).click();
+  const line = page.getByTestId("outbound-decision-line-line-wine");
+  await line.getByLabel("标准物品").selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("一号仓");
+  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByLabel("实际数量").fill("2");
+  await page.getByRole("button", { name: "复核出库" }).click();
+  await page.getByRole("button", { name: "确认并提交" }).click();
+  await finalReloadRequest;
+  pendingRemoved = true;
+  await page.getByRole("button", { name: "刷新" }).click();
+  await expect(page.getByRole("button", { name: "办理出库" })).toHaveCount(0);
+  finalReload.release();
+  await page.waitForTimeout(100);
+
+  expect(pendingReads).toBeGreaterThanOrEqual(2);
+  expect(confirmPosts).toBe(0);
+});
+
 test("desktop outbound preserves the draft after a server rejection", async ({ page }) => {
   await mockPending(page);
   await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => route.fulfill({ json: initialOptions }));
@@ -325,8 +474,12 @@ test("desktop reopening a valid reviewed draft still requires a new review", asy
 
 test("desktop confirmation becomes terminal even when pending still returns the approval", async ({ page }) => {
   await mockPending(page);
+  let optionReads = 0;
   let confirmPosts = 0;
-  await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => route.fulfill({ json: initialOptions }));
+  await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => {
+    optionReads += 1;
+    return route.fulfill({ json: initialOptions });
+  });
   await page.route(apiUrl("/admin/outbound/confirm"), async (route) => {
     confirmPosts += 1;
     await route.fulfill({ status: 201, json: { id: "outbound-terminal", status: "COMPLETED", actualQuantity: "2", amount: "200.00" } });
@@ -340,12 +493,16 @@ test("desktop confirmation becomes terminal even when pending still returns the 
   await line.getByLabel("采购批次").selectOption("期初-260827");
   await line.getByLabel("实际数量").fill("2");
   await page.getByRole("button", { name: "复核出库" }).click();
-  await page.getByRole("button", { name: "确认并提交" }).click();
+  await page.getByRole("button", { name: "确认并提交" }).evaluate((button) => {
+    (button as HTMLButtonElement).click();
+    (button as HTMLButtonElement).click();
+  });
 
   await expect(page.getByRole("status")).toContainText("outbound-terminal");
   await expect(page.getByRole("button", { name: "确认并提交" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "已完成", exact: true })).toBeDisabled();
   await page.waitForTimeout(50);
+  expect(optionReads).toBe(3);
   expect(confirmPosts).toBe(1);
 });
 
@@ -466,6 +623,7 @@ test("a reason hidden by full issuance is omitted from the decisions payload", a
   await line.getByLabel("实际数量").fill("2");
   await page.getByRole("button", { name: "复核出库" }).click();
   await page.getByRole("button", { name: "确认并提交" }).click();
+  await expect(page.getByRole("status")).toContainText("outbound-full");
 
   expect(submitted).toEqual({
     approvalId: "approval-1",

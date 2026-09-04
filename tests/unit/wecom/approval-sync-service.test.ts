@@ -32,7 +32,6 @@ function makeService(detail: WeComApprovalPayload, approvalTemplateId = "tpl-app
   const store = new InMemoryApprovalSyncStore();
   const parser = new ApprovalParser(
     (optionKey) => optionKey === "opt-tea" ? { id: "item-tea", name: "茶叶", unit: "盒", isActive: true } : undefined,
-    "tpl-intent-v2",
   );
   return { gateway, store, service: new ApprovalSyncService({ gateway, parser, store, approvalTemplateIds: [approvalTemplateId] }) };
 }
@@ -82,7 +81,7 @@ describe("approval synchronization service", () => {
     const detail = makeIntentDetail();
     const gateway = { fetchDetail: vi.fn().mockResolvedValue(detail) };
     const store = new InMemoryApprovalSyncStore();
-    const parser = new ApprovalParser(() => undefined, "tpl-intent-v2");
+    const parser = new ApprovalParser(() => undefined);
     const service = new ApprovalSyncService({ gateway, parser, store, approvalTemplateIds: ["tpl-intent-v2", "tpl-selector-v1"] });
 
     await expect(service.sync(detail.sp_no)).resolves.toMatchObject({ status: "PENDING_OUTBOUND" });
@@ -132,6 +131,33 @@ describe("approval synchronization service", () => {
 
     await expect(service.sync("202607230021")).rejects.toThrow("approval form is malformed");
     expect(store.attempts()[0]).toMatchObject({ status: "FAILED", payload: detail });
+  });
+
+  it("records a visible failed attempt when the approval purpose is blank", async () => {
+    const detail = makeIntentDetail();
+    const purpose = detail.contents.find((content) => content.control !== "Table" && content.title === "用途");
+    if (!purpose || purpose.control === "Table") throw new Error("fixture purpose missing");
+    purpose.value = { text: " \u3000 " };
+    const gateway = { fetchDetail: vi.fn().mockResolvedValue(detail) };
+    const store = new InMemoryApprovalSyncStore();
+    const service = new ApprovalSyncService({
+      gateway,
+      parser: new ApprovalParser(() => undefined),
+      store,
+      approvalTemplateIds: ["tpl-intent-v2"],
+    });
+
+    await expect(service.sync(detail.sp_no)).rejects.toThrow("approval purpose is required");
+    expect(store.records()).toEqual([]);
+    expect(store.attempts()).toMatchObject([{
+      weComSpNo: detail.sp_no,
+      status: "FAILED",
+      error: "approval purpose is required",
+    }]);
+    await expect(store.listRecentFailures(20)).resolves.toMatchObject([{
+      weComSpNo: detail.sp_no,
+      error: "approval purpose is required",
+    }]);
   });
 
   it("rejects a fetched detail with a different template before parsing or saving", async () => {
@@ -259,7 +285,6 @@ describe("approval synchronization service", () => {
     const store = new InMemoryApprovalSyncStore();
     const parser = new ApprovalParser(
       (optionKey) => optionKey === "opt-tea" ? { id: "item-tea", name: "茶叶", unit: "盒", isActive: true } : undefined,
-      "tpl-intent-v2",
     );
     const service = new ApprovalSyncService({
       gateway,
@@ -282,11 +307,71 @@ describe("approval synchronization service", () => {
     });
   });
 
+  it("requires reapplication instead of replacing an existing exact legacy item binding", async () => {
+    const store = new InMemoryApprovalSyncStore();
+    const original = parsedApproval({
+      sourceTemplateId: "tpl-selector-v1",
+      lines: [{
+        requestedItemName: "Tea",
+        requestedQuantity: "2",
+        unit: "box",
+        itemId: "item-original",
+        itemOptionKey: "option-tea",
+        legacyResolutionStatus: "EXACT_LOCKED",
+      }],
+    });
+    await store.save({ id: "approval-202607230021", ...original, outboundStatus: "PENDING_OUTBOUND" });
+
+    await expect(store.save({
+      id: "approval-202607230021",
+      ...original,
+      lines: [{
+        ...original.lines[0]!,
+        itemId: "item-remapped",
+        itemOptionKey: "option-tea",
+      }],
+      outboundStatus: "PENDING_OUTBOUND",
+    })).resolves.toBe("REAPPLY_REQUIRED");
+
+    expect(store.records()[0]).toMatchObject({
+      outboundStatus: "REAPPLY_REQUIRED",
+      lines: [{ legacyResolutionStatus: "REAPPLY_REQUIRED" }],
+    });
+    expect(store.records()[0]?.lines[0]?.itemId).toBeUndefined();
+    expect(store.records()[0]?.lines[0]?.itemOptionKey).toBeUndefined();
+  });
+
+  it("keeps an existing exact legacy binding when the selector still resolves to the same item", async () => {
+    const store = new InMemoryApprovalSyncStore();
+    const original = parsedApproval({
+      sourceTemplateId: "tpl-selector-v1",
+      lines: [{
+        requestedItemName: "Tea",
+        requestedQuantity: "2",
+        unit: "box",
+        itemId: "item-original",
+        itemOptionKey: "option-tea",
+        legacyResolutionStatus: "EXACT_LOCKED",
+      }],
+    });
+    await store.save({ id: "approval-202607230021", ...original, outboundStatus: "PENDING_OUTBOUND" });
+
+    await expect(store.save({
+      id: "approval-202607230021",
+      ...original,
+      outboundStatus: "PENDING_OUTBOUND",
+    })).resolves.toBe("PENDING_OUTBOUND");
+    expect(store.records()[0]).toMatchObject({
+      outboundStatus: "PENDING_OUTBOUND",
+      lines: [{ itemId: "item-original", itemOptionKey: "option-tea", legacyResolutionStatus: "EXACT_LOCKED" }],
+    });
+  });
+
   it("marks an approved legacy approval for reapplication when any line lacks exact evidence", async () => {
     const detail = makeDetail(2, "tpl-selector-v1");
     const gateway = { fetchDetail: vi.fn().mockResolvedValue(detail) };
     const store = new InMemoryApprovalSyncStore();
-    const parser = new ApprovalParser(() => undefined, "tpl-intent-v2");
+    const parser = new ApprovalParser(() => undefined);
     const service = new ApprovalSyncService({ gateway, parser, store, approvalTemplateIds: ["tpl-intent-v2", "tpl-selector-v1"] });
 
     await expect(service.sync(detail.sp_no)).resolves.toMatchObject({ status: "REAPPLY_REQUIRED" });

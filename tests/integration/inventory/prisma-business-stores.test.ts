@@ -1254,6 +1254,16 @@ describe.skipIf(!databaseUrl)("Prisma approval synchronization after the intent 
         weComOptionKey: "sync-option",
       },
     });
+    await prisma.item.create({
+      data: {
+        id: "sync-remapped-item",
+        code: "SY-002",
+        name: "Remapped item",
+        unit: "box",
+        categoryId: "sync-category",
+        weComOptionKey: "sync-remapped-option",
+      },
+    });
   });
 
   beforeEach(async () => {
@@ -1470,6 +1480,49 @@ describe.skipIf(!databaseUrl)("Prisma approval synchronization after the intent 
     });
     await expect(prisma.approvalLine.findFirstOrThrow({ where: { approvalRequestId: "sync-approval" } }))
       .resolves.toMatchObject({ id: original.id });
+  });
+
+  it("atomically rejects a changed exact legacy item binding and cannot be re-promoted by a stale concurrent sync", async () => {
+    const realStore = new PrismaApprovalSyncStore(prisma);
+    const exactRecord = intentRecord({
+      sourceTemplateId: "tpl-selector-v1",
+      lines: [{
+        requestedItemName: "Exact item",
+        requestedQuantity: "2",
+        unit: "box",
+        itemId: "sync-item",
+        itemOptionKey: "sync-option",
+        legacyResolutionStatus: "EXACT_LOCKED",
+      }],
+    });
+    await realStore.save(exactRecord);
+    const paused = pauseOneFind(realStore);
+    const staleService = new ApprovalSyncService({
+      gateway: { fetchDetail: async () => syncDetail("tpl-selector-v1") },
+      parser: { parse: async () => exactRecord },
+      store: paused.store,
+      approvalTemplateIds: ["tpl-selector-v1"],
+    });
+
+    const staleSynchronization = staleService.sync(exactRecord.weComSpNo);
+    await paused.reached;
+    await realStore.save(intentRecord({
+      sourceTemplateId: "tpl-selector-v1",
+      lines: [{
+        ...exactRecord.lines[0]!,
+        itemId: "sync-remapped-item",
+        itemOptionKey: "sync-option",
+      }],
+    }));
+    paused.release();
+
+    await expect(staleSynchronization).resolves.toMatchObject({ status: "REAPPLY_REQUIRED" });
+    await expect(realStore.findBySpNo(exactRecord.weComSpNo)).resolves.toMatchObject({
+      outboundStatus: "REAPPLY_REQUIRED",
+      lines: [{ legacyResolutionStatus: "REAPPLY_REQUIRED" }],
+    });
+    const storedLine = await prisma.approvalLine.findFirstOrThrow({ where: { approvalRequestId: exactRecord.id } });
+    expect(storedLine.itemId).toBeNull();
   });
 
   it("records a post-issue revocation exception without rewriting lines or deleting the outbound order", async () => {

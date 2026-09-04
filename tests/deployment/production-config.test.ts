@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { parse as parseYaml } from "yaml";
 
 import { readServerConfig } from "../../apps/api/src/infrastructure/db/runtime.js";
 
@@ -125,6 +126,21 @@ describe("production deployment configuration", () => {
     expect(compose).toMatch(/backend:\s*\n\s+internal: true/);
   });
 
+  it("passes the legacy approval template allow-list to both migration and API services", async () => {
+    const compose = parseYaml(await readText("docker-compose.prod.yml")) as {
+      services?: Record<string, { environment?: Record<string, unknown> }>;
+    };
+    const legacyTemplateEnvironment = ["migrate", "api"].map((serviceName) => ({
+      serviceName,
+      value: compose.services?.[serviceName]?.environment?.WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS,
+    }));
+
+    expect(legacyTemplateEnvironment).toEqual([
+      { serviceName: "migrate", value: "${WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS:-}" },
+      { serviceName: "api", value: "${WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS:-}" },
+    ]);
+  });
+
   it("leaves host headroom and bounds the migration peak on a 2 GiB server", async () => {
     const compose = await readText("docker-compose.prod.yml");
     const postgres = memoryLimitMiB(composeService(compose, "postgres"));
@@ -206,7 +222,6 @@ describe("production deployment configuration", () => {
     expect(example).toContain("WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS=");
     expect(compose).toContain("WE_COM_APPROVAL_SECRET: ${WE_COM_APPROVAL_SECRET:-}");
     expect(compose).toContain("WE_COM_APPROVAL_TEMPLATE_ID: ${WE_COM_APPROVAL_TEMPLATE_ID:-}");
-    expect(compose).toContain("WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS: ${WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS:-}");
     expect(example).not.toMatch(/106\.14\.224\.213|i-uf6ig2xdl67rqerk67l1/);
   });
 

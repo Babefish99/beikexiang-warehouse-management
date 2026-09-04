@@ -60,13 +60,15 @@ export interface ParsedApproval {
   lines: ParsedApprovalLine[];
 }
 
-interface ResolvedApprovalItem {
+export interface ResolvedApprovalItem {
   id: string;
   code?: string;
   name?: string;
   unit?: string;
   isActive: boolean;
 }
+
+export type ApprovalItemResolver = (reference: string) => ResolvedApprovalItem | undefined;
 
 function parseStatus(value: number | string): ParsedApprovalStatus {
   switch (String(value).toLowerCase()) {
@@ -104,10 +106,7 @@ function toSubmittedAt(value: number | string): string {
 }
 
 export class ApprovalParser {
-  constructor(
-    private readonly resolveItem: (reference: string) => ResolvedApprovalItem | undefined,
-    private readonly intentTemplateId?: string,
-  ) {}
+  constructor(private readonly resolveItem: ApprovalItemResolver) {}
 
   parse(detail: WeComApprovalPayload): ParsedApproval {
     const table = detail.contents.find((content): content is WeComApprovalTable => content.control === "Table");
@@ -116,9 +115,11 @@ export class ApprovalParser {
 
     const purposeField = detail.contents.find((content): content is WeComApprovalField => content.control !== "Table" && content.title === "用途");
     const purpose = purposeField?.value?.text?.trim() ?? "";
-    const isIntentTable = this.intentTemplateId !== undefined
-      ? detail.template_id === this.intentTemplateId
-      : rows.some((row) => row.list.filter((field) => isIntentFieldTitle(field.title)).length >= 2);
+    if (!purpose) throw new Error("approval purpose is required");
+    const isIntentTable = rows.some((row) => (
+      !row.list.some((field) => field.control === "Selector")
+      && row.list.some((field) => isIntentFieldTitle(field.title))
+    ));
     const lines = isIntentTable
       ? rows.map((row) => this.parseIntentLine(row))
       : rows.length > 0

@@ -190,6 +190,39 @@ function normalizeResolutionEvidence(parsed: ParsedApproval): ParsedApproval {
   };
 }
 
+function withoutLegacyBinding(line: ParsedApproval["lines"][number]): ParsedApproval["lines"][number] {
+  return {
+    requestedItemName: line.requestedItemName,
+    requestedQuantity: line.requestedQuantity,
+    unit: line.unit,
+    ...(line.note ? { note: line.note } : {}),
+    legacyResolutionStatus: "REAPPLY_REQUIRED",
+  };
+}
+
+export function reconcileLegacyLineBindings(input: {
+  existingSourceTemplateId?: string;
+  existingLines?: Array<Pick<ParsedApproval["lines"][number], "itemId" | "legacyResolutionStatus">>;
+  incomingLines: ParsedApproval["lines"];
+}): ParsedApproval["lines"] {
+  return input.incomingLines.map((incoming, index) => {
+    const existing = input.existingLines?.[index];
+    if (existing?.legacyResolutionStatus === "EXACT_LOCKED") {
+      return incoming.legacyResolutionStatus === "EXACT_LOCKED" && incoming.itemId === existing.itemId
+        ? incoming
+        : withoutLegacyBinding(incoming);
+    }
+    if (
+      input.existingSourceTemplateId
+      && existing?.legacyResolutionStatus === "REAPPLY_REQUIRED"
+      && incoming.legacyResolutionStatus === "EXACT_LOCKED"
+    ) {
+      return withoutLegacyBinding(incoming);
+    }
+    return incoming;
+  });
+}
+
 export function deriveOutboundStatus(input: {
   approvalStatus: ParsedApproval["status"];
   existingOutboundStatus?: ApprovalOutboundStatus;
@@ -212,10 +245,15 @@ function reconcileApprovalRecord(existing: ApprovalSyncRecord | undefined, incom
   if (existing?.sourceTemplateId && incoming.sourceTemplateId && existing.sourceTemplateId !== incoming.sourceTemplateId) {
     throw new Error("approval source template does not match the existing record");
   }
+  const reconciledLines = reconcileLegacyLineBindings({
+    existingSourceTemplateId: existing?.sourceTemplateId,
+    existingLines: existing?.lines,
+    incomingLines: incoming.lines,
+  });
   const outboundStatus = deriveOutboundStatus({
     approvalStatus: incoming.status,
     existingOutboundStatus: existing?.outboundStatus ?? incoming.outboundStatus,
-    lines: incoming.lines,
+    lines: reconciledLines,
   });
   const preserveLines = existing !== undefined
     && (CLOSED_OUTBOUND_STATUSES.has(existing.outboundStatus)
@@ -227,7 +265,7 @@ function reconcileApprovalRecord(existing: ApprovalSyncRecord | undefined, incom
     sourceTemplateId: existing?.sourceTemplateId ?? incoming.sourceTemplateId,
     outboundStatus,
     hasOutboundDecision: existing?.hasOutboundDecision ?? incoming.hasOutboundDecision,
-    lines: preserveLines ? existing.lines : incoming.lines,
+    lines: preserveLines ? existing.lines : reconciledLines,
   };
 }
 

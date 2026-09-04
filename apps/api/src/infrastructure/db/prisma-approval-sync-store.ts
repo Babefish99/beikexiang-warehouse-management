@@ -1,7 +1,7 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import type { ApprovalSyncFailureSource } from "../../application/wecom/approval-sync-query-service.js";
-import { deriveOutboundStatus, type ApprovalSyncAttemptInput, type ApprovalSyncRecord, type ApprovalSyncStore } from "../../application/wecom/approval-sync-service.js";
+import { deriveOutboundStatus, reconcileLegacyLineBindings, type ApprovalSyncAttemptInput, type ApprovalSyncRecord, type ApprovalSyncStore } from "../../application/wecom/approval-sync-service.js";
 import type { InventoryTransactionClient } from "./prisma-inventory-transaction.js";
 
 const closedOutboundStatuses = new Set(["COMPLETED", "PARTIALLY_ISSUED", "UNAVAILABLE", "VOIDED", "REVOCATION_EXCEPTION"]);
@@ -102,10 +102,18 @@ export class PrismaApprovalSyncStore implements ApprovalSyncStore, ApprovalSyncF
     if (existing?.sourceTemplateId && record.sourceTemplateId && existing.sourceTemplateId !== record.sourceTemplateId) {
       throw new Error("approval source template does not match the existing record");
     }
+    const reconciledLines = reconcileLegacyLineBindings({
+      existingSourceTemplateId: existing?.sourceTemplateId ?? undefined,
+      existingLines: existing?.lines.map((line) => ({
+        itemId: line.itemId ?? undefined,
+        legacyResolutionStatus: line.legacyResolutionStatus as ApprovalSyncRecord["lines"][number]["legacyResolutionStatus"],
+      })),
+      incomingLines: record.lines,
+    });
     const outboundStatus = deriveOutboundStatus({
       approvalStatus: record.status,
       existingOutboundStatus: (existing?.outboundStatus as ApprovalSyncRecord["outboundStatus"] | undefined) ?? record.outboundStatus,
-      lines: record.lines,
+      lines: reconciledLines,
     });
     const preserveClosed = existing ? closedOutboundStatuses.has(existing.outboundStatus) : false;
     const preserveLines = Boolean(existing)
@@ -139,7 +147,7 @@ export class PrismaApprovalSyncStore implements ApprovalSyncStore, ApprovalSyncF
     if (preserveLines) return outboundStatus;
 
     const retainedIds: string[] = [];
-    for (const [index, line] of record.lines.entries()) {
+    for (const [index, line] of reconciledLines.entries()) {
       const lineId = existing?.lines[index]?.id ?? `${approvalId}-line-${index + 1}`;
       retainedIds.push(lineId);
       await transaction.approvalLine.upsert({
