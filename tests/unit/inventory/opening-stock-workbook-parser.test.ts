@@ -205,7 +205,7 @@ describe("ExcelOpeningStockWorkbookParser workbook contract", () => {
     const result = await parser.parse({ fileName: "期初库存.xlsx", buffer });
 
     expect(result.rows[0]).toMatchObject({
-      batchNo: "OPEN-20260824-WH01-BJ0001",
+      batchNo: "期初-260824",
       quantity: "2",
       unitCost: "10",
       amount: "20.00",

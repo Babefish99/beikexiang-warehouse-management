@@ -234,7 +234,7 @@ describe.skipIf(!databaseUrl)("Prisma opening-stock import transaction", () => {
         id: "existing-opening-batch",
         warehouseId: "warehouse-1",
         itemId: "existing-bj0001",
-        batchNo: "OPEN-20260824-WH01-BJ0001",
+        batchNo: "期初-260824",
         quantity: "1",
         remainingQuantity: "1",
         unitCost: "1",

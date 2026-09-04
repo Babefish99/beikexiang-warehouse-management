@@ -424,8 +424,8 @@ function parseInventoryRows(
   return rows;
 }
 
-export function openingStockBatchNo(baselineDate: string, warehouseCode: string, itemCode: string): string {
-  return `OPEN-${baselineDate.replaceAll("-", "")}-${warehouseCode.replaceAll("-", "")}-${itemCode}`;
+export function openingStockBatchNo(baselineDate: string): string {
+  return `期初-${baselineDate.replaceAll("-", "").slice(2)}`;
 }
 
 type InventoryNumericField = "QUANTITY" | "UNIT_COST";
@@ -611,7 +611,7 @@ function normalizeInventoryRows(input: {
 
     const batchNo =
       baselineDate && row.warehouseCode !== "" && row.itemCode !== ""
-        ? openingStockBatchNo(baselineDate, row.warehouseCode, row.itemCode)
+        ? openingStockBatchNo(baselineDate)
         : undefined;
     let disposition: ParsedOpeningStockRow["disposition"];
     if (!rowHasBlockingIssue(issues, row.sheetRow) && baselineDate && quantity && amount !== undefined) {
