@@ -1,6 +1,8 @@
 import Fastify from "fastify";
 import { describe, expect, it } from "vitest";
 
+import { createInventoryMemoryState } from "../../../apps/api/src/application/inventory/inventory-memory-state.js";
+import { InMemoryOutboundStore, OutboundService } from "../../../apps/api/src/application/inventory/outbound-service.js";
 import { InMemoryStocktakeStore, StocktakeService } from "../../../apps/api/src/application/inventory/stocktake-service.js";
 import { InMemoryAccountingPeriodStore, PeriodCloseService } from "../../../apps/api/src/application/periods/period-close-service.js";
 import { createAccountingPeriod } from "../../../apps/api/src/domain/periods/accounting-period.js";
@@ -26,6 +28,73 @@ describe("stocktake and period close", () => {
     expect(store.balance("wh-1", "batch-1")?.bookQuantity).toBe("8");
     expect(store.adjustments()).toMatchObject([{ quantityDelta: "-2", bookQuantity: "10", actualQuantity: "8", reason: "盘亏破损" }]);
     await expect(service.record({ period, operatorId: "admin-1", warehouseId: "wh-1", itemId: "item-1", batchId: "batch-1", bookQuantity: "10", actualQuantity: "8" })).rejects.toThrow("reason is required");
+  });
+
+  it("makes a stocktake gain available for outbound issue", async () => {
+    const state = createInventoryMemoryState();
+    const outboundStore = new InMemoryOutboundStore(state);
+    const stocktakeStore = new InMemoryStocktakeStore(state);
+    outboundStore.seedItem({ id: "item-1", code: "ITEM-1", name: "Counted item", unit: "box", isActive: true });
+    outboundStore.seedBatch({ id: "batch-1", warehouseId: "wh-1", itemId: "item-1", remainingQuantity: "0", unitCost: "20" });
+    outboundStore.seedApproval({
+      id: "approval-1",
+      weComSpNo: "stocktake-gain-1",
+      status: "PENDING_OUTBOUND",
+      lines: [{ id: "line-1", requestedItemName: "Counted item", requestedQuantity: "2", unit: "box", legacyResolutionStatus: "NOT_APPLICABLE" }],
+    });
+
+    await new StocktakeService(stocktakeStore).record({
+      periodCode: "2026-08",
+      operatorId: "admin-1",
+      warehouseId: "wh-1",
+      itemId: "item-1",
+      batchId: "batch-1",
+      bookQuantity: "0",
+      actualQuantity: "2",
+      reason: "counted surplus",
+    });
+    await expect(new OutboundService(outboundStore).confirm({
+      approvalId: "approval-1",
+      operatorId: "admin-1",
+      decisions: [{ approvalLineId: "line-1", selectedItemId: "item-1", allocations: [{ warehouseId: "wh-1", batchId: "batch-1", quantity: "2" }] }],
+    })).resolves.toMatchObject({ status: "COMPLETED" });
+    expect(state.batches.get("batch-1")?.remainingQuantity).toBe("0");
+    expect(state.balances.get("wh-1:batch-1")?.remainingQuantity).toBe("0");
+  });
+
+  it("keeps the batch total aligned after a stocktake loss and rejects over-issue", async () => {
+    const state = createInventoryMemoryState();
+    const outboundStore = new InMemoryOutboundStore(state);
+    const stocktakeStore = new InMemoryStocktakeStore(state);
+    outboundStore.seedItem({ id: "item-1", code: "ITEM-1", name: "Counted item", unit: "box", isActive: true });
+    outboundStore.seedBatch({ id: "batch-1", warehouseId: "wh-1", itemId: "item-1", remainingQuantity: "3", unitCost: "20" });
+    outboundStore.seedApproval({
+      id: "approval-1",
+      weComSpNo: "stocktake-loss-1",
+      status: "PENDING_OUTBOUND",
+      lines: [{ id: "line-1", requestedItemName: "Counted item", requestedQuantity: "2", unit: "box", legacyResolutionStatus: "NOT_APPLICABLE" }],
+    });
+
+    await new StocktakeService(stocktakeStore).record({
+      periodCode: "2026-08",
+      operatorId: "admin-1",
+      warehouseId: "wh-1",
+      itemId: "item-1",
+      batchId: "batch-1",
+      bookQuantity: "3",
+      actualQuantity: "1",
+      reason: "counted shortage",
+    });
+
+    expect(state.batches.get("batch-1")?.remainingQuantity).toBe("1");
+    expect(state.balances.get("wh-1:batch-1")?.remainingQuantity).toBe("1");
+    await expect(new OutboundService(outboundStore).confirm({
+      approvalId: "approval-1",
+      operatorId: "admin-1",
+      decisions: [{ approvalLineId: "line-1", selectedItemId: "item-1", allocations: [{ warehouseId: "wh-1", batchId: "batch-1", quantity: "2" }] }],
+    })).rejects.toThrow("batch balance cannot become negative");
+    expect(state.batches.get("batch-1")?.remainingQuantity).toBe("1");
+    expect(state.balances.get("wh-1:batch-1")?.remainingQuantity).toBe("1");
   });
 
   it("refuses to close with unresolved work and closes a clean period", async () => {

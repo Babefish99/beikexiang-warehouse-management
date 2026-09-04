@@ -1,45 +1,74 @@
 import Decimal from "decimal.js";
+
 import { readSessionDraft, writeSessionDraft } from "../drafts/session-draft";
 
 export type OutboundStep = "select" | "allocate" | "review" | "complete";
-
-export type ApprovalLine = { id: string; itemId: string; requestedQuantity: string };
-export type PendingApproval = { id: string; weComSpNo: string; status: string; lines: ApprovalLine[] };
+export type ApprovalLine = {
+  id: string;
+  requestedItemName: string;
+  requestedQuantity: string;
+  unit: string;
+  note?: string;
+  itemId?: string;
+  legacyResolutionStatus?: "NOT_APPLICABLE" | "EXACT_LOCKED" | "REAPPLY_REQUIRED";
+};
+export type PendingApproval = { id: string; weComSpNo: string; status: string; lines: readonly ApprovalLine[] };
+export type CandidateItem = { id: string; code: string; name: string; unit: string; isActive: boolean; availableQuantity: string };
 export type BatchOption = { batchId: string; warehouseId: string; itemId: string; remainingQuantity: string; unitCost: string };
-export type AllocationRow = { id: string; approvalLineId: string; warehouseId: string; batchId: string; quantity: string };
-export type OutboundDraft = { approvalId: string; step: OutboundStep; allocations: AllocationRow[]; reason: string };
+export type OutboundOptions = { approvalId: string; lines: readonly { approvalLineId: string; items: readonly CandidateItem[] }[]; batches: readonly BatchOption[] };
+export type AllocationRow = { id: string; warehouseId: string; batchId: string; quantity: string };
+export type DecisionDraft = { approvalLineId: string; selectedItemId: string; zeroIssue: boolean; varianceReason: string; allocations: AllocationRow[] };
+export type OutboundDraft = { approvalId: string; step: OutboundStep; decisions: DecisionDraft[] };
 export type OutboundSummary = {
   requestedQuantity: string;
   actualQuantity: string;
   amount: string;
-  lines: Array<{ approvalLineId: string; itemId: string; requestedQuantity: string; actualQuantity: string; difference: string }>;
+  lines: Array<{
+    approvalLineId: string;
+    requestedItemName: string;
+    requestedQuantity: string;
+    unit: string;
+    note?: string;
+    selectedItemId?: string;
+    actualQuantity: string;
+    difference: string;
+  }>;
 };
-export type ReconciledOutboundDraft = { draft: OutboundDraft; invalidAllocationIds: string[] };
+export type ReconciledOutboundDraft = { draft: OutboundDraft; staleSelectedItemLineIds: string[]; staleAllocationIds: string[] };
 export type OutboundDraftIndexEntry = { approvalId: string; weComSpNo: string };
 export type IndexedOutboundDraft = { entry: OutboundDraftIndexEntry; draft: OutboundDraft };
+export type NormalizedDecision = {
+  approvalLineId: string;
+  selectedItemId?: string;
+  allocations: Array<{ warehouseId: string; batchId: string; quantity: string }>;
+  varianceReason?: string;
+};
 
-const outboundDraftVersion = 1;
-
+const outboundDraftVersion = 2;
 const steps = new Set<OutboundStep>(["select", "allocate", "review", "complete"]);
-const plainDecimalPattern = /^\d+(?:\.\d{1,4})?$/;
+const positiveIntegerPattern = /^[1-9]\d{0,13}$/;
 
-function parseDecimal(value: string): Decimal | null {
+function parsePositiveInteger(value: string): Decimal | null {
   const normalized = value.trim();
-  if (!plainDecimalPattern.test(normalized)) return null;
-  const [integerPart] = normalized.split(".");
-  if ((integerPart?.replace(/^0+(?=\d)/, "").length ?? 0) > 14) return null;
-  try {
-    const decimal = new Decimal(normalized);
-    return decimal.isFinite() ? decimal : null;
-  } catch {
-    return null;
-  }
+  if (!positiveIntegerPattern.test(normalized)) return null;
+  return new Decimal(normalized);
 }
 
 function isAllocationRow(value: unknown): value is AllocationRow {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const row = value as Record<string, unknown>;
-  return ["id", "approvalLineId", "warehouseId", "batchId", "quantity"].every((field) => typeof row[field] === "string");
+  return ["id", "warehouseId", "batchId", "quantity"].every((field) => typeof row[field] === "string");
+}
+
+function isDecisionDraft(value: unknown): value is DecisionDraft {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const decision = value as Record<string, unknown>;
+  return typeof decision.approvalLineId === "string"
+    && typeof decision.selectedItemId === "string"
+    && typeof decision.zeroIssue === "boolean"
+    && typeof decision.varianceReason === "string"
+    && Array.isArray(decision.allocations)
+    && decision.allocations.every(isAllocationRow);
 }
 
 export function isOutboundDraft(value: unknown): value is OutboundDraft {
@@ -48,17 +77,16 @@ export function isOutboundDraft(value: unknown): value is OutboundDraft {
   return typeof draft.approvalId === "string"
     && typeof draft.step === "string"
     && steps.has(draft.step as OutboundStep)
-    && typeof draft.reason === "string"
-    && Array.isArray(draft.allocations)
-    && draft.allocations.every(isAllocationRow);
+    && Array.isArray(draft.decisions)
+    && draft.decisions.every(isDecisionDraft);
 }
 
 export function outboundDraftKey(userId: string, approvalId: string): string {
-  return `warehouse.outbound.v1.${encodeURIComponent(userId)}.${encodeURIComponent(approvalId)}`;
+  return `warehouse.outbound.v2.${encodeURIComponent(userId)}.${encodeURIComponent(approvalId)}`;
 }
 
 export function outboundDraftIndexKey(userId: string): string {
-  return `warehouse.outbound.index.v1.${encodeURIComponent(userId)}`;
+  return `warehouse.outbound.index.v2.${encodeURIComponent(userId)}`;
 }
 
 export function isOutboundDraftIndex(value: unknown): value is OutboundDraftIndexEntry[] {
@@ -87,8 +115,7 @@ export function removeOutboundDraftIndexEntry(storage: Storage, userId: string, 
 }
 
 export function readIndexedOutboundDrafts(storage: Storage, userId: string): IndexedOutboundDraft[] {
-  const entries = readOutboundDraftIndex(storage, userId);
-  return entries.flatMap((entry) => {
+  return readOutboundDraftIndex(storage, userId).flatMap((entry) => {
     const draft = readSessionDraft<OutboundDraft>(storage, outboundDraftKey(userId, entry.approvalId), userId, outboundDraftVersion, isOutboundDraft);
     return draft?.approvalId === entry.approvalId && draft.step !== "complete" ? [{ entry, draft }] : [];
   });
@@ -99,98 +126,165 @@ export function pruneOutboundDraftIndex(storage: Storage, userId: string, indexe
   if (indexed.length !== entries.length) writeOutboundDraftIndex(storage, userId, indexed.map(({ entry }) => entry));
 }
 
-export function summarizeOutbound(approval: PendingApproval, allocations: readonly AllocationRow[], options: readonly BatchOption[]): OutboundSummary {
-  const actualByLine = new Map<string, Decimal>();
+function decisionTotal(decision: DecisionDraft): Decimal {
+  return decision.allocations.reduce((total, allocation) => total.plus(parsePositiveInteger(allocation.quantity) ?? 0), new Decimal(0));
+}
+
+export function summarizeOutbound(approval: PendingApproval, decisions: readonly DecisionDraft[], options: OutboundOptions): OutboundSummary {
+  const decisionsByLine = new Map(decisions.map((decision) => [decision.approvalLineId, decision]));
   let amount = new Decimal(0);
-  for (const allocation of allocations) {
-    const quantity = parseDecimal(allocation.quantity);
-    if (!quantity) continue;
-    actualByLine.set(allocation.approvalLineId, (actualByLine.get(allocation.approvalLineId) ?? new Decimal(0)).plus(quantity));
-    const option = options.find((candidate) => candidate.warehouseId === allocation.warehouseId && candidate.batchId === allocation.batchId);
-    const unitCost = option ? parseDecimal(option.unitCost) : null;
-    if (unitCost) amount = amount.plus(quantity.mul(unitCost));
+  for (const decision of decisions) {
+    if (decision.zeroIssue) continue;
+    for (const allocation of decision.allocations) {
+      const quantity = parsePositiveInteger(allocation.quantity);
+      const option = options.batches.find((candidate) => candidate.warehouseId === allocation.warehouseId && candidate.batchId === allocation.batchId && candidate.itemId === decision.selectedItemId);
+      if (quantity && option) amount = amount.plus(quantity.mul(option.unitCost).toFixed(2));
+    }
   }
   const lines = approval.lines.map((line) => {
-    const requested = parseDecimal(line.requestedQuantity) ?? new Decimal(0);
-    const actual = actualByLine.get(line.id) ?? new Decimal(0);
-    return { approvalLineId: line.id, itemId: line.itemId, requestedQuantity: requested.toString(), actualQuantity: actual.toString(), difference: requested.minus(actual).toString() };
+    const decision = decisionsByLine.get(line.id);
+    const requested = parsePositiveInteger(line.requestedQuantity) ?? new Decimal(0);
+    const actual = decision?.zeroIssue ? new Decimal(0) : decision ? decisionTotal(decision) : new Decimal(0);
+    return {
+      approvalLineId: line.id,
+      requestedItemName: line.requestedItemName,
+      requestedQuantity: requested.toString(),
+      unit: line.unit,
+      ...(line.note === undefined ? {} : { note: line.note }),
+      ...(decision?.zeroIssue || !decision?.selectedItemId ? {} : { selectedItemId: decision.selectedItemId }),
+      actualQuantity: actual.toString(),
+      difference: requested.minus(actual).toString(),
+    };
   });
-  const requestedQuantity = lines.reduce((sum, line) => sum.plus(line.requestedQuantity), new Decimal(0));
-  const actualQuantity = lines.reduce((sum, line) => sum.plus(line.actualQuantity), new Decimal(0));
-  return { requestedQuantity: requestedQuantity.toString(), actualQuantity: actualQuantity.toString(), amount: amount.toFixed(2), lines };
-}
-
-export function validateAllocationStep(approval: PendingApproval, allocations: readonly AllocationRow[], options: readonly BatchOption[]): Record<string, string> {
-  const errors: Record<string, string> = {};
-  const rowsByLine = new Map(approval.lines.map((line) => [line.id, allocations.filter((row) => row.approvalLineId === line.id)]));
-  for (const line of approval.lines) {
-    const rows = rowsByLine.get(line.id) ?? [];
-    if (!rows.length) errors[`line:${line.id}`] = "每个物品至少需要一条分配";
-    let total = new Decimal(0);
-    for (const row of rows) {
-      if (!row.warehouseId || !row.batchId || !row.quantity.trim()) {
-        errors[row.id] = "请选择仓库、批次并填写数量";
-        continue;
-      }
-      const quantity = parseDecimal(row.quantity);
-      if (!quantity) {
-        errors[row.id] = "数量必须为最多 14 位整数和 4 位小数的非负普通十进制数";
-        continue;
-      }
-      const option = options.find((candidate) => candidate.warehouseId === row.warehouseId && candidate.batchId === row.batchId && candidate.itemId === line.itemId);
-      if (!option) {
-        errors[row.id] = "所选仓库或批次已失效";
-        continue;
-      }
-      total = total.plus(quantity);
-    }
-    const requested = parseDecimal(line.requestedQuantity) ?? new Decimal(0);
-    if (total.gt(requested)) for (const row of rows) errors[row.id] = "同一审批行的实际数量合计不能超过审批数量";
-  }
-  const grouped = new Map<string, { quantity: Decimal; rows: AllocationRow[]; remaining: Decimal }>();
-  for (const row of allocations) {
-    const quantity = parseDecimal(row.quantity);
-    const option = options.find((candidate) => candidate.warehouseId === row.warehouseId && candidate.batchId === row.batchId);
-    if (!quantity || !option) continue;
-    const key = `${row.warehouseId}:${row.batchId}`;
-    const group = grouped.get(key) ?? { quantity: new Decimal(0), rows: [], remaining: parseDecimal(option.remainingQuantity) ?? new Decimal(0) };
-    group.quantity = group.quantity.plus(quantity);
-    group.rows.push(row);
-    grouped.set(key, group);
-  }
-  for (const group of grouped.values()) if (group.quantity.gt(group.remaining)) for (const row of group.rows) errors[row.id] = "同一批次的实际数量合计不能超过可用库存";
-  return errors;
-}
-
-export function validateReviewStep(summary: Pick<OutboundSummary, "requestedQuantity" | "actualQuantity" | "amount">, reason: string): { reason?: string } {
-  const requested = parseDecimal(summary.requestedQuantity) ?? new Decimal(0);
-  const actual = parseDecimal(summary.actualQuantity) ?? new Decimal(0);
-  return actual.lt(requested) && !reason.trim() ? { reason: "少出或零出必须填写原因" } : {};
-}
-
-export function reconcileBatchOptions(draft: OutboundDraft, options: readonly BatchOption[]): ReconciledOutboundDraft {
-  const byBatch = new Map(options.map((option) => [`${option.warehouseId}:${option.batchId}`, option]));
-  const totals = new Map<string, Decimal>();
-  for (const row of draft.allocations) {
-    const quantity = parseDecimal(row.quantity);
-    const key = `${row.warehouseId}:${row.batchId}`;
-    if (quantity) totals.set(key, (totals.get(key) ?? new Decimal(0)).plus(quantity));
-  }
   return {
-    draft: { ...draft },
-    invalidAllocationIds: draft.allocations.filter((row) => {
-      if (!row.batchId) return false;
-      const key = `${row.warehouseId}:${row.batchId}`;
-      const option = byBatch.get(key);
-      const remaining = option ? parseDecimal(option.remainingQuantity) : null;
-      return !remaining || (totals.get(key)?.gt(remaining) ?? false);
-    }).map((row) => row.id),
+    requestedQuantity: lines.reduce((total, line) => total.plus(line.requestedQuantity), new Decimal(0)).toString(),
+    actualQuantity: lines.reduce((total, line) => total.plus(line.actualQuantity), new Decimal(0)).toString(),
+    amount: amount.toFixed(2),
+    lines,
   };
 }
 
-export function normalizeAllocations(allocations: readonly AllocationRow[]): Array<Omit<AllocationRow, "id">> {
-  return allocations.flatMap(({ id: _id, quantity, ...row }) => {
-    const parsed = parseDecimal(quantity);
-    return parsed?.gt(0) ? [{ ...row, quantity: parsed.toString() }] : [];
+function validateExactDecisionLineSet(approval: PendingApproval, decisions: readonly DecisionDraft[], errors: Record<string, string>): void {
+  const approvalLineIds = new Set(approval.lines.map((line) => line.id));
+  const decisionCounts = new Map<string, number>();
+  for (const decision of decisions) {
+    decisionCounts.set(decision.approvalLineId, (decisionCounts.get(decision.approvalLineId) ?? 0) + 1);
+    if (!approvalLineIds.has(decision.approvalLineId)) errors[`line:${decision.approvalLineId}`] = "出库决定不属于当前审批";
+  }
+  for (const line of approval.lines) {
+    const count = decisionCounts.get(line.id) ?? 0;
+    if (count === 0) errors[`line:${line.id}`] = "每个审批意向都需要出库决定";
+    if (count > 1) errors[`line:${line.id}`] = "每个审批意向只能有一个出库决定";
+  }
+}
+
+export function validateDecisionStep(approval: PendingApproval, decisions: readonly DecisionDraft[], options: OutboundOptions): Record<string, string> {
+  const errors: Record<string, string> = {};
+  validateExactDecisionLineSet(approval, decisions, errors);
+  const decisionsByLine = new Map<string, DecisionDraft>(decisions.map((decision) => [decision.approvalLineId, decision]));
+  for (const line of approval.lines) {
+    const decision = decisionsByLine.get(line.id);
+    if (!decision) continue;
+    const requested = parsePositiveInteger(line.requestedQuantity) ?? new Decimal(0);
+    if (decision.zeroIssue) {
+      if (decision.selectedItemId || decision.allocations.length) errors[`line:${line.id}`] = "零出库不能选择标准物品或填写批次分配";
+      if (!decision.varianceReason.trim()) errors[`reason:${line.id}`] = "少出或零出必须填写原因";
+      continue;
+    }
+    const candidates = options.lines.find((candidate) => candidate.approvalLineId === line.id)?.items ?? [];
+    if (!decision.selectedItemId) errors[`line:${line.id}`] = "请选择标准物品";
+    else if (!candidates.some((candidate) => candidate.id === decision.selectedItemId)) errors[`line:${line.id}`] = "所选标准物品已失效";
+    if (!decision.allocations.length) errors[`line:${line.id}`] ??= "每个标准物品至少需要一条分配";
+    let actual = new Decimal(0);
+    for (const allocation of decision.allocations) {
+      const quantity = parsePositiveInteger(allocation.quantity);
+      if (!allocation.warehouseId || !allocation.batchId) { errors[allocation.id] = "请选择仓库、批次并填写数量"; continue; }
+      if (!quantity) { errors[allocation.id] = "数量必须为 1 到 14 位正整数"; continue; }
+      const batch = options.batches.find((candidate) => candidate.warehouseId === allocation.warehouseId && candidate.batchId === allocation.batchId && candidate.itemId === decision.selectedItemId);
+      if (!batch) { errors[allocation.id] = "所选仓库或批次已失效"; continue; }
+      actual = actual.plus(quantity);
+    }
+    if (actual.gt(requested)) for (const allocation of decision.allocations) errors[allocation.id] = "同一审批意向的实际数量合计不能超过审批数量";
+    if (actual.lt(requested) && !decision.varianceReason.trim()) errors[`reason:${line.id}`] = "少出或零出必须填写原因";
+  }
+  const batchTotals = new Map<string, { total: Decimal; rows: AllocationRow[]; remaining: Decimal }>();
+  for (const decision of decisions) for (const allocation of decision.allocations) {
+    if (decision.zeroIssue) continue;
+    const quantity = parsePositiveInteger(allocation.quantity);
+    const batch = options.batches.find((candidate) => candidate.warehouseId === allocation.warehouseId && candidate.batchId === allocation.batchId && candidate.itemId === decision.selectedItemId);
+    if (!quantity || !batch) continue;
+    const key = `${batch.warehouseId}:${batch.batchId}`;
+    const group = batchTotals.get(key) ?? { total: new Decimal(0), rows: [], remaining: new Decimal(batch.remainingQuantity) };
+    group.total = group.total.plus(quantity); group.rows.push(allocation); batchTotals.set(key, group);
+  }
+  for (const group of batchTotals.values()) if (group.total.gt(group.remaining)) for (const row of group.rows) errors[row.id] = "同一批次的实际数量合计不能超过可用库存";
+  return errors;
+}
+
+export function changeDecisionItem(decision: DecisionDraft, selectedItemId: string): DecisionDraft {
+  return decision.selectedItemId === selectedItemId ? decision : { ...decision, selectedItemId, zeroIssue: false, allocations: [] };
+}
+
+export function reconcileOutboundOptions(draft: OutboundDraft, options: OutboundOptions): ReconciledOutboundDraft {
+  const staleSelectedItemLineIds: string[] = [];
+  const staleAllocationIds: string[] = [];
+  const allocationsByBatch = new Map<string, { rows: AllocationRow[]; total: Decimal; remaining: Decimal }>();
+  for (const decision of draft.decisions) {
+    if (decision.zeroIssue) continue;
+    const candidates = options.lines.find((line) => line.approvalLineId === decision.approvalLineId)?.items ?? [];
+    if (decision.selectedItemId && !candidates.some((candidate) => candidate.id === decision.selectedItemId)) staleSelectedItemLineIds.push(decision.approvalLineId);
+    for (const allocation of decision.allocations) {
+      if (!allocation.batchId) continue;
+      const batch = options.batches.find((candidate) => candidate.warehouseId === allocation.warehouseId && candidate.batchId === allocation.batchId && candidate.itemId === decision.selectedItemId);
+      const quantity = parsePositiveInteger(allocation.quantity);
+      if (!batch) { staleAllocationIds.push(allocation.id); continue; }
+      if (!quantity) continue;
+      const key = `${batch.warehouseId}:${batch.batchId}`;
+      const group = allocationsByBatch.get(key) ?? { rows: [], total: new Decimal(0), remaining: new Decimal(batch.remainingQuantity) };
+      group.rows.push(allocation);
+      group.total = group.total.plus(quantity);
+      allocationsByBatch.set(key, group);
+    }
+  }
+  for (const group of allocationsByBatch.values()) if (group.total.gt(group.remaining)) staleAllocationIds.push(...group.rows.map((row) => row.id));
+  return { draft: { ...draft }, staleSelectedItemLineIds, staleAllocationIds };
+}
+
+function normalizedSearchValue(value: string): string {
+  return value.normalize("NFKC").trim().toLocaleLowerCase();
+}
+
+function candidateRank(item: CandidateItem, search: string): number {
+  const requested = normalizedSearchValue(search);
+  if (!requested) return 3;
+  const name = normalizedSearchValue(item.name);
+  const code = normalizedSearchValue(item.code);
+  if (name === requested) return 0;
+  if (name.includes(requested) || requested.includes(name)) return 1;
+  const terms = requested.split(/\s+/).filter(Boolean);
+  return code.includes(requested) || requested.includes(code) || terms.some((term) => code.includes(term) || name.includes(term)) ? 2 : 3;
+}
+
+export function searchCandidateItems<T extends CandidateItem>(items: readonly T[], search: string): T[] {
+  return [...items].sort((left, right) => candidateRank(left, search) - candidateRank(right, search)
+    || (left.code === right.code ? left.id.localeCompare(right.id) : left.code.localeCompare(right.code)));
+}
+
+export function normalizeDecisions(decisions: readonly DecisionDraft[], approval?: PendingApproval): NormalizedDecision[] {
+  return decisions.map((decision) => {
+    const varianceReason = decision.varianceReason.trim();
+    if (decision.zeroIssue) return { approvalLineId: decision.approvalLineId, allocations: [], ...(varianceReason ? { varianceReason } : {}) };
+    const approvalLine = approval?.lines.find((line) => line.id === decision.approvalLineId);
+    const requested = approvalLine ? parsePositiveInteger(approvalLine.requestedQuantity) : null;
+    const includeVarianceReason = !requested || decisionTotal(decision).lt(requested);
+    return {
+      approvalLineId: decision.approvalLineId,
+      ...(decision.selectedItemId ? { selectedItemId: decision.selectedItemId } : {}),
+      allocations: decision.allocations.flatMap(({ id: _id, warehouseId, batchId, quantity }) => {
+        const parsed = parsePositiveInteger(quantity);
+        return parsed ? [{ warehouseId, batchId, quantity: parsed.toString() }] : [];
+      }),
+      ...(varianceReason && includeVarianceReason ? { varianceReason } : {}),
+    };
   });
 }

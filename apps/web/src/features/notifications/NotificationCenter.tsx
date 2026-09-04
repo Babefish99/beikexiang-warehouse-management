@@ -4,7 +4,7 @@ import { ModalDialog } from "../../components/ModalDialog";
 import { OPEN_NOTIFICATION_CENTER_EVENT, type NotificationTask } from "./notification-tasks";
 import { useNotificationTasks } from "./use-notification-tasks";
 
-const actionableKinds = new Set<NotificationTask["kind"]>(["PENDING_OUTBOUND", "LOW_STOCK"]);
+const actionableKinds = new Set<NotificationTask["kind"]>(["PENDING_OUTBOUND", "APPROVAL_EXCEPTION", "LOW_STOCK"]);
 
 function TaskList({ tasks }: { tasks: NotificationTask[] }) {
   return <div className="workspace-notification-list">

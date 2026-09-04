@@ -1,5 +1,7 @@
 const inventoryStatusLabels: Record<string, string> = {
   PENDING_OUTBOUND: "待出库",
+  REAPPLY_REQUIRED: "需重新申请",
+  REVOCATION_EXCEPTION: "撤销异常",
   COMPLETED: "已完成",
   PARTIALLY_ISSUED: "部分出库",
   UNAVAILABLE: "无法出库",

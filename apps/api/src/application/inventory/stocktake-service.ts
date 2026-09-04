@@ -1,4 +1,5 @@
 import { Decimal } from "decimal.js";
+import type { InventoryLedgerEntry } from "../../domain/inventory/ledger.js";
 import type { AccountingPeriod } from "../../domain/periods/accounting-period.js";
 import { InMemoryAccountingPeriodStore, type AccountingPeriodStore } from "../periods/period-close-service.js";
 import { createInventoryMemoryState, inventoryBalanceKey, type InventoryMemoryState, type InventoryStocktakeAdjustmentState } from "./inventory-memory-state.js";
@@ -40,13 +41,32 @@ export class InMemoryStocktakeStore implements StocktakeStore {
   }
 
   seedBalance(balance: StocktakeBalance): void {
-    this.state.balances.set(inventoryBalanceKey(balance.warehouseId, balance.batchId), {
+    const key = inventoryBalanceKey(balance.warehouseId, balance.batchId);
+    const previous = this.state.balances.get(key);
+    const batch = this.state.batches.get(balance.batchId);
+    const nextBatchRemaining = new Decimal(batch?.remainingQuantity ?? "0")
+      .minus(previous?.remainingQuantity ?? "0")
+      .plus(balance.bookQuantity)
+      .toString();
+    this.state.balances.set(key, {
       warehouseId: balance.warehouseId,
       itemId: balance.itemId,
       batchId: balance.batchId,
       remainingQuantity: balance.bookQuantity,
       unitCost: balance.unitCost,
     });
+    this.state.batches.set(balance.batchId, batch
+      ? { ...batch, remainingQuantity: nextBatchRemaining }
+      : {
+          id: balance.batchId,
+          warehouseId: balance.warehouseId,
+          itemId: balance.itemId,
+          batchNo: balance.batchId,
+          quantity: balance.bookQuantity,
+          remainingQuantity: nextBatchRemaining,
+          unitCost: balance.unitCost,
+          purchasedAt: new Date(0).toISOString(),
+        });
   }
 
   balance(warehouseId: string, batchId: string): StocktakeBalance | undefined {
@@ -68,9 +88,24 @@ export class InMemoryStocktakeStore implements StocktakeStore {
     const key = inventoryBalanceKey(adjustment.warehouseId, adjustment.batchId);
     const current = this.state.balances.get(key);
     if (!current || current.itemId !== adjustment.itemId) throw new Error("stocktake balance not found");
-    this.state.stocktakeAdjustments.push(structuredClone(adjustment));
-    this.state.balances.set(key, { ...current, remainingQuantity: adjustment.actualQuantity });
-    this.state.ledger.push({
+    const batch = this.state.batches.get(adjustment.batchId);
+    if (!batch || batch.itemId !== adjustment.itemId) throw new Error("stocktake batch not found");
+    const quantityDelta = new Decimal(adjustment.quantityDelta);
+    const balanceTotal = [...this.state.balances.values()]
+      .filter((candidate) => candidate.batchId === adjustment.batchId)
+      .reduce((total, candidate) => total.plus(candidate.remainingQuantity), new Decimal(0));
+    if (
+      current.remainingQuantity !== adjustment.bookQuantity
+      || !new Decimal(adjustment.actualQuantity).minus(adjustment.bookQuantity).eq(quantityDelta)
+      || !balanceTotal.eq(batch.remainingQuantity)
+    ) {
+      throw new Error("stocktake balance changed; retry transaction");
+    }
+    const nextBatchRemaining = new Decimal(batch.remainingQuantity).plus(quantityDelta);
+    if (nextBatchRemaining.isNegative()) throw new Error("batch balance cannot become negative");
+    const nextBalance = { ...current, remainingQuantity: adjustment.actualQuantity };
+    const nextBatch = { ...batch, remainingQuantity: nextBatchRemaining.toString() };
+    const ledgerEntry: InventoryLedgerEntry = {
       id: crypto.randomUUID(),
       warehouseId: adjustment.warehouseId,
       itemId: adjustment.itemId,
@@ -82,7 +117,11 @@ export class InMemoryStocktakeStore implements StocktakeStore {
       referenceType: "STOCKTAKE",
       referenceId: adjustment.stocktakeId,
       occurredAt: adjustment.occurredAt,
-    });
+    };
+    this.state.stocktakeAdjustments.push(structuredClone(adjustment));
+    this.state.balances.set(key, nextBalance);
+    this.state.batches.set(batch.id, nextBatch);
+    this.state.ledger.push(ledgerEntry);
   }
 
   adjustments(): StocktakeAdjustment[] {

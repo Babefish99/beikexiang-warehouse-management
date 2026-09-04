@@ -1,4 +1,4 @@
-export type NotificationTaskKind = "PENDING_OUTBOUND" | "LOW_STOCK" | "STOCKTAKE" | "PERIOD_CLOSE" | "ANOMALY";
+export type NotificationTaskKind = "PENDING_OUTBOUND" | "APPROVAL_EXCEPTION" | "LOW_STOCK" | "STOCKTAKE" | "PERIOD_CLOSE" | "ANOMALY";
 
 export type NotificationTask = {
   id: string;

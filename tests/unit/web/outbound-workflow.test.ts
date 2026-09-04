@@ -1,182 +1,187 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  addOutboundDraftIndexEntry,
-  isOutboundDraftIndex,
+  changeDecisionItem,
   isOutboundDraft,
-  normalizeAllocations,
+  normalizeDecisions,
   outboundDraftIndexKey,
   outboundDraftKey,
-  pruneOutboundDraftIndex,
-  readIndexedOutboundDrafts,
-  removeOutboundDraftIndexEntry,
-  reconcileBatchOptions,
+  reconcileOutboundOptions,
+  searchCandidateItems,
   summarizeOutbound,
-  validateAllocationStep,
-  validateReviewStep,
+  validateDecisionStep,
   type OutboundDraft,
 } from "../../../apps/web/src/features/outbound/outbound-workflow";
-import { writeSessionDraft } from "../../../apps/web/src/features/drafts/session-draft";
+import { readSessionDraft } from "../../../apps/web/src/features/drafts/session-draft";
 
-function createStorage(): Storage {
-  const values = new Map<string, string>();
+const approval = {
+  id: "approval-1", weComSpNo: "202609040001", status: "PENDING_OUTBOUND",
+  lines: [{ id: "line-wine", requestedItemName: "飞天茅台", requestedQuantity: "2", unit: "瓶", note: "宴请" }],
+} as const;
+
+const options = {
+  approvalId: "approval-1",
+  lines: [{ approvalLineId: "line-wine", items: [
+    { id: "item-maotai", code: "W-001", name: "飞天茅台", unit: "瓶", isActive: true, availableQuantity: "8" },
+    { id: "item-wine", code: "W-002", name: "普通白酒", unit: "瓶", isActive: true, availableQuantity: "4" },
+  ] }],
+  batches: [
+    { batchId: "b1", warehouseId: "wh-1", itemId: "item-maotai", remainingQuantity: "4", unitCost: "100.005" },
+    { batchId: "b2", warehouseId: "wh-2", itemId: "item-maotai", remainingQuantity: "4", unitCost: "10.005" },
+  ],
+} as const;
+
+function draft(overrides: Partial<OutboundDraft> = {}): OutboundDraft {
   return {
-    getItem: (key) => values.get(key) ?? null,
-    setItem: (key, value) => { values.set(key, value); },
-    removeItem: (key) => { values.delete(key); },
-    clear: () => values.clear(),
-    key: (index) => [...values.keys()][index] ?? null,
-    get length() { return values.size; },
+    approvalId: "approval-1", step: "allocate",
+    decisions: [{
+      approvalLineId: "line-wine", selectedItemId: "item-maotai", zeroIssue: false, varianceReason: "",
+      allocations: [
+        { id: "a1", warehouseId: "wh-1", batchId: "b1", quantity: "1" },
+        { id: "a2", warehouseId: "wh-2", batchId: "b2", quantity: "1" },
+      ],
+    }],
+    ...overrides,
   };
 }
 
-const approval = {
-  id: "approval-1",
-  weComSpNo: "202608130001",
-  status: "PENDING_OUTBOUND",
-  lines: [{ id: "line-1", itemId: "item-1", requestedQuantity: "0.3" }],
-} as const;
+function createStorage(): Storage {
+  const entries = new Map<string, string>();
+  return {
+    getItem: (key) => entries.get(key) ?? null,
+    setItem: (key, value) => { entries.set(key, value); },
+    removeItem: (key) => { entries.delete(key); },
+    clear: () => entries.clear(),
+    key: (index) => [...entries.keys()][index] ?? null,
+    get length() { return entries.size; },
+  };
+}
 
-describe("outbound workflow", () => {
-  it("supports multiple warehouses and batches with Decimal totals", () => {
-    const summary = summarizeOutbound(approval, [
-      { id: "a1", approvalLineId: "line-1", warehouseId: "wh-1", batchId: "b1", quantity: "0.1" },
-      { id: "a2", approvalLineId: "line-1", warehouseId: "wh-2", batchId: "b2", quantity: "0.2" },
-    ], [
-      { batchId: "b1", warehouseId: "wh-1", itemId: "item-1", remainingQuantity: "1", unitCost: "0.2" },
-      { batchId: "b2", warehouseId: "wh-2", itemId: "item-1", remainingQuantity: "1", unitCost: "0.3" },
-    ]);
-
-    expect(summary.actualQuantity).toBe("0.3");
-    expect(summary.amount).toBe("0.08");
+describe("outbound decision workflow", () => {
+  it("rejects non-positive, decimal, or overlong allocation quantities", () => {
+    for (const quantity of ["", "0", "-1", "1.5", "123456789012345"]) {
+      const candidate = draft({ decisions: [{ ...draft().decisions[0]!, allocations: [{ id: "a1", warehouseId: "wh-1", batchId: "b1", quantity }] }] });
+      expect(validateDecisionStep(approval, candidate.decisions, options)).toMatchObject({ a1: "数量必须为 1 到 14 位正整数" });
+    }
   });
 
-  it("requires complete Decimal(18,4)-safe allocations without exceeding a line or batch", () => {
-    expect(validateAllocationStep(approval, [
-      { id: "a1", approvalLineId: "line-1", warehouseId: "", batchId: "", quantity: "" },
-    ], [])).toEqual({ a1: "请选择仓库、批次并填写数量" });
+  it("requires one selected candidate item and a per-line reason when issued short", () => {
+    const noItem = draft({ decisions: [{ ...draft().decisions[0]!, selectedItemId: "" }] });
+    expect(validateDecisionStep(approval, noItem.decisions, options)).toMatchObject({ "line:line-wine": "请选择标准物品" });
+    const short = draft({ decisions: [{ ...draft().decisions[0]!, allocations: [{ id: "a1", warehouseId: "wh-1", batchId: "b1", quantity: "1" }] }] });
+    expect(validateDecisionStep(approval, short.decisions, options)).toMatchObject({ "reason:line-wine": "少出或零出必须填写原因" });
+  });
 
-    expect(validateAllocationStep(approval, [
-      { id: "a1", approvalLineId: "line-1", warehouseId: "wh-1", batchId: "b1", quantity: "0.30001" },
-    ], [{ batchId: "b1", warehouseId: "wh-1", itemId: "item-1", remainingQuantity: "1", unitCost: "1" }])).toEqual({ a1: "数量必须为最多 14 位整数和 4 位小数的非负普通十进制数" });
-
-    expect(validateAllocationStep(approval, [
-      { id: "a1", approvalLineId: "line-1", warehouseId: "wh-1", batchId: "b1", quantity: "0.1" },
-      { id: "a2", approvalLineId: "line-1", warehouseId: "wh-1", batchId: "b1", quantity: "0.3" },
-    ], [{ batchId: "b1", warehouseId: "wh-1", itemId: "item-1", remainingQuantity: "1", unitCost: "1" }])).toEqual({
-      a1: "同一审批行的实际数量合计不能超过审批数量",
-      a2: "同一审批行的实际数量合计不能超过审批数量",
-    });
-
-    expect(validateAllocationStep({ ...approval, lines: [{ ...approval.lines[0], requestedQuantity: "1" }] }, [
-      { id: "a1", approvalLineId: "line-1", warehouseId: "wh-1", batchId: "b1", quantity: "0.2" },
-      { id: "a2", approvalLineId: "line-1", warehouseId: "wh-1", batchId: "b1", quantity: "0.2" },
-    ], [{ batchId: "b1", warehouseId: "wh-1", itemId: "item-1", remainingQuantity: "0.35", unitCost: "1" }])).toEqual({
-      a1: "同一批次的实际数量合计不能超过可用库存",
-      a2: "同一批次的实际数量合计不能超过可用库存",
+  it("reports a duplicate decision even when both duplicate decisions are otherwise valid", () => {
+    const decision = draft().decisions[0]!;
+    expect(validateDecisionStep(approval, [decision, { ...decision, allocations: [...decision.allocations] }], options)).toEqual({
+      "line:line-wine": "每个审批意向只能有一个出库决定",
     });
   });
 
-  it("requires a reason for partial and zero issue", () => {
-    expect(validateReviewStep({ requestedQuantity: "2", actualQuantity: "1", amount: "20.00" }, "")).toEqual({ reason: "少出或零出必须填写原因" });
-    expect(validateReviewStep({ requestedQuantity: "2", actualQuantity: "0", amount: "0.00" }, "")).toEqual({ reason: "少出或零出必须填写原因" });
-    expect(validateReviewStep({ requestedQuantity: "2", actualQuantity: "2", amount: "40.00" }, "")).toEqual({});
-  });
-
-  it("omits zero rows from the server payload while preserving Decimal normalization", () => {
-    expect(normalizeAllocations([
-      { id: "zero", approvalLineId: "line-1", warehouseId: "wh-1", batchId: "b1", quantity: "0.0000" },
-      { id: "issued", approvalLineId: "line-1", warehouseId: "wh-1", batchId: "b1", quantity: "01.2000" },
-    ])).toEqual([{ approvalLineId: "line-1", warehouseId: "wh-1", batchId: "b1", quantity: "1.2" }]);
-  });
-
-  it("marks removed or reduced batches invalid without deleting other input", () => {
-    const draft: OutboundDraft = {
-      approvalId: "approval-1",
-      step: "review",
-      reason: "保留原因",
-      allocations: [
-        { id: "allocation-stale", approvalLineId: "line-1", warehouseId: "wh-1", batchId: "old-batch", quantity: "1" },
-        { id: "allocation-over", approvalLineId: "line-1", warehouseId: "wh-2", batchId: "batch-2", quantity: "5" },
-        { id: "allocation-valid", approvalLineId: "line-1", warehouseId: "wh-3", batchId: "batch-3", quantity: "1" },
-      ],
-    };
-    const reconciled = reconcileBatchOptions(draft, [
-      { batchId: "batch-2", warehouseId: "wh-2", itemId: "item-1", remainingQuantity: "4", unitCost: "20" },
-      { batchId: "batch-3", warehouseId: "wh-3", itemId: "item-1", remainingQuantity: "4", unitCost: "20" },
-    ]);
-
-    expect(reconciled.invalidAllocationIds).toEqual(["allocation-stale", "allocation-over"]);
-    expect(reconciled.draft.allocations).toEqual(draft.allocations);
-    expect(reconciled.draft.reason).toBe("保留原因");
-    expect(reconciled.draft.step).toBe("review");
-  });
-
-  it("preserves the current workflow step while reconciling batch options", () => {
-    const draft: OutboundDraft = {
-      approvalId: "approval-1",
-      step: "allocate",
-      reason: "",
-      allocations: [{ id: "allocation-1", approvalLineId: "line-1", warehouseId: "wh-1", batchId: "batch-1", quantity: "" }],
-    };
-
-    const reconciled = reconcileBatchOptions(draft, [
-      { batchId: "batch-1", warehouseId: "wh-1", itemId: "item-1", remainingQuantity: "4", unitCost: "20" },
-    ]);
-
-    expect(reconciled.draft).toEqual(draft);
-    expect(reconciled.invalidAllocationIds).toEqual([]);
-  });
-
-  it("isolates draft keys by encoded user and approval and rejects malformed runtime shapes", () => {
-    expect(outboundDraftKey("user/a", "approval b")).toBe("warehouse.outbound.v1.user%2Fa.approval%20b");
-    expect(isOutboundDraft({ approvalId: "a", step: "allocate", reason: "", allocations: [] })).toBe(true);
-    expect(isOutboundDraft({ approvalId: "a", step: "forged", reason: "", allocations: [] })).toBe(false);
-    expect(isOutboundDraft({ approvalId: "a", step: "review", reason: "", allocations: [{ id: "x" }] })).toBe(false);
-  });
-
-  it("indexes multiple drafts per user and removes only the requested entry", () => {
-    const storage = createStorage();
-    expect(outboundDraftIndexKey("user/a")).toBe("warehouse.outbound.index.v1.user%2Fa");
-
-    addOutboundDraftIndexEntry(storage, "admin-1", { approvalId: "approval-1", weComSpNo: "202608130001" });
-    addOutboundDraftIndexEntry(storage, "admin-1", { approvalId: "approval-2", weComSpNo: "202608130002" });
-    addOutboundDraftIndexEntry(storage, "admin-1", { approvalId: "approval-1", weComSpNo: "202608130001" });
-
-    expect(JSON.parse(storage.getItem(outboundDraftIndexKey("admin-1")) ?? "null")).toEqual({
-      version: 1,
-      userId: "admin-1",
-      value: [
-        { approvalId: "approval-1", weComSpNo: "202608130001" },
-        { approvalId: "approval-2", weComSpNo: "202608130002" },
-      ],
+  it("reports a missing decision without relying on an invalid allocation", () => {
+    expect(validateDecisionStep(approval, [], options)).toEqual({
+      "line:line-wine": "每个审批意向都需要出库决定",
     });
-    removeOutboundDraftIndexEntry(storage, "admin-1", "approval-1");
-    expect(JSON.parse(storage.getItem(outboundDraftIndexKey("admin-1")) ?? "null").value).toEqual([
-      { approvalId: "approval-2", weComSpNo: "202608130002" },
-    ]);
   });
 
-  it("rejects corrupt or cross-user indexes and prunes missing or malformed draft keys", () => {
-    const storage = createStorage();
-    expect(isOutboundDraftIndex([{ approvalId: "a", weComSpNo: "1" }])).toBe(true);
-    expect(isOutboundDraftIndex([{ approvalId: "a" }, null])).toBe(false);
-    storage.setItem(outboundDraftIndexKey("admin-1"), JSON.stringify({ version: 1, userId: "other-user", value: [{ approvalId: "foreign", weComSpNo: "9" }] }));
-    expect(readIndexedOutboundDrafts(storage, "admin-1")).toEqual([]);
+  it("rejects a foreign decision even when every known approval line is valid", () => {
+    const decisions = [...draft().decisions, {
+      approvalLineId: "foreign-line", selectedItemId: "", zeroIssue: true, varianceReason: "该行不属于本审批", allocations: [],
+    }];
+    expect(validateDecisionStep(approval, decisions, options)).toEqual({
+      "line:foreign-line": "出库决定不属于当前审批",
+    });
+  });
 
-    addOutboundDraftIndexEntry(storage, "admin-1", { approvalId: "valid", weComSpNo: "1" });
-    addOutboundDraftIndexEntry(storage, "admin-1", { approvalId: "missing", weComSpNo: "2" });
-    addOutboundDraftIndexEntry(storage, "admin-1", { approvalId: "broken", weComSpNo: "3" });
-    writeSessionDraft(storage, outboundDraftKey("admin-1", "valid"), { version: 1, userId: "admin-1", value: { approvalId: "valid", step: "allocate", reason: "", allocations: [] } });
-    storage.setItem(outboundDraftKey("admin-1", "broken"), "not-json");
+  it("requires zero issue to have no item or allocations and its own reason", () => {
+    const zero = draft({ decisions: [{ ...draft().decisions[0]!, selectedItemId: "", zeroIssue: true, allocations: [], varianceReason: "无库存" }] });
+    expect(validateDecisionStep(approval, zero.decisions, options)).toEqual({});
+    expect(normalizeDecisions(zero.decisions)).toEqual([{ approvalLineId: "line-wine", allocations: [], varianceReason: "无库存" }]);
+    const malformed = draft({ decisions: [{ ...draft().decisions[0]!, zeroIssue: true, varianceReason: "" }] });
+    expect(validateDecisionStep(approval, malformed.decisions, options)).toMatchObject({
+      "line:line-wine": "零出库不能选择标准物品或填写批次分配",
+      "reason:line-wine": "少出或零出必须填写原因",
+    });
+  });
 
-    const indexed = readIndexedOutboundDrafts(storage, "admin-1");
-    expect(indexed).toEqual([{
-      entry: { approvalId: "valid", weComSpNo: "1" },
-      draft: { approvalId: "valid", step: "allocate", reason: "", allocations: [] },
+  it("clears a decision's allocations only when its selected item changes", () => {
+    const decision = draft().decisions[0]!;
+    expect(changeDecisionItem(decision, "item-maotai")).toEqual(decision);
+    expect(changeDecisionItem(decision, "item-wine")).toEqual({ ...decision, selectedItemId: "item-wine", allocations: [] });
+  });
+
+  it("preserves text while marking selections and batches that became stale", () => {
+    const current = draft({ step: "review", decisions: [{
+      ...draft().decisions[0]!, selectedItemId: "item-removed", varianceReason: "保留原因",
+      allocations: [{ id: "stale-batch", warehouseId: "wh-1", batchId: "removed", quantity: "1" }],
+    }] });
+    const reconciled = reconcileOutboundOptions(current, options);
+    expect(reconciled.draft).toEqual(current);
+    expect(reconciled.staleSelectedItemLineIds).toEqual(["line-wine"]);
+    expect(reconciled.staleAllocationIds).toEqual(["stale-batch"]);
+    expect(reconciled.draft.decisions[0]!.varianceReason).toBe("保留原因");
+  });
+
+  it("clears stale markers after restored options without changing user input", () => {
+    const current = draft({ decisions: [{ ...draft().decisions[0]!, varianceReason: "保留原因" }] });
+    const reconciled = reconcileOutboundOptions(current, options);
+    expect(reconciled).toEqual({ draft: current, staleSelectedItemLineIds: [], staleAllocationIds: [] });
+    expect(current.decisions[0]!.varianceReason).toBe("保留原因");
+  });
+
+  it("marks every allocation stale when their combined batch quantity no longer fits", () => {
+    const current = draft({ decisions: [{ ...draft().decisions[0]!, allocations: [
+      { id: "first", warehouseId: "wh-1", batchId: "b1", quantity: "3" },
+      { id: "second", warehouseId: "wh-1", batchId: "b1", quantity: "2" },
+    ] }] });
+
+    expect(reconcileOutboundOptions(current, options).staleAllocationIds).toEqual(["first", "second"]);
+  });
+
+  it("uses the server candidate ranking semantics for local candidate search", () => {
+    const candidates = [
+      { id: "loose", code: "W-3", name: "茅台酒", unit: "瓶", isActive: true, availableQuantity: "1" },
+      { id: "code", code: "FEITIAN-9", name: "白酒", unit: "瓶", isActive: true, availableQuantity: "1" },
+      { id: "exact", code: "W-1", name: "飞天茅台", unit: "瓶", isActive: true, availableQuantity: "1" },
+      { id: "other", code: "Z-1", name: "红酒", unit: "瓶", isActive: true, availableQuantity: "1" },
+    ] as const;
+    expect(searchCandidateItems(candidates, " 飞天茅台 ").map((item) => item.id)).toEqual(["exact", "code", "loose", "other"]);
+    expect(searchCandidateItems(candidates, "").map((item) => item.id)).toEqual(["code", "exact", "loose", "other"]);
+  });
+
+  it("rounds each allocation amount before summing and retains immutable approval display data", () => {
+    const summary = summarizeOutbound(approval, draft().decisions, options);
+    expect(summary.amount).toBe("110.02");
+    expect(summary.lines).toEqual([{
+      approvalLineId: "line-wine", requestedItemName: "飞天茅台", requestedQuantity: "2", unit: "瓶", note: "宴请",
+      selectedItemId: "item-maotai", actualQuantity: "2", difference: "0",
     }]);
-    expect(JSON.parse(storage.getItem(outboundDraftIndexKey("admin-1")) ?? "null").value).toHaveLength(3);
-    pruneOutboundDraftIndex(storage, "admin-1", indexed);
-    expect(JSON.parse(storage.getItem(outboundDraftIndexKey("admin-1")) ?? "null").value).toEqual([{ approvalId: "valid", weComSpNo: "1" }]);
+  });
+
+  it("normalizes only the confirm API fields and never accepts a v1 draft", () => {
+    expect(normalizeDecisions(draft().decisions)).toEqual([{
+      approvalLineId: "line-wine", selectedItemId: "item-maotai",
+      allocations: [{ warehouseId: "wh-1", batchId: "b1", quantity: "1" }, { warehouseId: "wh-2", batchId: "b2", quantity: "1" }],
+    }]);
+    expect(outboundDraftKey("user/a", "approval b")).toBe("warehouse.outbound.v2.user%2Fa.approval%20b");
+    expect(outboundDraftIndexKey("user/a")).toBe("warehouse.outbound.index.v2.user%2Fa");
+    expect(isOutboundDraft({ approvalId: "a", step: "allocate", reason: "", allocations: [] })).toBe(false);
+    expect(isOutboundDraft(draft())).toBe(true);
+  });
+
+  it("returns null for wrong-version, partial, corrupt, or prototype-shaped draft envelopes", () => {
+    const storage = createStorage();
+    const key = outboundDraftKey("admin", "approval-1");
+    for (const raw of [
+      JSON.stringify({ version: 1, userId: "admin", value: draft() }),
+      JSON.stringify({ version: 2, userId: "admin" }),
+      "{not json",
+      '{"version":2,"userId":"admin","value":{"__proto__":{"polluted":true}}}',
+    ]) {
+      storage.setItem(key, raw);
+      expect(readSessionDraft(storage, key, "admin", 2, isOutboundDraft)).toBeNull();
+    }
+    expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
   });
 });

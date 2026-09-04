@@ -14,6 +14,7 @@ import { InMemoryAccountingPeriodStore, type AccountingPeriodStore } from "../..
 import type { ReportEntry } from "../../application/reports/report-query-service.js";
 import { InMemoryWarehouseRepository, type WarehouseRepository } from "../../application/warehouses/warehouse-service.js";
 import { InMemoryApprovalSyncStore, type ApprovalSyncStore } from "../../application/wecom/approval-sync-service.js";
+import type { ApprovalSyncFailureSource } from "../../application/wecom/approval-sync-query-service.js";
 import type { ItemDefinition } from "../../domain/items/item.js";
 import { CANONICAL_ITEM_CATEGORIES } from "../../domain/items/item-category.js";
 import type { WarehouseDefinition } from "../../domain/warehouses/warehouse.js";
@@ -41,6 +42,7 @@ export interface ServerConfig {
   nodeEnv: string;
   approvalSecret?: string;
   approvalTemplateId?: string;
+  approvalTemplateIds: string[];
 }
 
 export interface CoreEntityRecord {
@@ -82,6 +84,7 @@ export interface InventoryReadSource {
   getPendingOutboundCount(): Promise<number>;
   getStocktakeCount(): Promise<number>;
   getAnomalyCount(): Promise<number>;
+  getApprovalExceptionCount(): Promise<number>;
   getUnpostedAdjustmentCount(): Promise<number>;
 }
 
@@ -92,7 +95,7 @@ export interface InventoryPersistence {
   movementStore: MovementStore;
   stocktakeStore: StocktakeStore;
   periodStore: AccountingPeriodStore;
-  approvalSyncStore: ApprovalSyncStore;
+  approvalSyncStore: ApprovalSyncStore & ApprovalSyncFailureSource;
   readSource: InventoryReadSource;
 }
 
@@ -171,6 +174,10 @@ export function readServerConfig(env: Record<string, string | undefined>): Serve
   const databaseUrl = env.DATABASE_URL?.trim() || undefined;
   const approvalSecret = env.WE_COM_APPROVAL_SECRET?.trim() || undefined;
   const approvalTemplateId = env.WE_COM_APPROVAL_TEMPLATE_ID?.trim() || undefined;
+  const approvalTemplateIds = [...new Set([
+    ...(approvalTemplateId ? [approvalTemplateId] : []),
+    ...(env.WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS ?? "").split(",").map((value) => value.trim()).filter(Boolean),
+  ])];
   const localAuthEnabled = isLocalAuthEnabled({
     bypassEnabled: env.LOCAL_AUTH_BYPASS === "true",
     nodeEnv,
@@ -223,6 +230,7 @@ export function readServerConfig(env: Record<string, string | undefined>): Serve
     nodeEnv,
     approvalSecret,
     approvalTemplateId,
+    approvalTemplateIds,
   };
 }
 
@@ -464,8 +472,13 @@ class PrismaAuditService implements AuditService {
   }
 }
 
+function databaseSchemaFromConnectionString(connectionString?: string): string {
+  if (!connectionString) return "public";
+  return new URL(connectionString).searchParams.get("schema") || "public";
+}
+
 function createPrismaClient(connectionString: string): PrismaClient {
-  const schema = new URL(connectionString).searchParams.get("schema") ?? undefined;
+  const schema = databaseSchemaFromConnectionString(connectionString);
   const adapter = new PrismaPg({ connectionString }, schema ? { schema } : undefined);
   return new PrismaClient({ adapter });
 }
@@ -520,7 +533,7 @@ export function createPersistenceAdapters(options: { driver: "memory" } | { driv
           entryStore,
           periodStore,
         ),
-        outboundStore: new InMemoryOutboundStore(state),
+        outboundStore: new InMemoryOutboundStore(state, () => items.list(true)),
         movementStore: new InMemoryMovementStore(state),
         stocktakeStore: new InMemoryStocktakeStore(state),
         periodStore,
@@ -529,9 +542,10 @@ export function createPersistenceAdapters(options: { driver: "memory" } | { driv
           async listBatches() { return entryStore.batches(); },
           async listBalances() { return entryStore.balances(); },
           async listEntries() { return entryStore.ledger().map(({ batchId: _batchId, referenceId: _referenceId, ...entry }) => entry); },
-          async getPendingOutboundCount() { return [...state.approvals.values()].filter((approval) => approval.outboundStatus === "PENDING_OUTBOUND").length; },
+          async getPendingOutboundCount() { return [...state.approvals.values()].filter((approval) => approval.outboundStatus === "PENDING_OUTBOUND" || approval.outboundStatus === "REAPPLY_REQUIRED").length; },
           async getStocktakeCount() { return state.stocktakeAdjustments.length; },
           async getAnomalyCount() { return state.stocktakeAdjustments.filter((adjustment) => adjustment.quantityDelta !== "0").length; },
+          async getApprovalExceptionCount() { return [...state.approvals.values()].filter((approval) => approval.outboundStatus === "REVOCATION_EXCEPTION").length; },
           async getUnpostedAdjustmentCount() { return 0; },
         },
       },
@@ -540,6 +554,7 @@ export function createPersistenceAdapters(options: { driver: "memory" } | { driv
     };
   }
 
+  const databaseSchema = databaseSchemaFromConnectionString(options.connectionString);
   const prisma = options.prisma ?? createPrismaClient(options.connectionString ?? "");
   const reportSource = new PrismaReportSource(prisma);
   const periodStore = new PrismaAccountingPeriodStore(prisma);
@@ -567,7 +582,7 @@ export function createPersistenceAdapters(options: { driver: "memory" } | { driv
     inventory: {
       entryStore: new PrismaInventoryEntryStore(prisma),
       openingStockImportStore: new PrismaOpeningStockImportStore(prisma),
-      outboundStore: new PrismaOutboundStore(prisma),
+      outboundStore: new PrismaOutboundStore(prisma, databaseSchema),
       movementStore: new PrismaMovementStore(prisma),
       stocktakeStore: new PrismaStocktakeStore(prisma),
       periodStore,

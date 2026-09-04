@@ -67,11 +67,20 @@ Prisma 7 在使用 `--from-migrations` 或 `migrate dev` 时还需要单独的 `
 - 正式环境 `SESSION_SECRET` 至少 32 个字符，且不能使用 `.env.example` 中的占位值
 - `LOCAL_AUTH_BYPASS=true` 只在非生产环境生效；正式环境配置为 `true` 会拒绝启动
 - 本地 bypass 只接受 loopback 来源与 loopback/配置主机名
-- 正式环境必须完整提供 `WE_COM_CORP_ID`、`WE_COM_AGENT_ID`、`WE_COM_SECRET`、`WE_COM_CALLBACK_TOKEN`、`WE_COM_ENCODING_AES_KEY` 和唯一的 `WE_COM_APPROVAL_TEMPLATE_ID`；其中模板 ID 必须是非占位值，审批详情的 `template_id` 只有与之严格相等时才会在解析或保存前被接受；EncodingAESKey 必须是企业微信提供的 43 字符无填充 Base64 值，解码后正好 32 字节
+- 正式环境必须完整提供 `WE_COM_CORP_ID`、`WE_COM_AGENT_ID`、`WE_COM_SECRET`、`WE_COM_CALLBACK_TOKEN`、`WE_COM_ENCODING_AES_KEY` 和 `WE_COM_APPROVAL_TEMPLATE_ID`；主模板 ID 必须是非占位值。`WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS` 是可选的旧模板兼容列表，多个 ID 使用英文逗号分隔；运行时会去除首尾空白、空项和重复项，并把主模板放在允许列表首位。审批详情的 `template_id` 只有在该允许列表中时才会在解析或保存前被接受；EncodingAESKey 必须是企业微信提供的 43 字符无填充 Base64 值，解码后正好 32 字节
 - 正式环境的 `WE_COM_ADMIN_IDS` 至少要包含一个非占位的企业微信 UserID，作为首位生产管理员；多个 UserID 使用英文逗号分隔，`WE_COM_FINANCE_IDS` 可选
 - 正式环境的 `API_BASE_URL` 与 `WEB_BASE_URL` 都必须是 HTTPS
 
 `GET /health` 会返回 API 状态、当前持久化驱动和数据库状态。`memory` 模式明确返回 `database.status=not_required`；Prisma 模式执行实时数据库查询，数据库不可用时返回 HTTP 503 和 `database.status=unavailable`。
+
+## 审批模板兼容切换与异常处理
+
+- `WE_COM_APPROVAL_TEMPLATE_ID` 始终指向当前主模板；完成切换后应为新的“审批意向”模板。`WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS` 只填写仍需读取的旧选择器或固定文本模板 ID，可以留空，也可以用英文逗号填写多个值。
+- 发布顺序必须是“兼容代码与数据库迁移先上线，模板后切换”：首次部署保留当前模板为主模板并让旧模板列表为空，确认迁移、API、Web、PostgreSQL 和健康检查正常后，再创建并验收新模板；切换时将新模板设为主模板、原模板移入旧模板列表。不得先切模板再部署代码。
+- 旧审批只有在重新同步后能证明选择器映射、启用物品、审批单位和正整数数量完全一致时才可按锁定物品办理。固定文本、占位或联调物品、映射不一致、模板来源不明、缺少单位或小数数量会进入 `REAPPLY_REQUIRED`（界面显示“需重新申请”），保留原始事实，但禁止选择物品、批次或确认出库。
+- 已经完成、部分出库或零出库结案的审批后来被企业微信撤销时会进入 `REVOCATION_EXCEPTION`（界面显示“撤销异常”）。系统保留原出库决定、库存扣减和流水，不自动回补库存；管理员必须按正式退库或异常处置流程处理。
+- 真实 Secret、回调 Token、EncodingAESKey、会话密钥、数据库凭据和生产环境文件不得写入 Git、日志或交接文档。仓库中的示例配置只能保留占位值；实际值只写入服务器上权限受限的环境文件。
+- 本地测试、类型检查、构建和浏览器测试通过只表示代码就绪，不等于代码已部署、新模板已在企业微信启用，或真实回调/候选项已经完成生产验收。首次模板验收必须停在最终确认之前，不得调用确认接口或扣减库存；实际出库仍需另行明确授权。
 
 ## 企业微信上线前检查清单
 
@@ -80,9 +89,13 @@ Prisma 7 在使用 `--from-migrations` 或 `migrate dev` 时还需要单独的 `
 1. 部署可公网访问的 HTTPS API 域名
 2. 将 `API_BASE_URL` 设置为对应 HTTPS 地址
 3. 在企业微信后台配置回调 URL、Token、EncodingAESKey
-4. 提供真实 `WE_COM_CORP_ID`、`WE_COM_AGENT_ID`、`WE_COM_SECRET`，在 `WE_COM_ADMIN_IDS` 配置首位生产管理员的企业微信 UserID，并将唯一已核对审批模板的 ID 写入 `WE_COM_APPROVAL_TEMPLATE_ID`
-5. 跑迁移与 seed，确认数据库连通
-6. 通过 `/health` 验证实时数据库探针
-7. 用真实企业微信账号完成一次登录与审批回调验收
+4. 提供真实 `WE_COM_CORP_ID`、`WE_COM_AGENT_ID`、`WE_COM_SECRET`，并在 `WE_COM_ADMIN_IDS` 配置首位生产管理员的企业微信 UserID
+5. 先保留当前模板 ID 为 `WE_COM_APPROVAL_TEMPLATE_ID`、让 `WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS` 为空，部署兼容代码并执行迁移与 seed
+6. 通过 `/health` 验证实时数据库探针，并确认既有审批、库存、流水和出库单计数未被迁移改变
+7. 在企业微信创建并人工核对新的“仓库物品领用申请”模板、审批节点、抄送人与回调配置
+8. 将新模板 ID 写入 `WE_COM_APPROVAL_TEMPLATE_ID`，将原模板 ID 写入 `WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS`，再通过部署机制重启并验证两个模板均可接受
+9. 用真实企业微信账号完成一次登录、审批回调和候选/批次选项验收，同时确认不相关模板会被拒绝
+10. 首次验收停在最终确认之前，不调用 `/admin/outbound/confirm`，并复核出库单与 `OUTBOUND` 流水计数没有增加
+11. 验收通过后停止发起旧模板；旧模板 ID 暂留兼容列表用于历史审批读取
 
 在这些条件满足前，不应声称“企业微信生产连接已完成”。

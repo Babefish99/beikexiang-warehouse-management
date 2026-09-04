@@ -52,10 +52,12 @@ function mockApprovalDetail(detail: WeComApprovalPayload): void {
 function approvalDetail(): WeComApprovalPayload {
   return {
     sp_no: "202607230021",
+    template_id: "tpl-selector-v1",
     sp_status: 2,
     apply_time: 1784773140,
     applyer: { userid: "wx-1", name: "Tea Applicant", department: "Operations" },
     contents: [
+      { control: "Text", title: "用途", value: { text: "Field supplies" } },
       {
         control: "Table",
         value: {
@@ -86,6 +88,8 @@ describe("shared inventory memory state", () => {
     vi.stubEnv("WE_COM_SECRET", "test-secret");
     vi.stubEnv("WE_COM_CALLBACK_TOKEN", "test-token");
     vi.stubEnv("WE_COM_ENCODING_AES_KEY", "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG");
+    vi.stubEnv("WE_COM_APPROVAL_TEMPLATE_ID", "tpl-intent-v2");
+    vi.stubEnv("WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS", "tpl-selector-v1");
   });
 
   afterEach(() => {
@@ -212,7 +216,14 @@ describe("shared inventory memory state", () => {
           id: approvalId,
           weComSpNo: "202607230021",
           status: "PENDING_OUTBOUND",
-          lines: [{ id: `${approvalId}-line-1`, itemId: item.id, requestedQuantity: "2" }],
+          lines: [{
+            id: `${approvalId}-line-1`,
+            requestedItemName: "Tea leaves",
+            itemId: item.id,
+            requestedQuantity: "2",
+            unit: "box",
+            legacyResolutionStatus: "EXACT_LOCKED",
+          }],
         },
       ]);
       expect(transfers.json()).toEqual({
@@ -228,10 +239,51 @@ describe("shared inventory memory state", () => {
       expect(outboundOptions.statusCode).toBe(200);
       expect(outboundOptions.json()).toEqual({
         approvalId,
+        lines: [{
+          approvalLineId: `${approvalId}-line-1`,
+          items: [{
+            id: item.id,
+            code: "TEA-0001",
+            name: "Tea leaves",
+            unit: "box",
+            isActive: true,
+            availableQuantity: "8",
+          }],
+        }],
         batches: [
           { batchId, warehouseId: "warehouse-1", itemId: item.id, remainingQuantity: "8", unitCost: "20" },
         ],
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("keeps the old primary selector template on the legacy parser path during the compatible first deployment", async () => {
+    vi.stubEnv("WE_COM_APPROVAL_TEMPLATE_ID", "tpl-selector-v1");
+    vi.stubEnv("WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS", "");
+    const detail = { ...approvalDetail(), template_id: "tpl-selector-v1" };
+    detail.contents = detail.contents.filter((content) => content.control === "Table" || content.title !== "用途");
+    mockApprovalDetail(detail);
+    const app = buildServer();
+
+    try {
+      const cookie = await createAdminSessionCookie(app);
+      await createItem(app, cookie, {
+        code: "TEA-0001",
+        name: "Tea leaves",
+        unit: "box",
+        categoryId: "cat-tea",
+        weComOptionKey: "opt-tea",
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/admin/approvals/202607230021/resync",
+        headers: { cookie },
+      });
+
+      expect(response.statusCode, response.body).toBe(200);
     } finally {
       await app.close();
     }
@@ -282,7 +334,11 @@ describe("shared inventory memory state", () => {
         headers: { cookie },
         payload: {
           approvalId,
-          allocations: [{ approvalLineId, warehouseId: "warehouse-1", batchId, quantity: "2" }],
+          decisions: [{
+            approvalLineId,
+            selectedItemId: item.id,
+            allocations: [{ warehouseId: "warehouse-1", batchId, quantity: "2" }],
+          }],
         },
       });
       expect(confirm.statusCode).toBe(200);

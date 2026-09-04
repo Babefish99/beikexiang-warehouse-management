@@ -54,6 +54,24 @@ describe("item service", () => {
       name: "茶叶",
       unit: "盒",
       weComOptionKey: "acceptance-option",
+      isActive: true,
     });
+  });
+
+  it("returns inactive approval-resolution eligibility after deactivation", async () => {
+    const service = new ItemService(new InMemoryItemRepository());
+    const item = await service.create({ ...input, code: "CY-0001", weComOptionKey: "tea-option" });
+
+    await service.deactivate(item.id);
+
+    expect(service.resolveByWeComOptionKey("tea-option")).toMatchObject({ id: item.id, isActive: false });
+  });
+
+  it("does not resolve an ambiguous approval reference", async () => {
+    const service = new ItemService(new InMemoryItemRepository());
+    await service.create({ ...input, code: "TEA-0001" });
+    await service.create({ ...input, code: "COF-0001", weComOptionKey: "TEA-0001" });
+
+    expect(service.resolveByWeComOptionKey("TEA-0001")).toBeUndefined();
   });
 });

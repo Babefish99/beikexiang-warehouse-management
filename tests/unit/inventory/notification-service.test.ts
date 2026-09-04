@@ -10,6 +10,7 @@ describe("inventory notification service", () => {
       getPeriodStatus: async () => ({ code: "2026-08", status: "OPEN" }),
       getStocktakeNotice: async () => ({ count: 1, href: "/admin/stocktake" }),
       getAnomalyCount: async () => 1,
+      getApprovalExceptionCount: async () => 0,
     });
 
     const notifications = await service.list();
@@ -67,6 +68,7 @@ describe("inventory notification service", () => {
       getPeriodStatus: async () => ({ code: "2026-08", status: "CLOSED" }),
       getStocktakeNotice: async () => ({ count: 0, href: "/admin/stocktake" }),
       getAnomalyCount: async () => 0,
+      getApprovalExceptionCount: async () => 0,
     });
 
     await expect(service.list()).resolves.toEqual([]);
@@ -79,6 +81,7 @@ describe("inventory notification service", () => {
       getPeriodStatus: async () => ({ code: "2026-08", status: "CLOSED" }),
       getStocktakeNotice: async () => ({ count: 0, href: "/admin/stocktake" }),
       getAnomalyCount: async () => 0,
+      getApprovalExceptionCount: async () => 0,
     });
 
     await expect(service.list()).resolves.toEqual([
@@ -98,10 +101,31 @@ describe("inventory notification service", () => {
       getPeriodStatus: async () => ({ code: "2026-08", status: "CLOSED" }),
       getStocktakeNotice: async () => ({ count: 0, href: "/admin/stocktake" }),
       getAnomalyCount: async () => 0,
+      getApprovalExceptionCount: async () => 0,
     });
 
     await expect(service.list()).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ kind: "PENDING_OUTBOUND" })]));
     pending = 0;
     await expect(service.list()).resolves.not.toEqual(expect.arrayContaining([expect.objectContaining({ kind: "PENDING_OUTBOUND" })]));
+  });
+
+  it("emits post-issue approval revocations as a distinct actionable exception", async () => {
+    const service = new NotificationService({
+      getPendingOutboundCount: async () => 0,
+      listLowStock: async () => [],
+      getPeriodStatus: async () => ({ code: "2026-08", status: "CLOSED" }),
+      getStocktakeNotice: async () => ({ count: 0, href: "/admin/stocktake" }),
+      getAnomalyCount: async () => 0,
+      getApprovalExceptionCount: async () => 2,
+    });
+
+    await expect(service.list()).resolves.toEqual([{
+      id: "approval-exception",
+      kind: "APPROVAL_EXCEPTION",
+      title: "审批撤销异常",
+      description: "2 条已结案审批在企业微信被撤销，需要核查并按正式退库流程处理。",
+      href: "/admin/outbound",
+      priority: 1,
+    }]);
   });
 });

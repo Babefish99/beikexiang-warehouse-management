@@ -1,3 +1,5 @@
+// Snapshot immediately before 20260904183000_approval_intent_outbound_decisions.
+// It keeps the pre-migration store contract executable until the later store migration task.
 generator client {
   provider = "prisma-client-js"
 }
@@ -54,63 +56,58 @@ model ItemCategory {
 }
 
 model Item {
-  id                    String                 @id @default(cuid())
-  code                  String                 @unique
-  name                  String
-  specification         String?
-  unit                  String
-  categoryId            String
-  weComOptionKey        String?                @unique
-  minimumStock          Decimal?               @db.Decimal(18, 4)
-  isActive              Boolean                @default(true)
-  createdAt             DateTime               @default(now())
-  updatedAt             DateTime               @updatedAt
-  category              ItemCategory           @relation(fields: [categoryId], references: [id])
-  inboundLines          InboundLine[]
-  approvalLines         ApprovalLine[]
-  outboundDecisionLines OutboundDecisionLine[]
-  procurementBatches    ProcurementBatch[]
-  stockBalances         StockBalance[]
-  outboundAllocations   OutboundAllocation[]
-  transferLines         TransferLine[]
-  returnLines           ReturnLine[]
-  stockAdjustments      StockAdjustment[]
-  ledgerEntries         InventoryLedgerEntry[]
+  id                  String                 @id @default(cuid())
+  code                String                 @unique
+  name                String
+  specification       String?
+  unit                String
+  categoryId          String
+  weComOptionKey      String?                @unique
+  minimumStock        Decimal?               @db.Decimal(18, 4)
+  isActive            Boolean                @default(true)
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+  category            ItemCategory           @relation(fields: [categoryId], references: [id])
+  inboundLines        InboundLine[]
+  approvalLines       ApprovalLine[]
+  procurementBatches  ProcurementBatch[]
+  stockBalances       StockBalance[]
+  outboundAllocations OutboundAllocation[]
+  transferLines       TransferLine[]
+  returnLines         ReturnLine[]
+  stockAdjustments    StockAdjustment[]
+  ledgerEntries       InventoryLedgerEntry[]
 }
 
 model ApprovalRequest {
-  id               String         @id @default(cuid())
-  weComSpNo        String         @unique
-  sourceTemplateId String?
-  applicantUserId  String
-  applicantName    String
-  department       String?
-  purpose          String
-  status           String
-  outboundStatus   String         @default("NONE")
-  cancelReason     String?
-  submittedAt      DateTime
-  approvedAt       DateTime?
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
-  applicant        User           @relation(fields: [applicantUserId], references: [id], onDelete: Restrict)
-  lines            ApprovalLine[]
-  outboundOrder    OutboundOrder?
+  id              String         @id @default(cuid())
+  weComSpNo       String         @unique
+  applicantUserId String
+  applicantName   String
+  department      String?
+  purpose         String
+  status          String
+  outboundStatus  String         @default("NONE")
+  cancelReason    String?
+  submittedAt     DateTime
+  approvedAt      DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  applicant       User           @relation(fields: [applicantUserId], references: [id], onDelete: Restrict)
+  lines           ApprovalLine[]
+  outboundOrder   OutboundOrder?
 }
 
 model ApprovalLine {
-  id                     String                @id @default(cuid())
-  approvalRequestId      String
-  itemId                 String?
-  requestedItemName      String
-  requestedQuantity      Decimal               @db.Decimal(18, 4)
-  unit                   String
-  note                   String?
-  legacyResolutionStatus String
-  createdAt              DateTime              @default(now())
-  approvalRequest        ApprovalRequest       @relation(fields: [approvalRequestId], references: [id], onDelete: Restrict)
-  item                   Item?                 @relation(fields: [itemId], references: [id], onDelete: Restrict)
-  outboundDecisionLine   OutboundDecisionLine?
+  id                  String               @id @default(cuid())
+  approvalRequestId   String
+  itemId              String
+  requestedQuantity   Decimal              @db.Decimal(18, 4)
+  unit                String
+  createdAt           DateTime             @default(now())
+  approvalRequest     ApprovalRequest      @relation(fields: [approvalRequestId], references: [id], onDelete: Restrict)
+  item                Item                 @relation(fields: [itemId], references: [id])
+  outboundAllocations OutboundAllocation[]
 }
 
 model InboundOrder {
@@ -204,54 +201,38 @@ model StockBalance {
 }
 
 model OutboundOrder {
-  id                String                 @id @default(cuid())
-  approvalRequestId String                 @unique
-  orderNo           String                 @unique
+  id                String               @id @default(cuid())
+  approvalRequestId String               @unique
+  orderNo           String               @unique
   status            String
-  actualQuantity    Decimal                @db.Decimal(18, 4)
-  amount            Decimal                @db.Decimal(18, 2)
+  actualQuantity    Decimal              @db.Decimal(18, 4)
+  amount            Decimal              @db.Decimal(18, 2)
   reason            String?
   issuedAt          DateTime?
   operatorId        String
-  createdAt         DateTime               @default(now())
-  approvalRequest   ApprovalRequest        @relation(fields: [approvalRequestId], references: [id], onDelete: Restrict)
-  decisions         OutboundDecisionLine[]
+  createdAt         DateTime             @default(now())
+  approvalRequest   ApprovalRequest      @relation(fields: [approvalRequestId], references: [id], onDelete: Restrict)
   allocations       OutboundAllocation[]
-  returns           ReturnOrder[]          @relation("OriginalOutbound")
-}
-
-model OutboundDecisionLine {
-  id              String               @id @default(cuid())
-  outboundOrderId String
-  approvalLineId  String               @unique
-  selectedItemId  String?
-  actualQuantity  Decimal              @db.Decimal(18, 4)
-  varianceReason  String?
-  decidedBy       String
-  decidedAt       DateTime
-  outboundOrder   OutboundOrder        @relation(fields: [outboundOrderId], references: [id], onDelete: Restrict)
-  approvalLine    ApprovalLine         @relation(fields: [approvalLineId], references: [id], onDelete: Restrict)
-  selectedItem    Item?                @relation(fields: [selectedItemId], references: [id], onDelete: Restrict)
-  allocations     OutboundAllocation[]
+  returns           ReturnOrder[]        @relation("OriginalOutbound")
 }
 
 model OutboundAllocation {
-  id                     String               @id @default(cuid())
-  outboundOrderId        String
-  outboundDecisionLineId String
-  warehouseId            String
-  itemId                 String
-  batchId                String
-  originalQuantity       Decimal              @db.Decimal(18, 4)
-  quantity               Decimal              @db.Decimal(18, 4)
-  unitCost               Decimal              @db.Decimal(18, 4)
-  amount                 Decimal              @db.Decimal(18, 2)
-  outboundOrder          OutboundOrder        @relation(fields: [outboundOrderId], references: [id], onDelete: Restrict)
-  outboundDecisionLine   OutboundDecisionLine @relation(fields: [outboundDecisionLineId], references: [id], onDelete: Restrict)
-  warehouse              Warehouse            @relation(fields: [warehouseId], references: [id])
-  item                   Item                 @relation(fields: [itemId], references: [id])
-  batch                  ProcurementBatch     @relation(fields: [batchId], references: [id])
-  returnLines            ReturnLine[]
+  id               String           @id @default(cuid())
+  outboundOrderId  String
+  approvalLineId   String
+  warehouseId      String
+  itemId           String
+  batchId          String
+  originalQuantity Decimal          @db.Decimal(18, 4)
+  quantity         Decimal          @db.Decimal(18, 4)
+  unitCost         Decimal          @db.Decimal(18, 4)
+  amount           Decimal          @db.Decimal(18, 2)
+  outboundOrder    OutboundOrder    @relation(fields: [outboundOrderId], references: [id], onDelete: Restrict)
+  approvalLine     ApprovalLine     @relation(fields: [approvalLineId], references: [id])
+  warehouse        Warehouse        @relation(fields: [warehouseId], references: [id])
+  item             Item             @relation(fields: [itemId], references: [id])
+  batch            ProcurementBatch @relation(fields: [batchId], references: [id])
+  returnLines      ReturnLine[]
 }
 
 model TransferOrder {

@@ -18,6 +18,7 @@ const BAD_REQUEST_PATTERNS = [
   /already exists/i,
   /cannot /i,
   /does not belong to/i,
+  /unit does not match approval unit/i,
   /unknown item option key/i,
   /must /i,
   /mismatch/i,

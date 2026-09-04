@@ -54,7 +54,7 @@ export class PrismaReportSource implements InventoryReadSource {
   }
 
   getPendingOutboundCount(): Promise<number> {
-    return this.prisma.approvalRequest.count({ where: { outboundStatus: "PENDING_OUTBOUND" } });
+    return this.prisma.approvalRequest.count({ where: { outboundStatus: { in: ["PENDING_OUTBOUND", "REAPPLY_REQUIRED"] } } });
   }
 
   getStocktakeCount(): Promise<number> {
@@ -63,6 +63,10 @@ export class PrismaReportSource implements InventoryReadSource {
 
   getAnomalyCount(): Promise<number> {
     return this.prisma.stockAdjustment.count({ where: { quantity: { not: 0 } } });
+  }
+
+  getApprovalExceptionCount(): Promise<number> {
+    return this.prisma.approvalRequest.count({ where: { outboundStatus: "REVOCATION_EXCEPTION" } });
   }
 
   getUnpostedAdjustmentCount(): Promise<number> {

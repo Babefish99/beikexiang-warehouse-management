@@ -1,6 +1,6 @@
 import type { LowStockItem } from "./alert-service.js";
 
-export type InventoryNotificationKind = "PENDING_OUTBOUND" | "LOW_STOCK" | "STOCKTAKE" | "PERIOD_CLOSE" | "ANOMALY";
+export type InventoryNotificationKind = "PENDING_OUTBOUND" | "APPROVAL_EXCEPTION" | "LOW_STOCK" | "STOCKTAKE" | "PERIOD_CLOSE" | "ANOMALY";
 
 export interface InventoryNotification {
   id: string;
@@ -17,18 +17,20 @@ interface NotificationDependencies {
   getPeriodStatus(): Promise<{ code: string; status: "OPEN" | "CLOSED" }>;
   getStocktakeNotice(): Promise<{ count: number; href: string }>;
   getAnomalyCount(): Promise<number>;
+  getApprovalExceptionCount(): Promise<number>;
 }
 
 export class NotificationService {
   constructor(private readonly dependencies: NotificationDependencies) {}
 
   async list(): Promise<InventoryNotification[]> {
-    const [pendingOutboundCount, lowStockItems, period, stocktakeNotice, anomalyCount] = await Promise.all([
+    const [pendingOutboundCount, lowStockItems, period, stocktakeNotice, anomalyCount, approvalExceptionCount] = await Promise.all([
       this.dependencies.getPendingOutboundCount(),
       this.dependencies.listLowStock(),
       this.dependencies.getPeriodStatus(),
       this.dependencies.getStocktakeNotice(),
       this.dependencies.getAnomalyCount(),
+      this.dependencies.getApprovalExceptionCount(),
     ]);
 
     const notifications: InventoryNotification[] = [];
@@ -39,6 +41,17 @@ export class NotificationService {
         kind: "PENDING_OUTBOUND",
         title: "待出库审批",
         description: `${pendingOutboundCount} 条已通过的领用审批待管理员确认出库。`,
+        href: "/admin/outbound",
+        priority: 1,
+      });
+    }
+
+    if (approvalExceptionCount > 0) {
+      notifications.push({
+        id: "approval-exception",
+        kind: "APPROVAL_EXCEPTION",
+        title: "审批撤销异常",
+        description: `${approvalExceptionCount} 条已结案审批在企业微信被撤销，需要核查并按正式退库流程处理。`,
         href: "/admin/outbound",
         priority: 1,
       });

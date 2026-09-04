@@ -45,7 +45,7 @@ describe("administrator approval resynchronization route", () => {
       },
       parser,
       store,
-      approvalTemplateId: "tpl-approved-requisition",
+      approvalTemplateIds: ["tpl-approved-requisition", "tpl-selector-v1"],
     });
     registerApprovalResyncRoute(app, { syncService });
 

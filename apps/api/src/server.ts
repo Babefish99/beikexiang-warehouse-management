@@ -22,13 +22,15 @@ import { PeriodCloseService, type AccountingPeriodStore } from "./application/pe
 import { InventoryReportService, TransactionReportService } from "./application/reports/report-query-service.js";
 import { WarehouseService } from "./application/warehouses/warehouse-service.js";
 import { ApprovalSyncService } from "./application/wecom/approval-sync-service.js";
-import { createPersistenceAdapters, readServerConfig } from "./infrastructure/db/runtime.js";
+import { ApprovalSyncQueryService } from "./application/wecom/approval-sync-query-service.js";
+import { createPersistenceAdapters, readServerConfig, type ServerConfig } from "./infrastructure/db/runtime.js";
 import { ExcelOpeningStockWorkbookParser } from "./infrastructure/import/excel-opening-stock-workbook-parser.js";
 import { HttpApprovalGateway } from "./infrastructure/wecom/approval-gateway.js";
-import { ApprovalParser } from "./infrastructure/wecom/approval-parser.js";
+import { ApprovalParser, type ApprovalItemResolver } from "./infrastructure/wecom/approval-parser.js";
 import { WeComOAuthClient } from "./infrastructure/wecom/oauth-client.js";
 import { WeComSignatureVerifier } from "./infrastructure/wecom/signature-verifier.js";
 import { registerApprovalResyncRoute } from "./routes/admin/approvals-resync.js";
+import { registerApprovalSyncFailureRoutes } from "./routes/admin/approval-sync-failures.js";
 import "./routes/admin/admin-request-context.js";
 import { registerInboundRoutes } from "./routes/admin/inbound.js";
 import { registerItemRoutes } from "./routes/admin/items.js";
@@ -78,6 +80,17 @@ function serializeCookie(name: string, value: string, options: { httpOnly: boole
 
 interface BuildServerOptions {
   periodStore?: AccountingPeriodStore;
+}
+
+export function createApprovalParser(
+  resolveItem: ApprovalItemResolver,
+  config: Pick<ServerConfig, "approvalTemplateId" | "approvalTemplateIds">,
+): ApprovalParser {
+  const intentTemplateId = config.approvalTemplateId
+    && config.approvalTemplateIds.some((templateId) => templateId !== config.approvalTemplateId)
+    ? config.approvalTemplateId
+    : undefined;
+  return new ApprovalParser(resolveItem, intentTemplateId);
 }
 
 export function buildServer(options: BuildServerOptions = {}) {
@@ -154,6 +167,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     },
     getStocktakeNotice: async () => ({ count: await readSource.getStocktakeCount(), href: "/admin/stocktake" }),
     getAnomalyCount: () => readSource.getAnomalyCount(),
+    getApprovalExceptionCount: () => readSource.getApprovalExceptionCount(),
   });
   const listReportEntries = () => readSource.listEntries();
   const inventoryReportService = new InventoryReportService(listReportEntries);
@@ -164,7 +178,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     secret: process.env.WE_COM_SECRET ?? "",
     redirectUri: `${config.apiBaseUrl}/auth/wecom/callback`,
   });
-  const approvalParser = new ApprovalParser((optionKey) => itemService.resolveByWeComOptionKey(optionKey));
+  const approvalParser = createApprovalParser((optionKey) => itemService.resolveByWeComOptionKey(optionKey), config);
   const approvalSyncService = new ApprovalSyncService({
     gateway: new HttpApprovalGateway({
       corpId: process.env.WE_COM_CORP_ID ?? "",
@@ -177,8 +191,9 @@ export function buildServer(options: BuildServerOptions = {}) {
       },
     },
     store: inventoryPersistence.approvalSyncStore,
-    approvalTemplateId: config.approvalTemplateId,
+    approvalTemplateIds: config.approvalTemplateIds,
   });
+  const approvalSyncQueryService = new ApprovalSyncQueryService(inventoryPersistence.approvalSyncStore);
   const signatureVerifier = new WeComSignatureVerifier({
     token: process.env.WE_COM_CALLBACK_TOKEN ?? "",
     encodingAesKey: process.env.WE_COM_ENCODING_AES_KEY ?? "",
@@ -324,6 +339,7 @@ export function buildServer(options: BuildServerOptions = {}) {
   });
   registerApprovalCallbackRoute(app, { verifier: signatureVerifier, syncService: approvalSyncService });
   registerApprovalResyncRoute(app, { syncService: approvalSyncService });
+  registerApprovalSyncFailureRoutes(app, { queryService: approvalSyncQueryService });
   registerItemRoutes(app, { itemService });
   registerWarehouseRoutes(app, { warehouseService });
   registerInboundRoutes(app, { inboundService });
