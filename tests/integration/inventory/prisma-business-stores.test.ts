@@ -383,7 +383,12 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     expect((await prisma.stockBalance.findFirstOrThrow({ where: { batchId: stock.batchId } })).remainingQuantity.toString()).toBe("5");
     expect((await prisma.procurementBatch.findUniqueOrThrow({ where: { id: stock.batchId } })).remainingQuantity.toString()).toBe("5");
     const storedOutbound = await prisma.outboundOrder.findUniqueOrThrow({ where: { id: result.id }, include: { allocations: true } });
+    const [storedAllocationLink] = await prisma.$queryRawUnsafe<Array<{ approvalLineId: string }>>(
+      `SELECT "approvalLineId" FROM "${schemaName}"."OutboundAllocation" WHERE "outboundOrderId" = $1`,
+      result.id,
+    );
     expect(storedOutbound.orderNo).toMatch(/^OUT-/);
+    expect(storedAllocationLink?.approvalLineId).toBe(approval.lines[0]!.id);
     expect(storedOutbound.allocations.map((allocation) => ({ quantity: allocation.quantity.toString(), originalQuantity: allocation.originalQuantity.toString() }))).toEqual([
       { quantity: "5", originalQuantity: "5" },
     ]);
