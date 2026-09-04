@@ -62,6 +62,17 @@ export interface InventoryIssuedAllocationState {
   unitCost: string;
 }
 
+export interface InventoryOutboundDecisionState {
+  id: string;
+  outboundOrderId: string;
+  approvalLineId: string;
+  selectedItemId?: string;
+  actualQuantity: string;
+  varianceReason?: string;
+  decidedBy: string;
+  decidedAt: string;
+}
+
 export interface InventoryStocktakeAdjustmentState {
   stocktakeId: string;
   periodCode: string;
@@ -83,6 +94,7 @@ export interface InventoryMemoryState {
   ledger: InventoryLedgerEntry[];
   approvals: Map<string, InventoryApprovalState>;
   approvalsBySpNo: Map<string, string>;
+  outboundDecisions: Map<string, InventoryOutboundDecisionState>;
   issuedAllocations: Map<string, InventoryIssuedAllocationState>;
   returnedQuantities: Map<string, string>;
   stocktakeAdjustments: InventoryStocktakeAdjustmentState[];
@@ -101,6 +113,7 @@ export function createInventoryMemoryState(): InventoryMemoryState {
     ledger: [],
     approvals: new Map(),
     approvalsBySpNo: new Map(),
+    outboundDecisions: new Map(),
     issuedAllocations: new Map(),
     returnedQuantities: new Map(),
     stocktakeAdjustments: [],

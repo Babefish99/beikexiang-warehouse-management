@@ -222,7 +222,15 @@ describe("approval synchronization service", () => {
         id: "approval-202607230021",
         weComSpNo: "202607230021",
         status: "PENDING_OUTBOUND",
-        lines: [{ id: "approval-202607230021-line-1", itemId: "item-tea", requestedQuantity: "2" }],
+        lines: [{
+          id: "approval-202607230021-line-1",
+          requestedItemName: "Tea leaves",
+          itemId: "item-tea",
+          requestedQuantity: "2",
+          unit: "box",
+          note: undefined,
+          legacyResolutionStatus: "EXACT_LOCKED",
+        }],
       },
     ]);
   });

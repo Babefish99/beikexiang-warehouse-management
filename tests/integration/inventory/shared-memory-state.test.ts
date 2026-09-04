@@ -215,7 +215,14 @@ describe("shared inventory memory state", () => {
           id: approvalId,
           weComSpNo: "202607230021",
           status: "PENDING_OUTBOUND",
-          lines: [{ id: `${approvalId}-line-1`, itemId: item.id, requestedQuantity: "2" }],
+          lines: [{
+            id: `${approvalId}-line-1`,
+            requestedItemName: "Tea leaves",
+            itemId: item.id,
+            requestedQuantity: "2",
+            unit: "box",
+            legacyResolutionStatus: "EXACT_LOCKED",
+          }],
         },
       ]);
       expect(transfers.json()).toEqual({
@@ -231,6 +238,17 @@ describe("shared inventory memory state", () => {
       expect(outboundOptions.statusCode).toBe(200);
       expect(outboundOptions.json()).toEqual({
         approvalId,
+        lines: [{
+          approvalLineId: `${approvalId}-line-1`,
+          items: [{
+            id: item.id,
+            code: "TEA-0001",
+            name: "Tea leaves",
+            unit: "box",
+            isActive: true,
+            availableQuantity: "8",
+          }],
+        }],
         batches: [
           { batchId, warehouseId: "warehouse-1", itemId: item.id, remainingQuantity: "8", unitCost: "20" },
         ],
