@@ -30,6 +30,24 @@ describe("atomic stock balance operations", () => {
     expect(stock.get("warehouse-1", "batch-1")?.remainingQuantity).toBe("7");
   });
 
+  it("leaves every batch unchanged when one outbound balance snapshot is stale", () => {
+    const stock = createInMemoryStockBalanceRepository();
+    stock.seed({ batchId: "batch-1", warehouseId: "warehouse-1", itemId: "item-1", remainingQuantity: "5", unitCost: "12.50" });
+    stock.seed({ batchId: "batch-2", warehouseId: "warehouse-1", itemId: "item-1", remainingQuantity: "5", unitCost: "12.50" });
+    const service = createInventoryTransactionService({ periodService: createAccountingPeriodService(), stockBalanceRepository: stock });
+
+    expect(() => service.recordOutbound({
+      period: createAccountingPeriod({ code: "2026-08" }),
+      approvalLine: { id: "line-1", approvalId: "approval-1", itemId: "item-1", requestedQuantity: "4", unit: "box" },
+      allocations: [
+        { warehouseId: "warehouse-1", itemId: "item-1", batchId: "batch-1", quantity: "2", remainingQuantity: "5", unitCost: "12.50" },
+        { warehouseId: "warehouse-1", itemId: "item-1", batchId: "batch-2", quantity: "2", remainingQuantity: "4", unitCost: "12.50" },
+      ],
+    })).toThrowError(/stock balance changed.*retry/i);
+    expect(stock.get("warehouse-1", "batch-1")?.remainingQuantity).toBe("5");
+    expect(stock.get("warehouse-1", "batch-2")?.remainingQuantity).toBe("5");
+  });
+
   it("moves the same batch quantity and cost between warehouses atomically", () => {
     const stock = createInMemoryStockBalanceRepository();
     stock.seed({ batchId: "batch-1", warehouseId: "warehouse-1", itemId: "item-1", remainingQuantity: "5", unitCost: "12.50" });

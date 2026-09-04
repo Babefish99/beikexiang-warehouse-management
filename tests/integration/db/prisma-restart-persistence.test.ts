@@ -7,7 +7,9 @@ import { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { buildServer } from "../../../apps/api/src/server.js";
+import { OutboundService } from "../../../apps/api/src/application/inventory/outbound-service.js";
 import { PrismaOpeningStockImportStore } from "../../../apps/api/src/infrastructure/db/prisma-opening-stock-import-store.js";
+import { PrismaOutboundStore } from "../../../apps/api/src/infrastructure/db/prisma-outbound-store.js";
 import { seedStructuralData } from "../../../prisma/seed.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -17,6 +19,7 @@ const preserveSchema = process.env.TASK4_PRESERVE_TEST_SCHEMA === "true";
 function schemaUrl(connectionString: string): string {
   const url = new URL(connectionString);
   url.searchParams.set("schema", schemaName);
+  url.searchParams.set("options", `-c search_path=${schemaName}`);
   return url.toString();
 }
 
@@ -46,6 +49,7 @@ function mockRestartApproval(): void {
       return new Response(JSON.stringify({
         info: {
           sp_no: "2026081100000006",
+          template_id: "task4-legacy-template",
           sp_status: 2,
           apply_time: Math.floor(Date.now() / 1000),
           applyer: { userid: "task4-restart-applicant", name: "Restart Applicant" },
@@ -83,6 +87,7 @@ describe.skipIf(!databaseUrl)("Prisma application restart persistence", () => {
         "prisma/migrations/20260811171500_stocktake_quantity_snapshots/migration.sql",
         "prisma/migrations/20260814110000_inbound_batch_sequences/migration.sql",
         "prisma/migrations/20260824170000_opening_stock_import/migration.sql",
+        "prisma/migrations/20260904183000_approval_intent_outbound_decisions/migration.sql",
       ]) {
         await migrationClient.query(readFileSync(resolve(process.cwd(), migration), "utf8"));
       }
@@ -119,6 +124,8 @@ describe.skipIf(!databaseUrl)("Prisma application restart persistence", () => {
     vi.stubEnv("WE_COM_CORP_ID", "wx-task4-corp");
     vi.stubEnv("WE_COM_AGENT_ID", "1000001");
     vi.stubEnv("WE_COM_SECRET", "task4-secret");
+    vi.stubEnv("WE_COM_APPROVAL_TEMPLATE_ID", "task4-intent-template");
+    vi.stubEnv("WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS", "task4-legacy-template");
     vi.stubEnv("WE_COM_CALLBACK_TOKEN", "task4-token");
     vi.stubEnv("WE_COM_ENCODING_AES_KEY", "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG");
 
@@ -222,23 +229,32 @@ describe.skipIf(!databaseUrl)("Prisma application restart persistence", () => {
           outboundStatus: "PENDING_OUTBOUND",
           submittedAt: new Date(),
           approvedAt: new Date(),
-          lines: { create: { id: "task4-approved-line", itemId, requestedQuantity: "5", unit: "box" } },
+          lines: {
+            create: {
+              id: "task4-approved-line",
+              itemId,
+              requestedItemName: "Task 4 durable item",
+              requestedQuantity: "5",
+              unit: "box",
+              legacyResolutionStatus: "EXACT_LOCKED",
+            },
+          },
         },
         include: { lines: true },
       });
       approvalId = approval.id;
 
-      const outboundResponse = await firstApp.inject({
-        method: "POST",
-        url: "/admin/outbound/confirm",
-        headers: { cookie },
-        payload: {
-          approvalId,
-          allocations: [{ approvalLineId: approval.lines[0]!.id, warehouseId: "warehouse-1", batchId, quantity: "5" }],
-        },
+      const outbound = await new OutboundService(new PrismaOutboundStore(fixturePrisma)).confirm({
+        approvalId,
+        operatorId: "local-admin",
+        decisions: [{
+          approvalLineId: approval.lines[0]!.id,
+          selectedItemId: itemId,
+          allocations: [{ warehouseId: "warehouse-1", batchId, quantity: "5" }],
+        }],
       });
-      expect(outboundResponse.statusCode).toBe(200);
-      const outboundId = outboundResponse.json<{ id: string }>().id;
+      expect(outbound).toMatchObject({ status: "COMPLETED", actualQuantity: "5", amount: "50.00" });
+      const outboundId = outbound.id;
       outboundAllocationId = (await fixturePrisma.outboundAllocation.findFirstOrThrow({ where: { outboundOrderId: outboundId } })).id;
 
       const transferResponse = await firstApp.inject({
@@ -294,17 +310,63 @@ describe.skipIf(!databaseUrl)("Prisma application restart persistence", () => {
           outboundStatus: "PENDING_OUTBOUND",
           submittedAt: new Date(),
           approvedAt: new Date(),
-          lines: { create: { id: "task4-pending-line", itemId, requestedQuantity: "1", unit: "box" } },
+          lines: {
+            create: {
+              id: "task4-pending-line",
+              itemId,
+              requestedItemName: "Task 4 durable item",
+              requestedQuantity: "1",
+              unit: "box",
+              legacyResolutionStatus: "EXACT_LOCKED",
+            },
+          },
         },
       });
     } finally {
       await firstApp.close();
     }
 
+    await fixturePrisma.$disconnect();
+    fixturePrisma = createClient(isolatedDatabaseUrl);
     mockRestartApproval();
     const secondApp = buildServer();
     try {
       const cookie = await createAdminSessionCookie(secondApp);
+      const reconstructedOutbound = await fixturePrisma.approvalRequest.findUniqueOrThrow({
+        where: { id: approvalId },
+        include: {
+          lines: true,
+          outboundOrder: {
+            include: {
+              decisions: { include: { allocations: true } },
+              allocations: true,
+            },
+          },
+        },
+      });
+      expect(reconstructedOutbound).toMatchObject({
+        lines: [{
+          id: "task4-approved-line",
+          requestedItemName: "Task 4 durable item",
+          unit: "box",
+          itemId,
+          legacyResolutionStatus: "EXACT_LOCKED",
+        }],
+        outboundOrder: {
+          operatorId: "local-admin",
+          decisions: [{
+            approvalLineId: "task4-approved-line",
+            selectedItemId: itemId,
+            varianceReason: null,
+            decidedBy: "local-admin",
+            allocations: [expect.objectContaining({ warehouseId: "warehouse-1", itemId, batchId })],
+          }],
+          allocations: [expect.objectContaining({ warehouseId: "warehouse-1", itemId, batchId })],
+        },
+      });
+      expect(reconstructedOutbound.lines[0]!.requestedQuantity.toString()).toBe("5");
+      expect(reconstructedOutbound.outboundOrder!.decisions[0]!.actualQuantity.toString()).toBe("5");
+      expect(reconstructedOutbound.outboundOrder!.allocations[0]!.quantity.toString()).toBe("5");
       const resync = await secondApp.inject({ method: "POST", url: "/admin/approvals/2026081100000006/resync", headers: { cookie } });
       expect(resync.statusCode, resync.body).toBe(200);
       expect(resync.json()).toMatchObject({ created: true, status: "PENDING_OUTBOUND" });

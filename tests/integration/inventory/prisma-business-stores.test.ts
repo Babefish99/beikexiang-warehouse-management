@@ -50,6 +50,7 @@ async function applyMigrations(client: PoolClient, paths: string[]) {
 function schemaUrl(connectionString: string): string {
   const url = new URL(connectionString);
   url.searchParams.set("schema", schemaName);
+  url.searchParams.set("options", `-c search_path=${schemaName}`);
   return url.toString();
 }
 
@@ -245,6 +246,66 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     });
   }
 
+  async function seedLegacyIssuedAllocation(input: {
+    approvalId: string;
+    approvalLineId: string;
+    warehouseId: string;
+    batchId: string;
+    quantity: string;
+  }) {
+    const outboundOrderId = `task3-outbound-${crypto.randomUUID()}`;
+    const outboundAllocationId = `task3-allocation-${crypto.randomUUID()}`;
+    const amount = new Prisma.Decimal(input.quantity).mul("12.5").toFixed(2);
+    await prisma.$transaction(async (transaction) => {
+      await transaction.stockBalance.updateMany({
+        where: { warehouseId: input.warehouseId, itemId, batchId: input.batchId },
+        data: { remainingQuantity: { decrement: input.quantity } },
+      });
+      await transaction.procurementBatch.update({
+        where: { id: input.batchId },
+        data: { remainingQuantity: { decrement: input.quantity } },
+      });
+      await transaction.approvalRequest.update({
+        where: { id: input.approvalId },
+        data: { outboundStatus: "COMPLETED" },
+      });
+      await transaction.$executeRawUnsafe(
+        `INSERT INTO "${schemaName}"."OutboundOrder" ("id", "approvalRequestId", "orderNo", "status", "actualQuantity", "amount", "issuedAt", "operatorId", "createdAt") VALUES ($1, $2, $3, 'COMPLETED', $4, $5, NOW(), 'task3-operator', NOW())`,
+        outboundOrderId,
+        input.approvalId,
+        `OUT-${outboundOrderId}`,
+        input.quantity,
+        amount,
+      );
+      await transaction.$executeRawUnsafe(
+        `INSERT INTO "${schemaName}"."OutboundAllocation" ("id", "outboundOrderId", "approvalLineId", "warehouseId", "itemId", "batchId", "originalQuantity", "quantity", "unitCost", "amount") VALUES ($1, $2, $3, $4, $5, $6, $7, $7, 12.5, $8)`,
+        outboundAllocationId,
+        outboundOrderId,
+        input.approvalLineId,
+        input.warehouseId,
+        itemId,
+        input.batchId,
+        input.quantity,
+        amount,
+      );
+      await transaction.inventoryLedgerEntry.create({
+        data: {
+          warehouseId: input.warehouseId,
+          itemId,
+          batchId: input.batchId,
+          type: "OUTBOUND",
+          quantity: new Prisma.Decimal(input.quantity).negated().toString(),
+          unitCost: "12.5",
+          amount,
+          referenceType: "OUTBOUND_ORDER",
+          referenceId: outboundOrderId,
+          occurredAt: new Date(),
+        },
+      });
+    });
+    return { outboundOrderId, outboundAllocationId };
+  }
+
   function openingStockService() {
     return new OpeningStockService(new PrismaInventoryEntryStore(prisma), {
       warehouseService: { list: () => prisma.warehouse.findMany() },
@@ -371,76 +432,6 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     ]);
   });
 
-  it("commits outbound stock, allocation, ledger, and approval closure in one transaction", async () => {
-    const stock = await recordStock({ batchNo: "TASK3-OUTBOUND" });
-    const approval = await createApproval("5");
-    const service = new OutboundService(new PrismaOutboundStore(prisma));
-
-    const result = await service.confirm({
-      approvalId: approval.id,
-      allocations: [{ approvalLineId: approval.lines[0]!.id, warehouseId: "warehouse-1", batchId: stock.batchId, quantity: "5" }],
-    });
-
-    expect(result).toMatchObject({ approvalId: approval.id, status: "COMPLETED", actualQuantity: "5", amount: "62.50" });
-    expect((await prisma.stockBalance.findFirstOrThrow({ where: { batchId: stock.batchId } })).remainingQuantity.toString()).toBe("5");
-    expect((await prisma.procurementBatch.findUniqueOrThrow({ where: { id: stock.batchId } })).remainingQuantity.toString()).toBe("5");
-    const storedOutbound = await prisma.outboundOrder.findUniqueOrThrow({ where: { id: result.id }, include: { allocations: true } });
-    const [storedAllocationLink] = await prisma.$queryRawUnsafe<Array<{ approvalLineId: string }>>(
-      `SELECT "approvalLineId" FROM "${schemaName}"."OutboundAllocation" WHERE "outboundOrderId" = $1`,
-      result.id,
-    );
-    expect(storedOutbound.orderNo).toMatch(/^OUT-/);
-    expect(storedAllocationLink?.approvalLineId).toBe(approval.lines[0]!.id);
-    expect(storedOutbound.allocations.map((allocation) => ({ quantity: allocation.quantity.toString(), originalQuantity: allocation.originalQuantity.toString() }))).toEqual([
-      { quantity: "5", originalQuantity: "5" },
-    ]);
-    await expect(prisma.approvalRequest.findUniqueOrThrow({ where: { id: approval.id } })).resolves.toMatchObject({ outboundStatus: "COMPLETED" });
-    const outboundLedger = await prisma.inventoryLedgerEntry.findFirstOrThrow({ where: { referenceId: result.id } });
-    expect({ type: outboundLedger.type, quantity: outboundLedger.quantity.toString() }).toEqual({ type: "OUTBOUND", quantity: "-5" });
-  });
-
-  it("rejects a stale outbound balance without partially closing the approval", async () => {
-    const stock = await recordStock({ batchNo: "TASK3-STALE" });
-    const approvalRecord = await createApproval("5");
-    const store = new PrismaOutboundStore(prisma);
-    const approval = await store.getApproval(approvalRecord.id);
-    const batches = await store.listBatches([itemId]);
-    const validation = new OutboundAllocator().validate({
-      lines: approval!.lines,
-      batches,
-      allocations: [{ approvalLineId: approvalRecord.lines[0]!.id, warehouseId: "warehouse-1", batchId: stock.batchId, quantity: "5" }],
-    });
-    await prisma.stockBalance.updateMany({ where: { batchId: stock.batchId }, data: { remainingQuantity: "9" } });
-    await prisma.procurementBatch.update({ where: { id: stock.batchId }, data: { remainingQuantity: "9" } });
-
-    await expect(store.commitOutbound(approval!, validation)).rejects.toThrow(/stock balance changed.*retry/i);
-    await expect(prisma.outboundOrder.count()).resolves.toBe(0);
-    await expect(prisma.inventoryLedgerEntry.count({ where: { type: "OUTBOUND" } })).resolves.toBe(0);
-    await expect(prisma.approvalRequest.findUniqueOrThrow({ where: { id: approvalRecord.id } })).resolves.toMatchObject({ outboundStatus: "PENDING_OUTBOUND" });
-  });
-
-  it("conditionally decrements a shared batch once for split allocations and supports zero issue", async () => {
-    const stock = await recordStock({ batchNo: "TASK3-SPLIT" });
-    const approval = await createApproval("5");
-    const service = new OutboundService(new PrismaOutboundStore(prisma));
-
-    await expect(service.confirm({
-      approvalId: approval.id,
-      allocations: [
-        { approvalLineId: approval.lines[0]!.id, warehouseId: "warehouse-1", batchId: stock.batchId, quantity: "2" },
-        { approvalLineId: approval.lines[0]!.id, warehouseId: "warehouse-1", batchId: stock.batchId, quantity: "3" },
-      ],
-    })).resolves.toMatchObject({ status: "COMPLETED", actualQuantity: "5" });
-    expect((await prisma.stockBalance.findFirstOrThrow({ where: { batchId: stock.batchId } })).remainingQuantity.toString()).toBe("5");
-
-    const zeroApproval = await createApproval("1");
-    await expect(service.confirm({ approvalId: zeroApproval.id, allocations: [], reason: "no stock available" })).resolves.toMatchObject({
-      status: "UNAVAILABLE",
-      actualQuantity: "0",
-      amount: "0.00",
-    });
-  });
-
   it("persists transfers and cumulative returns while preserving the batch cost", async () => {
     const stock = await recordStock({ batchNo: "TASK3-MOVEMENT" });
     const movementStore = new PrismaMovementStore(prisma);
@@ -466,16 +457,19 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     expect(transferLedger.map((entry) => ({ type: entry.type, quantity: entry.quantity.toString() }))).toEqual([{ type: "TRANSFER_IN", quantity: "4" }, { type: "TRANSFER_OUT", quantity: "-4" }]);
 
     const approval = await createApproval("3");
-    const outbound = await new OutboundService(new PrismaOutboundStore(prisma)).confirm({
+    const outbound = await seedLegacyIssuedAllocation({
       approvalId: approval.id,
-      allocations: [{ approvalLineId: approval.lines[0]!.id, warehouseId: "warehouse-2", batchId: stock.batchId, quantity: "3" }],
+      approvalLineId: approval.lines[0]!.id,
+      warehouseId: "warehouse-2",
+      batchId: stock.batchId,
+      quantity: "3",
     });
-    const allocation = await prisma.outboundAllocation.findFirstOrThrow({ where: { outboundOrderId: outbound.id } });
+    const allocation = await prisma.outboundAllocation.findFirstOrThrow({ where: { id: outbound.outboundAllocationId } });
     const returned = await new ReturnService(movementStore).create({ outboundAllocationId: allocation.id, quantity: "2", reason: "unused" });
 
     expect(returned).toMatchObject({ status: "COMPLETED", unitCost: "12.5" });
     const storedReturn = await prisma.returnOrder.findUniqueOrThrow({ where: { id: returned.returnId }, include: { lines: true } });
-    expect(storedReturn).toMatchObject({ returnNo: expect.stringMatching(/^RET-/), originalOutboundId: outbound.id });
+    expect(storedReturn).toMatchObject({ returnNo: expect.stringMatching(/^RET-/), originalOutboundId: outbound.outboundOrderId });
     expect(storedReturn.lines.map((line) => ({ outboundAllocationId: line.outboundAllocationId, quantity: line.quantity.toString(), unitCost: line.unitCost.toString() }))).toEqual([{ outboundAllocationId: allocation.id, quantity: "2", unitCost: "12.5" }]);
     await expect(new ReturnService(movementStore).create({ outboundAllocationId: allocation.id, quantity: "2", reason: "too much" })).rejects.toThrow("return quantity exceeds original issued quantity");
   });
@@ -534,12 +528,14 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     const movementStore = new PrismaMovementStore(prisma);
     const outboundService = new OutboundService(new PrismaOutboundStore(prisma));
     const issuedApproval = await createApproval("2");
-    const issued = await outboundService.confirm({
+    const issued = await seedLegacyIssuedAllocation({
       approvalId: issuedApproval.id,
-      allocations: [{ approvalLineId: issuedApproval.lines[0]!.id, warehouseId: "warehouse-1", batchId: stock.batchId, quantity: "2" }],
+      approvalLineId: issuedApproval.lines[0]!.id,
+      warehouseId: "warehouse-1",
+      batchId: stock.batchId,
+      quantity: "2",
     });
-    const allocation = await prisma.outboundAllocation.findFirstOrThrow({ where: { outboundOrderId: issued.id } });
-    const confirmApproval = await createApproval("1");
+    const allocation = await prisma.outboundAllocation.findFirstOrThrow({ where: { id: issued.outboundAllocationId } });
     const cancelApproval = await createApproval("1");
     const periodCode = new Date().toISOString().slice(0, 7);
     await prisma.accountingPeriod.upsert({
@@ -556,10 +552,6 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
       ledger: await prisma.inventoryLedgerEntry.count(),
     };
 
-    await expect(outboundService.confirm({
-      approvalId: confirmApproval.id,
-      allocations: [{ approvalLineId: confirmApproval.lines[0]!.id, warehouseId: "warehouse-1", batchId: stock.batchId, quantity: "1" }],
-    })).rejects.toThrow(`closed period: ${periodCode}`);
     await expect(outboundService.cancelBeforeIssue({ approvalId: cancelApproval.id, reason: "cancelled" })).rejects.toThrow(`closed period: ${periodCode}`);
     await expect(new TransferService(movementStore).complete({ itemId, batchId: stock.batchId, sourceWarehouseId: "warehouse-1", destinationWarehouseId: "warehouse-2", quantity: "1", reason: "closed transfer" })).rejects.toThrow(`closed period: ${periodCode}`);
     await expect(new ReturnService(movementStore).create({ outboundAllocationId: allocation.id, quantity: "1", reason: "closed return" })).rejects.toThrow(`closed period: ${periodCode}`);
@@ -571,7 +563,6 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     await expect(prisma.returnOrder.count()).resolves.toBe(before.returns);
     await expect(prisma.stocktake.count()).resolves.toBe(before.stocktakes);
     await expect(prisma.inventoryLedgerEntry.count()).resolves.toBe(before.ledger);
-    await expect(prisma.approvalRequest.findUniqueOrThrow({ where: { id: confirmApproval.id } })).resolves.toMatchObject({ outboundStatus: "PENDING_OUTBOUND" });
     await expect(prisma.approvalRequest.findUniqueOrThrow({ where: { id: cancelApproval.id } })).resolves.toMatchObject({ outboundStatus: "PENDING_OUTBOUND" });
   });
 
@@ -594,7 +585,7 @@ describe.skipIf(!databaseUrl)("approval intent outbound decision migration", () 
   const migrationSchemaName = `warehouse_task2_migration_${process.pid}_${Date.now()}`;
   let migrationAdminPool: Pool;
 
-  async function withHistoricalSchema(run: (client: PoolClient) => Promise<void>) {
+  async function withHistoricalSchema(run: (client: PoolClient, connectionString: string) => Promise<void>) {
     const isolatedUrl = schemaUrlFor(databaseUrl as string, migrationSchemaName);
     await migrationAdminPool.query(`CREATE SCHEMA "${migrationSchemaName}"`);
     const pool = new Pool({ connectionString: isolatedUrl });
@@ -602,7 +593,7 @@ describe.skipIf(!databaseUrl)("approval intent outbound decision migration", () 
     try {
       await client.query(`SET search_path TO "${migrationSchemaName}"`);
       await applyMigrations(client, historicalMigrationPaths);
-      await run(client);
+      await run(client, isolatedUrl);
     } finally {
       client.release();
       await pool.end();
@@ -755,6 +746,437 @@ describe.skipIf(!databaseUrl)("approval intent outbound decision migration", () 
       await expect(client.query(readFileSync(resolve(process.cwd(), approvalIntentMigrationPath), "utf8")))
         .rejects.toThrow(/without an outbound decision/i);
     });
+  });
+
+  it("keeps a migrated historical allocation returnable", async () => {
+    await withHistoricalSchema(async (client, isolatedUrl) => {
+      await seedHistoricalOutbound(client, [
+        { id: "legacy-allocation-1", itemId: "legacy-item", batchId: "legacy-batch-1", quantity: "2", amount: "25.00" },
+      ]);
+      await client.query(readFileSync(resolve(process.cwd(), approvalIntentMigrationPath), "utf8"));
+      const migratedPrisma = new PrismaClient({
+        adapter: new PrismaPg({ connectionString: isolatedUrl }, { schema: migrationSchemaName }),
+      });
+
+      try {
+        const service = new ReturnService(new PrismaMovementStore(migratedPrisma));
+        await expect(service.listOptions()).resolves.toEqual({
+          allocations: [expect.objectContaining({
+            id: "legacy-allocation-1",
+            outboundOrderId: "legacy-outbound",
+            issuedQuantity: "2",
+            remainingReturnableQuantity: "2",
+          })],
+        });
+        await expect(service.create({
+          outboundAllocationId: "legacy-allocation-1",
+          quantity: "1",
+          reason: "unused historical stock",
+        })).resolves.toMatchObject({ status: "COMPLETED", unitCost: "12.5" });
+        expect((await migratedPrisma.stockBalance.findUniqueOrThrow({
+          where: { warehouseId_itemId_batchId: { warehouseId: "legacy-warehouse", itemId: "legacy-item", batchId: "legacy-batch-1" } },
+        })).remainingQuantity.toString()).toBe("9");
+      } finally {
+        await migratedPrisma.$disconnect();
+      }
+    });
+  });
+});
+
+describe.skipIf(!databaseUrl)("Prisma outbound decisions after the intent migration", () => {
+  const outboundSchemaName = `warehouse_task6_outbound_${process.pid}_${Date.now()}`;
+  let adminPool: Pool;
+  let prisma: PrismaClient;
+
+  beforeAll(async () => {
+    if (!/^warehouse_task6_outbound_\d+_\d+$/.test(outboundSchemaName)) throw new Error("unsafe outbound test schema name");
+    const isolatedUrl = schemaUrlFor(databaseUrl as string, outboundSchemaName);
+    adminPool = new Pool({ connectionString: databaseUrl });
+    await adminPool.query(`CREATE SCHEMA "${outboundSchemaName}"`);
+    const migrationPool = new Pool({ connectionString: isolatedUrl });
+    const migrationClient = await migrationPool.connect();
+    try {
+      await migrationClient.query(`SET search_path TO "${outboundSchemaName}"`);
+      await applyMigrations(migrationClient, [...historicalMigrationPaths, approvalIntentMigrationPath]);
+    } finally {
+      migrationClient.release();
+      await migrationPool.end();
+    }
+    prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: isolatedUrl }, { schema: outboundSchemaName }) });
+    await seedStructuralData(prisma);
+    await prisma.user.create({
+      data: {
+        id: "task6-applicant",
+        weComUserId: "task6-applicant",
+        name: "Task 6 Applicant",
+        roleId: "role-applicant",
+      },
+    });
+  });
+
+  beforeEach(async () => {
+    await prisma.returnLine.deleteMany();
+    await prisma.returnOrder.deleteMany();
+    await prisma.inventoryLedgerEntry.deleteMany();
+    await prisma.transferLine.deleteMany();
+    await prisma.transferOrder.deleteMany();
+    await prisma.stockAdjustment.deleteMany();
+    await prisma.stocktake.deleteMany();
+    await prisma.outboundAllocation.deleteMany();
+    await prisma.outboundDecisionLine.deleteMany();
+    await prisma.outboundOrder.deleteMany();
+    await prisma.inboundLine.deleteMany();
+    await prisma.inboundOrder.deleteMany();
+    await prisma.stockBalance.deleteMany();
+    await prisma.procurementBatch.deleteMany();
+    await prisma.approvalLine.deleteMany();
+    await prisma.approvalRequest.deleteMany();
+    await prisma.accountingPeriod.deleteMany();
+    await prisma.item.deleteMany({ where: { id: { startsWith: "task6-" } } });
+  });
+
+  afterAll(async () => {
+    await prisma?.$disconnect();
+    if (adminPool) {
+      await adminPool.query(`DROP SCHEMA IF EXISTS "${outboundSchemaName}" CASCADE`);
+      await adminPool.end();
+    }
+  });
+
+  async function createItem(options: { id: string; code: string; name: string; unit?: string; isActive?: boolean }) {
+    return prisma.item.create({
+      data: {
+        ...options,
+        unit: options.unit ?? "box",
+        isActive: options.isActive ?? true,
+        categoryId: "category-bj",
+      },
+    });
+  }
+
+  async function createBatch(options: {
+    id: string;
+    itemId: string;
+    originWarehouseId?: string;
+    quantity: string;
+    unitCost?: string;
+    balances: Array<{ warehouseId: string; quantity: string }>;
+  }) {
+    const unitCost = options.unitCost ?? "12.5";
+    await prisma.procurementBatch.create({
+      data: {
+        id: options.id,
+        warehouseId: options.originWarehouseId ?? options.balances[0]!.warehouseId,
+        itemId: options.itemId,
+        batchNo: options.id,
+        quantity: options.quantity,
+        remainingQuantity: options.quantity,
+        unitCost,
+        purchasedAt: new Date("2026-09-04T00:00:00.000Z"),
+      },
+    });
+    await prisma.stockBalance.createMany({
+      data: options.balances.map((balance) => ({
+        warehouseId: balance.warehouseId,
+        itemId: options.itemId,
+        batchId: options.id,
+        remainingQuantity: balance.quantity,
+        unitCost,
+      })),
+    });
+    return options.id;
+  }
+
+  async function createIntentApproval(lines: Array<{
+    id: string;
+    requestedItemName: string;
+    requestedQuantity: string;
+    unit?: string;
+    note?: string;
+  }>) {
+    const id = `task6-approval-${crypto.randomUUID()}`;
+    return prisma.approvalRequest.create({
+      data: {
+        id,
+        weComSpNo: `task6-${crypto.randomUUID()}`,
+        sourceTemplateId: "task6-intent-template",
+        applicantUserId: "task6-applicant",
+        applicantName: "Task 6 Applicant",
+        purpose: "Task 6 integration",
+        status: "APPROVED",
+        outboundStatus: "PENDING_OUTBOUND",
+        submittedAt: new Date("2026-09-04T00:00:00.000Z"),
+        approvedAt: new Date("2026-09-04T00:05:00.000Z"),
+        lines: {
+          create: lines.map((line) => ({
+            ...line,
+            unit: line.unit ?? "box",
+            legacyResolutionStatus: "NOT_APPLICABLE",
+          })),
+        },
+      },
+      include: { lines: { orderBy: { id: "asc" } } },
+    });
+  }
+
+  async function assertNoOutboundArtifacts(approvalId: string) {
+    await expect(prisma.outboundOrder.count({ where: { approvalRequestId: approvalId } })).resolves.toBe(0);
+    await expect(prisma.outboundDecisionLine.count({ where: { approvalLine: { approvalRequestId: approvalId } } })).resolves.toBe(0);
+    await expect(prisma.outboundAllocation.count({ where: { outboundOrder: { approvalRequestId: approvalId } } })).resolves.toBe(0);
+    await expect(prisma.inventoryLedgerEntry.count({ where: { referenceType: "OUTBOUND_ORDER" } })).resolves.toBe(0);
+    await expect(prisma.approvalRequest.findUniqueOrThrow({ where: { id: approvalId } }))
+      .resolves.toMatchObject({ outboundStatus: "PENDING_OUTBOUND" });
+  }
+
+  async function prepareValidation(options: {
+    approvalId: string;
+    itemId: string;
+    warehouseId: string;
+    batchId: string;
+    quantity: string;
+  }) {
+    const store = new PrismaOutboundStore(prisma);
+    const approval = await store.getApproval(options.approvalId);
+    if (!approval) throw new Error("test approval missing");
+    const validation = new OutboundAllocator().validate({
+      lines: approval.lines,
+      items: await store.listCandidateItems(),
+      batches: await store.listBatches([options.itemId]),
+      decisions: [{
+        approvalLineId: approval.lines[0]!.id,
+        selectedItemId: options.itemId,
+        allocations: [{ warehouseId: options.warehouseId, batchId: options.batchId, quantity: options.quantity }],
+      }],
+    });
+    return { approval, store, validation };
+  }
+
+  it("returns every active same-unit stocked candidate and aggregates its warehouse balances", async () => {
+    await Promise.all([
+      createItem({ id: "task6-tea", code: "T6-TEA", name: "Tea supplies" }),
+      createItem({ id: "task6-paper", code: "T6-PAPER", name: "Unrelated paper" }),
+      createItem({ id: "task6-inactive", code: "T6-INACTIVE", name: "Inactive stock", isActive: false }),
+      createItem({ id: "task6-case", code: "T6-CASE", name: "Wrong unit", unit: "case" }),
+      createItem({ id: "task6-empty", code: "T6-EMPTY", name: "Empty stock" }),
+    ]);
+    await createBatch({
+      id: "task6-shared-candidate-batch",
+      itemId: "task6-tea",
+      quantity: "5",
+      balances: [{ warehouseId: "warehouse-1", quantity: "2" }, { warehouseId: "warehouse-2", quantity: "3" }],
+    });
+    await createBatch({ id: "task6-paper-batch", itemId: "task6-paper", quantity: "4", balances: [{ warehouseId: "warehouse-2", quantity: "4" }] });
+    await createBatch({ id: "task6-inactive-batch", itemId: "task6-inactive", quantity: "4", balances: [{ warehouseId: "warehouse-1", quantity: "4" }] });
+    await createBatch({ id: "task6-case-batch", itemId: "task6-case", quantity: "4", balances: [{ warehouseId: "warehouse-1", quantity: "4" }] });
+    await createBatch({ id: "task6-empty-batch", itemId: "task6-empty", quantity: "0", balances: [{ warehouseId: "warehouse-1", quantity: "0" }] });
+    const approval = await createIntentApproval([{ id: "task6-candidate-line", requestedItemName: "Tea supplies", requestedQuantity: "1" }]);
+
+    const store = new PrismaOutboundStore(prisma);
+    const options = await new OutboundService(store).listOptions(approval.id);
+
+    expect(options.lines).toEqual([{
+      approvalLineId: "task6-candidate-line",
+      items: [
+        { id: "task6-tea", code: "T6-TEA", name: "Tea supplies", unit: "box", isActive: true, availableQuantity: "5" },
+        { id: "task6-paper", code: "T6-PAPER", name: "Unrelated paper", unit: "box", isActive: true, availableQuantity: "4" },
+      ],
+    }]);
+    expect(options.batches).toEqual([
+      { batchId: "task6-shared-candidate-batch", warehouseId: "warehouse-1", itemId: "task6-tea", remainingQuantity: "2", unitCost: "12.5" },
+      { batchId: "task6-paper-batch", warehouseId: "warehouse-2", itemId: "task6-paper", remainingQuantity: "4", unitCost: "12.5" },
+      { batchId: "task6-shared-candidate-batch", warehouseId: "warehouse-2", itemId: "task6-tea", remainingQuantity: "3", unitCost: "12.5" },
+    ]);
+    await expect(store.listBatches(["task6-tea"])).resolves.toEqual([
+      { id: "task6-shared-candidate-batch", warehouseId: "warehouse-1", itemId: "task6-tea", remainingQuantity: "2", unitCost: "12.5" },
+      { id: "task6-shared-candidate-batch", warehouseId: "warehouse-2", itemId: "task6-tea", remainingQuantity: "3", unitCost: "12.5" },
+    ]);
+  });
+
+  it("atomically persists a split positive decision and a zero decision with per-line audit data", async () => {
+    await createItem({ id: "task6-split-item", code: "T6-SPLIT", name: "Split item" });
+    await createBatch({
+      id: "task6-transferred-batch",
+      itemId: "task6-split-item",
+      originWarehouseId: "warehouse-1",
+      quantity: "2",
+      unitCost: "0.005",
+      balances: [{ warehouseId: "warehouse-1", quantity: "2" }],
+    });
+    await new TransferService(new PrismaMovementStore(prisma)).complete({
+      itemId: "task6-split-item",
+      batchId: "task6-transferred-batch",
+      sourceWarehouseId: "warehouse-1",
+      destinationWarehouseId: "warehouse-2",
+      quantity: "1",
+      reason: "prepare a shared transferred batch",
+    });
+    const approval = await createIntentApproval([
+      { id: "task6-positive-line", requestedItemName: "Split intent", requestedQuantity: "2", note: "audit me" },
+      { id: "task6-zero-line", requestedItemName: "Unavailable intent", requestedQuantity: "1" },
+    ]);
+    const service = new OutboundService(new PrismaOutboundStore(prisma));
+
+    const result = await service.confirm({
+      approvalId: approval.id,
+      operatorId: "task6-operator",
+      decisions: [
+        {
+          approvalLineId: "task6-positive-line",
+          selectedItemId: "task6-split-item",
+          allocations: [
+            { warehouseId: "warehouse-1", batchId: "task6-transferred-batch", quantity: "1" },
+            { warehouseId: "warehouse-2", batchId: "task6-transferred-batch", quantity: "1" },
+          ],
+        },
+        { approvalLineId: "task6-zero-line", allocations: [], varianceReason: "not available" },
+      ],
+    });
+
+    expect(result).toEqual({
+      id: expect.any(String),
+      approvalId: approval.id,
+      status: "PARTIALLY_ISSUED",
+      actualQuantity: "2",
+      amount: "0.02",
+    });
+    const stored = await prisma.outboundOrder.findUniqueOrThrow({
+      where: { id: result.id },
+      include: {
+        decisions: { include: { allocations: { orderBy: { warehouseId: "asc" } } }, orderBy: { approvalLineId: "asc" } },
+        allocations: { orderBy: { warehouseId: "asc" } },
+      },
+    });
+    expect(stored).toMatchObject({ operatorId: "task6-operator", reason: null, status: "PARTIALLY_ISSUED" });
+    expect(stored.decisions.map((decision) => ({
+      approvalLineId: decision.approvalLineId,
+      selectedItemId: decision.selectedItemId,
+      actualQuantity: decision.actualQuantity.toString(),
+      varianceReason: decision.varianceReason,
+      decidedBy: decision.decidedBy,
+      allocationCount: decision.allocations.length,
+    }))).toEqual([
+      { approvalLineId: "task6-positive-line", selectedItemId: "task6-split-item", actualQuantity: "2", varianceReason: null, decidedBy: "task6-operator", allocationCount: 2 },
+      { approvalLineId: "task6-zero-line", selectedItemId: null, actualQuantity: "0", varianceReason: "not available", decidedBy: "task6-operator", allocationCount: 0 },
+    ]);
+    expect(stored.allocations.map((allocation) => ({
+      outboundDecisionLineId: allocation.outboundDecisionLineId,
+      warehouseId: allocation.warehouseId,
+      amount: allocation.amount.toFixed(2),
+    }))).toEqual([
+      { outboundDecisionLineId: stored.decisions[0]!.id, warehouseId: "warehouse-1", amount: "0.01" },
+      { outboundDecisionLineId: stored.decisions[0]!.id, warehouseId: "warehouse-2", amount: "0.01" },
+    ]);
+    expect(stored.amount.toFixed(2)).toBe("0.02");
+    const ledger = await prisma.inventoryLedgerEntry.findMany({ where: { referenceId: result.id }, orderBy: { warehouseId: "asc" } });
+    expect(ledger.map((entry) => ({ warehouseId: entry.warehouseId, quantity: entry.quantity.toString(), amount: entry.amount.toFixed(2) }))).toEqual([
+      { warehouseId: "warehouse-1", quantity: "-1", amount: "0.01" },
+      { warehouseId: "warehouse-2", quantity: "-1", amount: "0.01" },
+    ]);
+    expect((await prisma.procurementBatch.findUniqueOrThrow({ where: { id: "task6-transferred-batch" } })).remainingQuantity.toString()).toBe("0");
+    expect((await prisma.stockBalance.aggregate({ where: { batchId: "task6-transferred-batch" }, _sum: { remainingQuantity: true } }))._sum.remainingQuantity?.toString()).toBe("0");
+  });
+
+  it("closes an all-zero approval without creating allocation or ledger rows", async () => {
+    const approval = await createIntentApproval([{ id: "task6-all-zero-line", requestedItemName: "No stock", requestedQuantity: "3" }]);
+
+    const result = await new OutboundService(new PrismaOutboundStore(prisma)).confirm({
+      approvalId: approval.id,
+      operatorId: "task6-operator",
+      decisions: [{ approvalLineId: "task6-all-zero-line", allocations: [], varianceReason: "none available" }],
+    });
+
+    expect(result).toMatchObject({ status: "UNAVAILABLE", actualQuantity: "0", amount: "0.00" });
+    await expect(prisma.outboundDecisionLine.findUniqueOrThrow({ where: { approvalLineId: "task6-all-zero-line" } }))
+      .resolves.toMatchObject({ selectedItemId: null, varianceReason: "none available", decidedBy: "task6-operator" });
+    await expect(prisma.outboundAllocation.count({ where: { outboundOrderId: result.id } })).resolves.toBe(0);
+    await expect(prisma.inventoryLedgerEntry.count({ where: { referenceId: result.id } })).resolves.toBe(0);
+  });
+
+  it("revalidates a selected item unit inside the transaction and rolls back every artifact", async () => {
+    await createItem({ id: "task6-unit-item", code: "T6-UNIT", name: "Unit item" });
+    await createBatch({ id: "task6-unit-batch", itemId: "task6-unit-item", quantity: "1", balances: [{ warehouseId: "warehouse-1", quantity: "1" }] });
+    const approval = await createIntentApproval([{ id: "task6-unit-line", requestedItemName: "Unit intent", requestedQuantity: "1" }]);
+    const prepared = await prepareValidation({ approvalId: approval.id, itemId: "task6-unit-item", warehouseId: "warehouse-1", batchId: "task6-unit-batch", quantity: "1" });
+    await prisma.item.update({ where: { id: "task6-unit-item" }, data: { unit: "case" } });
+
+    await expect(prepared.store.commitOutbound(prepared.approval, prepared.validation, "task6-operator"))
+      .rejects.toThrow("selected item unit does not match approval unit");
+
+    await assertNoOutboundArtifacts(approval.id);
+    expect((await prisma.stockBalance.findFirstOrThrow({ where: { batchId: "task6-unit-batch" } })).remainingQuantity.toString()).toBe("1");
+    expect((await prisma.procurementBatch.findUniqueOrThrow({ where: { id: "task6-unit-batch" } })).remainingQuantity.toString()).toBe("1");
+  });
+
+  it("revalidates a fractional approval quantity inside the transaction and rolls back every artifact", async () => {
+    await createItem({ id: "task6-fraction-item", code: "T6-FRACTION", name: "Fraction item" });
+    await createBatch({ id: "task6-fraction-batch", itemId: "task6-fraction-item", quantity: "1", balances: [{ warehouseId: "warehouse-1", quantity: "1" }] });
+    const approval = await createIntentApproval([{ id: "task6-fraction-line", requestedItemName: "Fraction intent", requestedQuantity: "1" }]);
+    const prepared = await prepareValidation({ approvalId: approval.id, itemId: "task6-fraction-item", warehouseId: "warehouse-1", batchId: "task6-fraction-batch", quantity: "1" });
+    await prisma.approvalLine.update({ where: { id: "task6-fraction-line" }, data: { requestedQuantity: "1.5" } });
+
+    await expect(prepared.store.commitOutbound(prepared.approval, prepared.validation, "task6-operator"))
+      .rejects.toThrow(/approval quantity must be a positive integer/i);
+
+    await assertNoOutboundArtifacts(approval.id);
+    expect((await prisma.stockBalance.findFirstOrThrow({ where: { batchId: "task6-fraction-batch" } })).remainingQuantity.toString()).toBe("1");
+  });
+
+  it("rolls back the approval CAS and balance decrement when the shared batch total is stale", async () => {
+    await createItem({ id: "task6-stale-item", code: "T6-STALE", name: "Stale item" });
+    await createBatch({ id: "task6-stale-batch", itemId: "task6-stale-item", quantity: "2", balances: [{ warehouseId: "warehouse-1", quantity: "2" }] });
+    const approval = await createIntentApproval([{ id: "task6-stale-line", requestedItemName: "Stale intent", requestedQuantity: "2" }]);
+    const prepared = await prepareValidation({ approvalId: approval.id, itemId: "task6-stale-item", warehouseId: "warehouse-1", batchId: "task6-stale-batch", quantity: "2" });
+    await prisma.procurementBatch.update({ where: { id: "task6-stale-batch" }, data: { remainingQuantity: "1" } });
+
+    await expect(prepared.store.commitOutbound(prepared.approval, prepared.validation, "task6-operator"))
+      .rejects.toThrow(/stock balance changed.*retry/i);
+
+    await assertNoOutboundArtifacts(approval.id);
+    expect((await prisma.stockBalance.findFirstOrThrow({ where: { batchId: "task6-stale-batch" } })).remainingQuantity.toString()).toBe("2");
+    expect((await prisma.procurementBatch.findUniqueOrThrow({ where: { id: "task6-stale-batch" } })).remainingQuantity.toString()).toBe("1");
+  });
+
+  it("allows exactly one simultaneous confirmation to close and decrement an approval", async () => {
+    await createItem({ id: "task6-race-item", code: "T6-RACE", name: "Race item" });
+    await createBatch({ id: "task6-race-batch", itemId: "task6-race-item", quantity: "2", balances: [{ warehouseId: "warehouse-1", quantity: "2" }] });
+    const approval = await createIntentApproval([{ id: "task6-race-line", requestedItemName: "Race intent", requestedQuantity: "1" }]);
+    const input = {
+      approvalId: approval.id,
+      operatorId: "task6-operator",
+      decisions: [{
+        approvalLineId: "task6-race-line",
+        selectedItemId: "task6-race-item",
+        allocations: [{ warehouseId: "warehouse-1", batchId: "task6-race-batch", quantity: "1" }],
+      }],
+    };
+    const first = new OutboundService(new PrismaOutboundStore(prisma));
+    const second = new OutboundService(new PrismaOutboundStore(prisma));
+
+    const outcomes = await Promise.allSettled([first.confirm(input), second.confirm(input)]);
+
+    expect(outcomes.map((outcome) => outcome.status).sort()).toEqual(["fulfilled", "rejected"]);
+    await expect(prisma.outboundOrder.count({ where: { approvalRequestId: approval.id } })).resolves.toBe(1);
+    await expect(prisma.outboundOrder.findUniqueOrThrow({ where: { approvalRequestId: approval.id } }))
+      .resolves.toMatchObject({ status: "COMPLETED", operatorId: "task6-operator" });
+    await expect(prisma.outboundDecisionLine.count({ where: { approvalLineId: "task6-race-line" } })).resolves.toBe(1);
+    await expect(prisma.outboundAllocation.count({ where: { batchId: "task6-race-batch" } })).resolves.toBe(1);
+    await expect(prisma.inventoryLedgerEntry.count({ where: { batchId: "task6-race-batch", type: "OUTBOUND" } })).resolves.toBe(1);
+    expect((await prisma.stockBalance.findFirstOrThrow({ where: { batchId: "task6-race-batch" } })).remainingQuantity.toString()).toBe("1");
+    expect((await prisma.procurementBatch.findUniqueOrThrow({ where: { id: "task6-race-batch" } })).remainingQuantity.toString()).toBe("1");
+    await expect(prisma.approvalRequest.findUniqueOrThrow({ where: { id: approval.id } }))
+      .resolves.toMatchObject({ outboundStatus: "COMPLETED" });
+  });
+
+  it("rejects the placeholder system actor without changing inventory", async () => {
+    await createItem({ id: "task6-actor-item", code: "T6-ACTOR", name: "Actor item" });
+    await createBatch({ id: "task6-actor-batch", itemId: "task6-actor-item", quantity: "1", balances: [{ warehouseId: "warehouse-1", quantity: "1" }] });
+    const approval = await createIntentApproval([{ id: "task6-actor-line", requestedItemName: "Actor intent", requestedQuantity: "1" }]);
+    const prepared = await prepareValidation({ approvalId: approval.id, itemId: "task6-actor-item", warehouseId: "warehouse-1", batchId: "task6-actor-batch", quantity: "1" });
+
+    await expect(prepared.store.commitOutbound(prepared.approval, prepared.validation, "system"))
+      .rejects.toThrow("outbound operator must identify an administrator");
+
+    await assertNoOutboundArtifacts(approval.id);
   });
 });
 
@@ -1103,6 +1525,7 @@ describe.skipIf(!databaseUrl)("Prisma approval synchronization after the intent 
 function schemaUrlFor(connectionString: string, targetSchema: string): string {
   const url = new URL(connectionString);
   url.searchParams.set("schema", targetSchema);
+  url.searchParams.set("options", `-c search_path=${targetSchema}`);
   return url.toString();
 }
 
