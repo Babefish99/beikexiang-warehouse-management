@@ -288,7 +288,33 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .inbound-summary div { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; }
 .inbound-summary dt { color: var(--muted); font-size: 13px; }
 .inbound-summary dd { margin: 0; font-weight: 650; text-align: right; }
-.outbound-desktop-row { display: grid; grid-template-columns: 1.25fr 1fr 1fr 1fr auto; gap: 10px; align-items: end; }
+.outbound-desktop-editor { padding: 8px 0; }
+.outbound-decision-editor { display: grid; gap: 14px; }
+.outbound-decision-line { min-width: 0; margin: 0; padding: 16px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+.outbound-decision-line legend { padding: 0 6px; color: var(--navy); font-size: 14px; font-weight: 750; }
+.outbound-intent { grid-column: 1 / -1; padding: 12px 14px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 16px; border-radius: 8px; background: #f8fafc; }
+.outbound-intent strong { font-size: 16px; }
+.outbound-intent span { color: var(--muted); font-size: 13px; }
+.outbound-intent span:last-child { grid-column: 1 / -1; }
+.outbound-locked-item { min-width: 0; display: grid; gap: 6px; }
+.outbound-locked-item span { color: var(--muted); font-size: 13px; font-weight: 650; }
+.outbound-decision-allocation { grid-column: 1 / -1; min-width: 0; padding: 12px; display: grid; grid-template-columns: 1fr 1.15fr .75fr auto; gap: 10px; align-items: end; border-radius: 8px; background: #f8fafc; }
+.outbound-decision-allocation .field-error { grid-column: 1 / -1; }
+.outbound-add-allocation { justify-self: start; }
+.outbound-decision-line__totals { grid-column: 1 / -1; display: flex; gap: 18px; color: var(--muted); font-size: 13px; }
+.outbound-decision-line > .button--danger, .outbound-decision-line > .button--secondary:last-child { justify-self: end; align-self: end; }
+.outbound-desktop-review { display: grid; gap: 12px; }
+.outbound-desktop-review h3 { margin: 0; font-size: 18px; }
+.outbound-desktop-review article { padding: 14px; display: grid; gap: 5px; border: 1px solid var(--border); border-radius: 9px; background: #f8fafc; }
+.outbound-desktop-review p { margin: 0; line-height: 1.6; }
+.outbound-desktop-review__amount { font-weight: 750; text-align: right; }
+.outbound-reapply-card { padding: 14px 16px; border: 1px solid #efc0b6; border-radius: 9px; background: #fff6f3; }
+.outbound-reapply-card p { margin: 6px 0 0; color: var(--muted); }
+.outbound-sync-failures { margin-top: 12px; padding: 12px 14px; border: 1px solid #efc0b6; border-radius: 9px; background: #fff9f7; }
+.outbound-sync-failures summary { cursor: pointer; color: #8d2c20; font-weight: 700; }
+.outbound-sync-failures ul { margin: 12px 0 0; padding: 0; display: grid; gap: 8px; list-style: none; }
+.outbound-sync-failures li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; font-size: 13px; }
+.outbound-sync-failures time { color: var(--muted); }
 .outbound-flow { min-width: 0; display: grid; gap: 14px; }
 .outbound-flow h2 { margin: 0; font-size: 18px; }
 .outbound-status-notice { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 10px; }
@@ -332,6 +358,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .outbound-flow input, .outbound-flow select, .outbound-flow textarea { width: 100%; min-width: 0; box-sizing: border-box; }
   .outbound-flow textarea { min-height: 88px; }
   .outbound-allocation-row { grid-template-columns: minmax(0, 1fr); }
+  .outbound-decision-line { grid-template-columns: minmax(0, 1fr); }
+  .outbound-intent { grid-template-columns: minmax(0, 1fr); }
+  .outbound-intent span:last-child { grid-column: auto; }
+  .outbound-decision-allocation { grid-template-columns: minmax(0, 1fr); }
+  .outbound-decision-line__totals { flex-wrap: wrap; gap: 8px 14px; }
+  .outbound-sync-failures li { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .outbound-card__actions .button, .outbound-flow__actions .button { flex: 1 1 0; }
   .outbound-review div { display: grid; gap: 4px; }
   .outbound-review dd { text-align: left; }
