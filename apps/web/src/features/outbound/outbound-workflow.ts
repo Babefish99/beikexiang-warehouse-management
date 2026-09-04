@@ -270,10 +270,13 @@ export function searchCandidateItems<T extends CandidateItem>(items: readonly T[
     || (left.code === right.code ? left.id.localeCompare(right.id) : left.code.localeCompare(right.code)));
 }
 
-export function normalizeDecisions(decisions: readonly DecisionDraft[]): NormalizedDecision[] {
+export function normalizeDecisions(decisions: readonly DecisionDraft[], approval?: PendingApproval): NormalizedDecision[] {
   return decisions.map((decision) => {
     const varianceReason = decision.varianceReason.trim();
     if (decision.zeroIssue) return { approvalLineId: decision.approvalLineId, allocations: [], ...(varianceReason ? { varianceReason } : {}) };
+    const approvalLine = approval?.lines.find((line) => line.id === decision.approvalLineId);
+    const requested = approvalLine ? parsePositiveInteger(approvalLine.requestedQuantity) : null;
+    const includeVarianceReason = !requested || decisionTotal(decision).lt(requested);
     return {
       approvalLineId: decision.approvalLineId,
       ...(decision.selectedItemId ? { selectedItemId: decision.selectedItemId } : {}),
@@ -281,7 +284,7 @@ export function normalizeDecisions(decisions: readonly DecisionDraft[]): Normali
         const parsed = parsePositiveInteger(quantity);
         return parsed ? [{ warehouseId, batchId, quantity: parsed.toString() }] : [];
       }),
-      ...(varianceReason ? { varianceReason } : {}),
+      ...(varianceReason && includeVarianceReason ? { varianceReason } : {}),
     };
   });
 }

@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import { CheckCircle2 } from "lucide-react";
 
 import { inventoryStatusLabel } from "../inventory/inventory-status-label";
@@ -19,6 +19,7 @@ type EditorState = {
   expanded: boolean;
   loading: boolean;
   submitting: boolean;
+  completed: boolean;
   reviewing: boolean;
   options: OutboundOptions | null;
   draft: OutboundDraft;
@@ -44,6 +45,7 @@ function initialEditor(approval: PendingApproval): EditorState {
     expanded: true,
     loading: true,
     submitting: false,
+    completed: false,
     reviewing: false,
     options: null,
     draft: { approvalId: approval.id, step: "allocate", decisions: approval.lines.map(initialDecision) },
@@ -59,6 +61,15 @@ export function DesktopOutboundTable({ pending, onReloadOptions, onConfirm }: {
   onConfirm(input: { approvalId: string; decisions: NormalizedDecision[] }): Promise<OutboundResult>;
 }) {
   const [editors, setEditors] = useState<Record<string, EditorState>>({});
+  const optionRequestEpochs = useRef<Record<string, number>>({});
+  const submitLocks = useRef(new Set<string>());
+  const completedApprovals = useRef(new Set<string>());
+  const beginOptionsRequest = (approvalId: string) => {
+    const epoch = (optionRequestEpochs.current[approvalId] ?? 0) + 1;
+    optionRequestEpochs.current[approvalId] = epoch;
+    return epoch;
+  };
+  const isCurrentOptionsRequest = (approvalId: string, epoch: number) => optionRequestEpochs.current[approvalId] === epoch;
   const updateEditor = (approvalId: string, update: (editor: EditorState) => EditorState) => setEditors((previous) => {
     const editor = previous[approvalId];
     return editor ? { ...previous, [approvalId]: update(editor) } : previous;
@@ -66,29 +77,35 @@ export function DesktopOutboundTable({ pending, onReloadOptions, onConfirm }: {
 
   const openEditor = async (approval: PendingApproval) => {
     const current = editors[approval.id];
+    if (current?.loading || current?.submitting || current?.completed || completedApprovals.current.has(approval.id)) return;
     if (current?.expanded && !current.loading) {
       updateEditor(approval.id, (editor) => ({ ...editor, expanded: false }));
       return;
     }
     const editor = current ?? initialEditor(approval);
+    const epoch = beginOptionsRequest(approval.id);
     setEditors((previous) => ({ ...previous, [approval.id]: { ...editor, expanded: true, loading: true, error: null } }));
     try {
       const options = await onReloadOptions(approval.id);
+      if (!isCurrentOptionsRequest(approval.id, epoch)) return;
       setEditors((previous) => ({
         ...previous,
         [approval.id]: { ...(previous[approval.id] ?? editor), expanded: true, loading: false, options, error: null },
       }));
     } catch (error) {
+      if (!isCurrentOptionsRequest(approval.id, epoch)) return;
       updateEditor(approval.id, (value) => ({ ...value, loading: false, error: error instanceof Error ? error.message : "读取出库选项失败" }));
     }
   };
 
   const requestReview = async (approval: PendingApproval) => {
     const editor = editors[approval.id];
-    if (!editor || editor.loading || editor.submitting) return;
+    if (!editor || editor.loading || editor.submitting || editor.completed) return;
+    const epoch = beginOptionsRequest(approval.id);
     updateEditor(approval.id, (value) => ({ ...value, loading: true, errors: {}, error: null }));
     try {
       const latest = await onReloadOptions(approval.id);
+      if (!isCurrentOptionsRequest(approval.id, epoch)) return;
       const reconciled = reconcileOutboundOptions(editor.draft, latest);
       const errors = validateDecisionStep(approval, reconciled.draft.decisions, latest);
       for (const lineId of reconciled.staleSelectedItemLineIds) errors[`line:${lineId}`] = "所选标准物品已失效，请重新选择";
@@ -103,40 +120,49 @@ export function DesktopOutboundTable({ pending, onReloadOptions, onConfirm }: {
         error: null,
       }));
     } catch (error) {
+      if (!isCurrentOptionsRequest(approval.id, epoch)) return;
       updateEditor(approval.id, (value) => ({ ...value, loading: false, error: error instanceof Error ? error.message : "提交前校验失败，草稿已保留" }));
     }
   };
 
   const submit = async (approval: PendingApproval) => {
     const editor = editors[approval.id];
-    if (!editor || editor.submitting || !editor.reviewing) return;
+    if (!editor || editor.submitting || !editor.reviewing || editor.completed || submitLocks.current.has(approval.id) || completedApprovals.current.has(approval.id)) return;
+    submitLocks.current.add(approval.id);
     updateEditor(approval.id, (value) => ({ ...value, submitting: true, error: null, result: null }));
     try {
-      const payload = await onConfirm({ approvalId: approval.id, decisions: normalizeDecisions(editor.draft.decisions) });
+      const payload = await onConfirm({ approvalId: approval.id, decisions: normalizeDecisions(editor.draft.decisions, approval) });
+      completedApprovals.current.add(approval.id);
       updateEditor(approval.id, (value) => ({
         ...value,
         submitting: false,
+        completed: true,
+        reviewing: false,
+        errors: {},
+        error: null,
         result: `出库已完成：${payload.id}，${inventoryStatusLabel(payload.status)}，实际数量 ${payload.actualQuantity}，金额 ${payload.amount}`,
       }));
     } catch (error) {
       updateEditor(approval.id, (value) => ({ ...value, submitting: false, error: error instanceof Error ? error.message : "出库提交失败，草稿已保留" }));
+    } finally {
+      submitLocks.current.delete(approval.id);
     }
   };
 
   return <div className="table-wrap"><table><thead><tr><th>审批编号</th><th>申请行数</th><th>状态</th><th>操作</th></tr></thead><tbody>{pending.map((approval) => {
     const editor = editors[approval.id];
     const requiresReapplication = approval.lines.some((line) => line.legacyResolutionStatus === "REAPPLY_REQUIRED");
-    return <Fragment key={approval.id}><tr><td><strong>{approval.weComSpNo}</strong></td><td>{approval.lines.length} 行</td><td><span className="status-pill status-pill--active">{inventoryStatusLabel(approval.status)}</span></td><td>{!requiresReapplication ? <button className="button button--primary button--small" type="button" onClick={() => void openEditor(approval)}>{editor?.expanded ? "收起" : "办理出库"}</button> : <span className="status-pill">需重新申请</span>}</td></tr>
+    return <Fragment key={approval.id}><tr><td><strong>{approval.weComSpNo}</strong></td><td>{approval.lines.length} 行</td><td><span className="status-pill status-pill--active">{editor?.completed ? "已完成" : inventoryStatusLabel(approval.status)}</span></td><td>{!requiresReapplication ? <button className="button button--primary button--small" type="button" aria-label={editor?.completed ? "办理出库" : undefined} disabled={Boolean(editor?.loading || editor?.submitting || editor?.completed)} onClick={() => void openEditor(approval)}>{editor?.completed ? "已完成" : editor?.expanded ? "收起" : "办理出库"}</button> : <span className="status-pill">需重新申请</span>}</td></tr>
       {requiresReapplication ? <tr><td colSpan={4}><article className="outbound-reapply-card" data-testid={`outbound-reapply-${approval.id}`}><strong>旧审批信息不完整，需重新申请</strong>{approval.lines.map((line) => <p key={line.id}>{line.requestedItemName} {line.requestedQuantity} {line.unit}</p>)}<p>该审批不能办理出库，请申请人使用当前模板重新提交。</p></article></td></tr> : null}
       {editor?.expanded ? <tr><td colSpan={4}><div className="form-grid outbound-desktop-editor">
         {editor.loading ? <div className="form-grid__wide notice">正在读取最新出库选项…</div> : null}
         {editor.error ? <div className="form-grid__wide form-error" role="alert">{editor.error}</div> : null}
-        {!editor.loading && editor.options && !editor.reviewing ? <>
+        {!editor.loading && !editor.completed && editor.options && !editor.reviewing ? <>
           <div className="form-grid__wide"><OutboundDecisionEditor approval={approval} options={editor.options} draft={editor.draft} errors={editor.errors} onChange={(draft) => updateEditor(approval.id, (value) => ({ ...value, draft, errors: {}, error: null, result: null }))} /></div>
           <div className="form-grid__wide form-actions"><button className="button button--primary" type="button" onClick={() => void requestReview(approval)}>复核出库</button></div>
         </> : null}
-        {!editor.loading && editor.options && editor.reviewing ? <DesktopReview approval={approval} draft={editor.draft} options={editor.options} /> : null}
-        {!editor.loading && editor.reviewing ? <div className="form-grid__wide form-actions form-actions--split"><button className="button button--secondary" type="button" onClick={() => updateEditor(approval.id, (value) => ({ ...value, reviewing: false, error: null }))}>返回修改</button><button className="button button--primary" type="button" disabled={editor.submitting} onClick={() => void submit(approval)}>{editor.submitting ? "提交中…" : "确认并提交"}</button></div> : null}
+        {!editor.loading && !editor.completed && editor.options && editor.reviewing ? <DesktopReview approval={approval} draft={editor.draft} options={editor.options} /> : null}
+        {!editor.loading && !editor.completed && editor.reviewing ? <div className="form-grid__wide form-actions form-actions--split"><button className="button button--secondary" type="button" disabled={editor.submitting} onClick={() => updateEditor(approval.id, (value) => ({ ...value, reviewing: false, error: null }))}>返回修改</button><button className="button button--primary" type="button" disabled={editor.submitting} onClick={() => void submit(approval)}>{editor.submitting ? "提交中…" : "确认并提交"}</button></div> : null}
         {editor.result ? <div className="form-grid__wide success-notice" role="status"><CheckCircle2 size={18} />{editor.result}</div> : null}
       </div></td></tr> : null}</Fragment>;
   })}</tbody></table></div>;

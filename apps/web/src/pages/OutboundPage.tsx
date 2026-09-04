@@ -25,11 +25,13 @@ export function OutboundPage({ userId }: { userId: string }) {
   const [syncFailureError, setSyncFailureError] = useState(false);
   const mounted = useRef(true);
   const pendingRequestEpoch = useRef(0);
+  const syncFailureRequestEpoch = useRef(0);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
       pendingRequestEpoch.current += 1;
+      syncFailureRequestEpoch.current += 1;
     };
   }, []);
 
@@ -54,18 +56,23 @@ export function OutboundPage({ userId }: { userId: string }) {
   useEffect(() => { void loadPending(); }, [loadPending]);
 
   const loadSyncFailures = useCallback(async () => {
+    if (!mounted.current) return;
+    syncFailureRequestEpoch.current += 1;
+    const epoch = syncFailureRequestEpoch.current;
+    const isCurrentRequest = () => mounted.current && syncFailureRequestEpoch.current === epoch;
     setSyncFailureError(false);
     try {
       const response = await fetch(`${apiBaseUrl}/admin/approvals/sync-failures?limit=20`, { credentials: "include" });
       if (!response.ok) throw new Error("sync failure request failed");
       const payload = await response.json() as unknown;
-      setSyncFailures(Array.isArray(payload) ? payload.filter((entry): entry is ApprovalSyncFailure => {
+      const next = Array.isArray(payload) ? payload.filter((entry): entry is ApprovalSyncFailure => {
         if (!entry || typeof entry !== "object") return false;
         const candidate = entry as Record<string, unknown>;
         return typeof candidate.weComSpNo === "string" && typeof candidate.attemptedAt === "string" && typeof candidate.error === "string";
-      }) : []);
+      }) : [];
+      if (isCurrentRequest()) setSyncFailures(next);
     } catch {
-      setSyncFailureError(true);
+      if (isCurrentRequest()) setSyncFailureError(true);
     }
   }, []);
   useEffect(() => { void loadSyncFailures(); }, [loadSyncFailures]);

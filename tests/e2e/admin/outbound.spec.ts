@@ -36,6 +36,12 @@ async function mockPending(page: Page, approvals: object[] = [intentApproval]) {
   await page.route(apiUrl("/admin/approvals/sync-failures?limit=20"), (route) => route.fulfill({ json: [] }));
 }
 
+function deferred() {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => { release = resolve; });
+  return { promise, release };
+}
+
 test("outbound execution APIs remain administrator-only", async ({ request }) => {
   const [pending, confirm] = await Promise.all([
     request.get(apiUrl("/admin/outbound/pending")),
@@ -208,4 +214,277 @@ test("reapply-required approvals and sanitized sync failures are non-actionable 
   await failures.locator("summary").click();
   await expect(failures).toContainText("202609040099");
   await expect(failures).toContainText("审批数量必须为正整数");
+});
+
+test("desktop keeps the latest review result when an older options request finishes last", async ({ page }) => {
+  await mockPending(page);
+  const olderOpenResponse = deferred();
+  const latestOpenResponse = deferred();
+  const reviewResponse = deferred();
+  let twoOpenRequestsStarted!: () => void;
+  const twoOpenRequests = new Promise<void>((resolve) => { twoOpenRequestsStarted = resolve; });
+  let optionReads = 0;
+  await page.route(apiUrl("/admin/outbound/approval-1/options"), async (route) => {
+    optionReads += 1;
+    if (optionReads === 1) {
+      await olderOpenResponse.promise;
+      return route.fulfill({ json: initialOptions });
+    }
+    if (optionReads === 2) {
+      twoOpenRequestsStarted();
+      await latestOpenResponse.promise;
+      return route.fulfill({ json: initialOptions });
+    }
+    await reviewResponse.promise;
+    return route.fulfill({ json: { ...initialOptions, lines: [{ approvalLineId: "line-wine", items: [] }], batches: [] } });
+  });
+
+  await loginAs(page, "/admin/outbound", "ADMIN");
+  await page.getByRole("button", { name: "办理出库" }).evaluate((button) => {
+    (button as HTMLButtonElement).click();
+    (button as HTMLButtonElement).click();
+  });
+  await twoOpenRequests;
+  latestOpenResponse.release();
+  const line = page.getByTestId("outbound-decision-line-line-wine");
+  await line.getByLabel("标准物品").selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("一号仓");
+  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByLabel("实际数量").fill("2");
+  await page.getByRole("button", { name: "复核出库" }).click();
+  const toggle = page.getByRole("button", { name: "收起" });
+  await expect(toggle).toBeDisabled();
+  reviewResponse.release();
+  await expect(page.getByRole("alert")).toContainText("所选标准物品已失效");
+  olderOpenResponse.release();
+  await page.waitForTimeout(50);
+
+  expect(optionReads).toBe(3);
+  await expect(line.getByLabel("标准物品").locator('option[value="item-maotai"]')).toHaveText("已失效：item-maotai");
+  await expect(line.getByLabel("实际数量")).toHaveValue("2");
+});
+
+test("desktop confirmation becomes terminal even when pending still returns the approval", async ({ page }) => {
+  await mockPending(page);
+  let confirmPosts = 0;
+  await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => route.fulfill({ json: initialOptions }));
+  await page.route(apiUrl("/admin/outbound/confirm"), async (route) => {
+    confirmPosts += 1;
+    await route.fulfill({ status: 201, json: { id: "outbound-terminal", status: "COMPLETED", actualQuantity: "2", amount: "200.00" } });
+  });
+
+  await loginAs(page, "/admin/outbound", "ADMIN");
+  await page.getByRole("button", { name: "办理出库" }).click();
+  const line = page.getByTestId("outbound-decision-line-line-wine");
+  await line.getByLabel("标准物品").selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("一号仓");
+  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByLabel("实际数量").fill("2");
+  await page.getByRole("button", { name: "复核出库" }).click();
+  await page.getByRole("button", { name: "确认并提交" }).click();
+
+  await expect(page.getByRole("status")).toContainText("outbound-terminal");
+  await expect(page.getByRole("button", { name: "确认并提交" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "办理出库" })).toBeDisabled();
+  await page.waitForTimeout(50);
+  expect(confirmPosts).toBe(1);
+});
+
+test("mobile locks the active editor while the final options reload is pending", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockPending(page);
+  const reloadResponse = deferred();
+  let reloadStarted!: () => void;
+  const reloadRequestStarted = new Promise<void>((resolve) => { reloadStarted = resolve; });
+  let optionReads = 0;
+  await page.route(apiUrl("/admin/outbound/approval-1/options"), async (route) => {
+    optionReads += 1;
+    if (optionReads === 1) return route.fulfill({ json: initialOptions });
+    reloadStarted();
+    await reloadResponse.promise;
+    return route.fulfill({ json: initialOptions });
+  });
+  await page.route(apiUrl("/admin/outbound/confirm"), (route) => route.fulfill({ status: 201, json: { id: "mobile-safe", status: "COMPLETED", actualQuantity: "2", amount: "200.00" } }));
+
+  await loginAs(page, "/admin/outbound", "ADMIN");
+  await page.getByRole("button", { name: "办理出库" }).click();
+  const line = page.getByTestId("outbound-decision-line-line-wine");
+  await line.getByLabel("标准物品").selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("一号仓");
+  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByLabel("实际数量").fill("2");
+  await page.getByRole("button", { name: "确认出库" }).click();
+  await reloadRequestStarted;
+
+  await expect(page.getByRole("button", { name: "返回待办" })).toBeDisabled();
+  await expect(line.getByLabel("标准物品")).toBeDisabled();
+  await expect(line.getByLabel("实际数量")).toBeDisabled();
+  await expect(line.getByRole("button", { name: "本项不出库" })).toBeDisabled();
+  reloadResponse.release();
+  await expect(page.getByRole("status")).toContainText("mobile-safe");
+});
+
+test("mobile offers retry and return after the first options request fails", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockPending(page);
+  let optionReads = 0;
+  await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => {
+    optionReads += 1;
+    return optionReads === 1
+      ? route.fulfill({ status: 503, json: { error: "temporary failure" } })
+      : route.fulfill({ json: initialOptions });
+  });
+
+  await loginAs(page, "/admin/outbound", "ADMIN");
+  await page.getByRole("button", { name: "办理出库" }).click();
+  await expect(page.getByRole("alert")).toHaveText("temporary failure");
+  await expect(page.getByLabel("标准物品")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "重试" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "返回待办" })).toBeVisible();
+  await page.getByRole("button", { name: "重试" }).click();
+  await expect(page.getByLabel("标准物品")).toBeVisible();
+  expect(optionReads).toBe(2);
+});
+
+test("mobile does not post an old decision after SPA navigation invalidates a pending reload", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockPending(page);
+  const reloadResponse = deferred();
+  let reloadStarted!: () => void;
+  const reloadRequestStarted = new Promise<void>((resolve) => { reloadStarted = resolve; });
+  let optionReads = 0;
+  let confirmPosts = 0;
+  await page.route(apiUrl("/admin/outbound/approval-1/options"), async (route) => {
+    optionReads += 1;
+    if (optionReads === 1) return route.fulfill({ json: initialOptions });
+    reloadStarted();
+    await reloadResponse.promise;
+    return route.fulfill({ json: initialOptions });
+  });
+  await page.route(apiUrl("/admin/outbound/confirm"), (route) => {
+    confirmPosts += 1;
+    return route.fulfill({ status: 201, json: { id: "must-not-submit" } });
+  });
+
+  await loginAs(page, "/admin/outbound", "ADMIN");
+  await page.getByRole("button", { name: "办理出库" }).click();
+  const line = page.getByTestId("outbound-decision-line-line-wine");
+  await line.getByLabel("标准物品").selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("一号仓");
+  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByLabel("实际数量").fill("2");
+  await page.getByRole("button", { name: "确认出库" }).click();
+  await reloadRequestStarted;
+  await page.getByRole("link", { name: "首页" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  reloadResponse.release();
+  await page.waitForTimeout(100);
+  expect(confirmPosts).toBe(0);
+});
+
+test("a reason hidden by full issuance is omitted from the decisions payload", async ({ page }) => {
+  await mockPending(page);
+  let submitted: unknown;
+  await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => route.fulfill({ json: initialOptions }));
+  await page.route(apiUrl("/admin/outbound/confirm"), async (route) => {
+    submitted = route.request().postDataJSON();
+    await route.fulfill({ status: 201, json: { id: "outbound-full", status: "COMPLETED", actualQuantity: "2", amount: "200.00" } });
+  });
+
+  await loginAs(page, "/admin/outbound", "ADMIN");
+  await page.getByRole("button", { name: "办理出库" }).click();
+  const line = page.getByTestId("outbound-decision-line-line-wine");
+  await line.getByLabel("标准物品").selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("一号仓");
+  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByLabel("实际数量").fill("1");
+  await line.getByLabel("少出 / 零出原因").fill("曾经少出");
+  await line.getByLabel("实际数量").fill("2");
+  await page.getByRole("button", { name: "复核出库" }).click();
+  await page.getByRole("button", { name: "确认并提交" }).click();
+
+  expect(submitted).toEqual({
+    approvalId: "approval-1",
+    decisions: [{
+      approvalLineId: "line-wine",
+      selectedItemId: "item-maotai",
+      allocations: [{ warehouseId: "一号仓", batchId: "期初-260827", quantity: "2" }],
+    }],
+  });
+});
+
+test("the latest sync-failure refresh wins when an older response finishes last", async ({ page }) => {
+  await mockPending(page);
+  let overlapping = false;
+  let overlapReads = 0;
+  let olderStarted!: () => void;
+  const olderRequestStarted = new Promise<void>((resolve) => { olderStarted = resolve; });
+  const olderResponse = deferred();
+  await page.unroute(apiUrl("/admin/approvals/sync-failures?limit=20"));
+  await page.route(apiUrl("/admin/approvals/sync-failures?limit=20"), async (route) => {
+    if (!overlapping) return route.fulfill({ json: [] });
+    overlapReads += 1;
+    if (overlapReads === 1) {
+      olderStarted();
+      await olderResponse.promise;
+      return route.fulfill({ json: [{ weComSpNo: "older", attemptedAt: "2026-09-04T01:00:00.000Z", error: "旧响应" }] });
+    }
+    return route.fulfill({ json: [{ weComSpNo: "newer", attemptedAt: "2026-09-04T02:00:00.000Z", error: "新响应" }] });
+  });
+
+  await loginAs(page, "/admin/outbound", "ADMIN");
+  overlapping = true;
+  await page.getByRole("button", { name: "刷新" }).click();
+  await olderRequestStarted;
+  await page.getByRole("button", { name: "刷新" }).click();
+  await expect(page.getByTestId("approval-sync-failures")).toContainText("管理员通知");
+  olderResponse.release();
+  await page.waitForTimeout(50);
+  const failures = page.getByTestId("approval-sync-failures");
+  await failures.locator("summary").click();
+  await expect(failures).toContainText("newer");
+  await expect(failures).not.toContainText("older");
+});
+
+test("desktop item change can be cancelled and the standard-item control precedes allocation controls", async ({ page }) => {
+  await mockPending(page);
+  await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => route.fulfill({ json: initialOptions }));
+  await loginAs(page, "/admin/outbound", "ADMIN");
+  await page.getByRole("button", { name: "办理出库" }).click();
+  const line = page.getByTestId("outbound-decision-line-line-wine");
+  const item = line.getByLabel("标准物品");
+  const warehouse = line.getByLabel("实际仓库");
+  const batch = line.getByLabel("采购批次");
+  expect(await item.evaluate((node, other) => Boolean(node.compareDocumentPosition(other as Node) & Node.DOCUMENT_POSITION_FOLLOWING), await warehouse.elementHandle())).toBe(true);
+  expect(await item.evaluate((node, other) => Boolean(node.compareDocumentPosition(other as Node) & Node.DOCUMENT_POSITION_FOLLOWING), await batch.elementHandle())).toBe(true);
+  await item.selectOption("item-maotai");
+  await warehouse.selectOption("一号仓");
+  await batch.selectOption("期初-260827");
+  await line.getByLabel("实际数量").fill("1");
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await item.selectOption("item-wine");
+  await expect(item).toHaveValue("item-maotai");
+  await expect(warehouse).toHaveValue("一号仓");
+  await expect(batch).toHaveValue("期初-260827");
+});
+
+test("exact legacy approvals show a locked standard item instead of an editable selector", async ({ page }) => {
+  const lockedApproval = {
+    ...intentApproval,
+    id: "approval-locked",
+    lines: [{ ...intentApproval.lines[0], id: "line-locked", itemId: "item-maotai", legacyResolutionStatus: "EXACT_LOCKED" }],
+  };
+  const lockedOptions = {
+    ...initialOptions,
+    approvalId: "approval-locked",
+    lines: [{ approvalLineId: "line-locked", items: initialOptions.lines[0].items }],
+  };
+  await mockPending(page, [lockedApproval]);
+  await page.route(apiUrl("/admin/outbound/approval-locked/options"), (route) => route.fulfill({ json: lockedOptions }));
+  await loginAs(page, "/admin/outbound", "ADMIN");
+  await page.getByRole("button", { name: "办理出库" }).click();
+  const line = page.getByTestId("outbound-decision-line-line-locked");
+  await expect(line).toContainText("标准物品（旧审批锁定）");
+  await expect(line).toContainText("BJ0002 飞天茅台 / 瓶");
+  await expect(line.getByLabel("标准物品")).toHaveCount(0);
 });
