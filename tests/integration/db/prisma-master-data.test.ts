@@ -21,6 +21,35 @@ function databaseConnectionString(connectionString: string, databaseName: string
   return url.toString();
 }
 
+async function waitForDatabaseClientsToDisconnect(adminPool: Pool, databaseName: string): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const result = await adminPool.query<{ disconnected: boolean }>(
+      `SELECT NOT EXISTS (
+        SELECT 1
+        FROM pg_stat_activity
+        WHERE datname = $1
+      ) AS disconnected`,
+      [databaseName],
+    );
+
+    if (result.rows[0]?.disconnected) {
+      return;
+    }
+
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+  }
+
+  throw new Error(`Temporary database clients did not disconnect: ${databaseName}`);
+}
+
+async function captureCleanupError(cleanupErrors: unknown[], cleanup: () => Promise<void>): Promise<void> {
+  try {
+    await cleanup();
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
+}
+
 describe.skipIf(!databaseUrl)("Prisma master-data and identity persistence", () => {
   let prisma = createClient();
 
@@ -150,7 +179,7 @@ describe.skipIf(!databaseUrl)("Prisma master-data and identity persistence", () 
     prisma = createClient();
   });
 
-  it("normalizes previous-seed ids after migration without breaking dependent references", async () => {
+  it("normalizes previous-seed ids after migration without breaking dependent references", { timeout: 15_000 }, async () => {
     const sourceUrl = databaseUrl as string;
     const databaseName = `warehouse_task2_legacy_${process.pid}_${Date.now()}`;
     const adminUrl = databaseConnectionString(sourceUrl, "postgres");
@@ -158,6 +187,7 @@ describe.skipIf(!databaseUrl)("Prisma master-data and identity persistence", () 
     const adminPool = new Pool({ connectionString: adminUrl });
     let upgradePool: Pool | undefined;
     let upgradePrisma: PrismaClient | undefined;
+    let testFailure: { error: unknown } | undefined;
 
     try {
       await adminPool.query(`CREATE DATABASE "${databaseName}"`);
@@ -202,11 +232,39 @@ describe.skipIf(!databaseUrl)("Prisma master-data and identity persistence", () 
         { id: "warehouse-2", code: "WH-02" },
         { id: "warehouse-3", code: "WH-03" },
       ]);
-    } finally {
+    } catch (error) {
+      testFailure = { error };
+    }
+
+    const cleanupErrors: unknown[] = [];
+    await captureCleanupError(cleanupErrors, async () => {
       await upgradePrisma?.$disconnect();
+    });
+    await captureCleanupError(cleanupErrors, async () => {
       await upgradePool?.end();
-      await adminPool.query(`DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`);
+    });
+    await captureCleanupError(cleanupErrors, async () => {
+      await waitForDatabaseClientsToDisconnect(adminPool, databaseName);
+      await adminPool.query(`DROP DATABASE IF EXISTS "${databaseName}"`);
+    });
+    await captureCleanupError(cleanupErrors, async () => {
       await adminPool.end();
+    });
+
+    if (testFailure) {
+      if (cleanupErrors.length > 0) {
+        throw new AggregateError([testFailure.error, ...cleanupErrors], "Test and temporary database cleanup failed");
+      }
+
+      throw testFailure.error;
+    }
+
+    if (cleanupErrors.length === 1) {
+      throw cleanupErrors[0];
+    }
+
+    if (cleanupErrors.length > 1) {
+      throw new AggregateError(cleanupErrors, "Temporary database cleanup failed");
     }
   });
 });
