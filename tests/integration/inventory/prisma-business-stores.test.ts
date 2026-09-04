@@ -1,8 +1,10 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { PrismaPg } from "@prisma/adapter-pg";
-import { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { Pool, type PoolClient } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -35,6 +37,7 @@ const historicalMigrationPaths = [
   "prisma/migrations/20260824170000_opening_stock_import/migration.sql",
 ];
 const approvalIntentMigrationPath = "prisma/migrations/20260904183000_approval_intent_outbound_decisions/migration.sql";
+const legacySchemaFixturePath = "tests/integration/inventory/fixtures/prisma-business-stores-legacy.prisma";
 
 async function applyMigrations(client: PoolClient, paths: string[]) {
   for (const path of paths) {
@@ -48,14 +51,43 @@ function schemaUrl(connectionString: string): string {
   return url.toString();
 }
 
-function createClient(connectionString: string): PrismaClient {
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString }, { schema: schemaName }) });
+type PrismaClientConstructor = new (options: { adapter: PrismaPg }) => PrismaClient;
+
+async function createLegacyClient(connectionString: string): Promise<{
+  client: PrismaClient;
+  Client: PrismaClientConstructor;
+  generatedRoot: string;
+}> {
+  const temporaryRoot = resolve(process.cwd(), ".tmp_runtime");
+  mkdirSync(temporaryRoot, { recursive: true });
+  const generatedRoot = mkdtempSync(join(temporaryRoot, "warehouse-legacy-prisma-"));
+  const generatedClientPath = join(generatedRoot, "client");
+  const temporarySchemaPath = join(generatedRoot, "schema.prisma");
+  const prismaOutputPath = generatedClientPath.replaceAll("\\", "/");
+  const legacySchema = readFileSync(resolve(process.cwd(), legacySchemaFixturePath), "utf8")
+    .replace('provider = "prisma-client-js"', `provider = "prisma-client-js"\n  output   = "${prismaOutputPath}"`);
+  writeFileSync(temporarySchemaPath, legacySchema);
+  const prismaCliPath = resolve(process.cwd(), "node_modules/prisma/build/index.js");
+  const childEnvironment = { ...process.env, DATABASE_URL: connectionString };
+  execFileSync(process.execPath, [prismaCliPath, "generate", "--schema", temporarySchemaPath], {
+    cwd: process.cwd(),
+    env: childEnvironment,
+    stdio: "pipe",
+  });
+  const legacyClientModule = await import(pathToFileURL(join(generatedClientPath, "index.js")).href) as { PrismaClient: PrismaClientConstructor };
+  return {
+    client: new legacyClientModule.PrismaClient({ adapter: new PrismaPg({ connectionString }, { schema: schemaName }) }),
+    Client: legacyClientModule.PrismaClient,
+    generatedRoot,
+  };
 }
 
 describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
   let adminPool: Pool;
   let prisma: PrismaClient;
   let isolatedDatabaseUrl: string;
+  let legacyClientRoot: string;
+  let LegacyPrismaClient: PrismaClientConstructor;
 
   beforeAll(async () => {
     if (!/^warehouse_task3_\d+_\d+$/.test(schemaName)) throw new Error("unsafe test schema name");
@@ -66,12 +98,12 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     const migrationClient = await migrationPool.connect();
     try {
       await migrationClient.query(`SET search_path TO "${schemaName}"`);
-      await applyMigrations(migrationClient, [...historicalMigrationPaths, approvalIntentMigrationPath]);
+      await applyMigrations(migrationClient, historicalMigrationPaths);
     } finally {
       migrationClient.release();
       await migrationPool.end();
     }
-    prisma = createClient(isolatedDatabaseUrl);
+    ({ client: prisma, Client: LegacyPrismaClient, generatedRoot: legacyClientRoot } = await createLegacyClient(isolatedDatabaseUrl));
     await seedStructuralData(prisma);
     await prisma.item.create({
       data: {
@@ -105,7 +137,6 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     await prisma.stockAdjustment.deleteMany();
     await prisma.stocktake.deleteMany();
     await prisma.outboundAllocation.deleteMany();
-    await prisma.outboundDecisionLine.deleteMany();
     await prisma.outboundOrder.deleteMany();
     await prisma.inboundLine.deleteMany();
     await prisma.inboundOrder.deleteMany();
@@ -125,6 +156,15 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
       await adminPool.query(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`);
       await adminPool.end();
     }
+    if (legacyClientRoot) rmSync(legacyClientRoot, { recursive: true, force: true });
+  });
+
+  it("runs the legacy store contract against the pre-decision schema", async () => {
+    const [{ decisionTable }] = await prisma.$queryRawUnsafe<Array<{ decisionTable: string | null }>>(
+      `SELECT to_regclass('"${schemaName}"."OutboundDecisionLine"')::text AS "decisionTable"`,
+    );
+
+    expect(decisionTable).toBeNull();
   });
 
   async function recordStock(options: { warehouseId?: string; itemId?: string; batchNo?: string; autoGenerateBatchNo?: boolean; quantity?: string; source?: "INBOUND" | "OPENING_STOCK" } = {}) {
@@ -196,14 +236,7 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
         submittedAt: new Date("2026-08-11T00:00:00.000Z"),
         approvedAt: new Date("2026-08-11T00:05:00.000Z"),
         lines: {
-          create: {
-            id: `task3-line-${crypto.randomUUID()}`,
-            itemId,
-            requestedItemName: "Task 3 test item",
-            requestedQuantity: quantity,
-            unit: "box",
-            legacyResolutionStatus: "EXACT_LOCKED",
-          },
+          create: { id: `task3-line-${crypto.randomUUID()}`, itemId, requestedQuantity: quantity, unit: "box" },
         },
       },
       include: { lines: true },
@@ -351,8 +384,8 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     expect((await prisma.procurementBatch.findUniqueOrThrow({ where: { id: stock.batchId } })).remainingQuantity.toString()).toBe("5");
     const storedOutbound = await prisma.outboundOrder.findUniqueOrThrow({ where: { id: result.id }, include: { allocations: true } });
     expect(storedOutbound.orderNo).toMatch(/^OUT-/);
-    expect(storedOutbound.allocations.map((allocation) => ({ approvalLineId: allocation.approvalLineId, quantity: allocation.quantity.toString(), originalQuantity: allocation.originalQuantity.toString() }))).toEqual([
-      { approvalLineId: approval.lines[0]!.id, quantity: "5", originalQuantity: "5" },
+    expect(storedOutbound.allocations.map((allocation) => ({ quantity: allocation.quantity.toString(), originalQuantity: allocation.originalQuantity.toString() }))).toEqual([
+      { quantity: "5", originalQuantity: "5" },
     ]);
     await expect(prisma.approvalRequest.findUniqueOrThrow({ where: { id: approval.id } })).resolves.toMatchObject({ outboundStatus: "COMPLETED" });
     const outboundLedger = await prisma.inventoryLedgerEntry.findFirstOrThrow({ where: { referenceId: result.id } });
@@ -567,7 +600,7 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
   it("reads ledger and balances from PostgreSQL after reconnecting", async () => {
     const stock = await recordStock({ batchNo: "TASK3-RESTART" });
     await prisma.$disconnect();
-    prisma = createClient(isolatedDatabaseUrl);
+    prisma = new LegacyPrismaClient({ adapter: new PrismaPg({ connectionString: isolatedDatabaseUrl }, { schema: schemaName }) });
     const source = new PrismaReportSource(prisma);
 
     await expect(source.listEntries()).resolves.toEqual(expect.arrayContaining([
@@ -628,7 +661,8 @@ describe.skipIf(!databaseUrl)("approval intent outbound decision migration", () 
         actualQuantity: string;
         varianceReason: string | null;
         decidedBy: string;
-      }>(`SELECT "id", "selectedItemId", "actualQuantity"::text, "varianceReason", "decidedBy" FROM "OutboundDecisionLine"`)).rows.map((row) => ({
+        decidedAt: string;
+      }>(`SELECT "id", "selectedItemId", "actualQuantity"::text, "varianceReason", "decidedBy", to_char("decidedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS') AS "decidedAt" FROM "OutboundDecisionLine"`)).rows.map((row) => ({
         ...row,
         actualQuantity: new Prisma.Decimal(row.actualQuantity),
       }));
@@ -644,6 +678,7 @@ describe.skipIf(!databaseUrl)("approval intent outbound decision migration", () 
         actualQuantity: new Prisma.Decimal("5"),
         varianceReason: "historical shortage",
         decidedBy: "task3-operator",
+        decidedAt: "2026-08-11T01:00:00.000",
       }]);
       expect(migratedAllocations.every((row) => row.outboundDecisionLineId === decisions[0]!.id)).toBe(true);
       expect(migratedIntent).toEqual([{ requestedItemName: "Legacy item", legacyResolutionStatus: "REAPPLY_REQUIRED" }]);
@@ -651,6 +686,66 @@ describe.skipIf(!databaseUrl)("approval intent outbound decision migration", () 
       expect(afterBatches).toEqual(beforeBatches);
       expect(afterLedger).toEqual(beforeLedger);
       expect(afterOrder).toEqual(beforeOrder);
+
+      await client.query(`
+        INSERT INTO "ApprovalLine" ("id", "approvalRequestId", "requestedItemName", "requestedQuantity", "unit", "legacyResolutionStatus", "createdAt")
+        VALUES ('constraint-approval-line', 'legacy-approval', 'Constraint item', 1, 'box', 'NOT_APPLICABLE', '2026-08-11T02:00:00Z')
+      `);
+      await expect(client.query(`
+        INSERT INTO "OutboundDecisionLine" ("id", "outboundOrderId", "approvalLineId", "actualQuantity", "decidedBy", "decidedAt")
+        VALUES ('null-actual-decision', 'legacy-outbound', 'constraint-approval-line', NULL, 'operator', '2026-08-11T02:00:00Z')
+      `)).rejects.toThrow(/null value.*actualQuantity/i);
+      await client.query(`
+        INSERT INTO "OutboundDecisionLine" ("id", "outboundOrderId", "approvalLineId", "actualQuantity", "decidedBy", "decidedAt")
+        VALUES ('constraint-decision', 'legacy-outbound', 'constraint-approval-line', 0, 'operator', '2026-08-11T02:00:00Z')
+      `);
+      await expect(client.query(`
+        INSERT INTO "OutboundDecisionLine" ("id", "outboundOrderId", "approvalLineId", "actualQuantity", "decidedBy", "decidedAt")
+        VALUES ('duplicate-decision', 'legacy-outbound', 'constraint-approval-line', 0, 'operator', '2026-08-11T02:00:00Z')
+      `)).rejects.toThrow(/unique constraint/i);
+      await expect(client.query(`UPDATE "OutboundAllocation" SET "outboundDecisionLineId" = NULL WHERE "id" = 'legacy-allocation-1'`))
+        .rejects.toThrow(/null value.*outboundDecisionLineId/i);
+      await expect(client.query(`UPDATE "OutboundAllocation" SET "outboundDecisionLineId" = 'missing-decision' WHERE "id" = 'legacy-allocation-1'`))
+        .rejects.toThrow(/foreign key constraint/i);
+      const oldColumns = (await client.query(`
+        SELECT "column_name"
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'OutboundAllocation'
+          AND column_name = 'approvalLineId'
+      `)).rows;
+      expect(oldColumns).toEqual([]);
+    });
+  });
+
+  it("creates a zero decision and does not copy an order reason to a full decision", async () => {
+    await withHistoricalSchema(async (client) => {
+      await seedHistoricalOutbound(client, [
+        { id: "legacy-allocation-1", itemId: "legacy-item", batchId: "legacy-batch-1", quantity: "2", amount: "25.00" },
+        { id: "legacy-allocation-2", itemId: "legacy-item", batchId: "legacy-batch-2", quantity: "3", amount: "37.50" },
+      ]);
+      await client.query(`UPDATE "ApprovalLine" SET "requestedQuantity" = 5 WHERE "id" = 'legacy-approval-line'`);
+      await client.query(`
+        INSERT INTO "ApprovalLine" ("id", "approvalRequestId", "itemId", "requestedQuantity", "unit", "createdAt")
+        VALUES ('legacy-zero-line', 'legacy-approval', 'legacy-item', 2, 'box', '2026-08-11T00:00:00Z')
+      `);
+
+      await client.query(readFileSync(resolve(process.cwd(), approvalIntentMigrationPath), "utf8"));
+
+      const decisions = (await client.query<{
+        approvalLineId: string;
+        selectedItemId: string | null;
+        actualQuantity: string;
+        varianceReason: string | null;
+      }>(`
+        SELECT "approvalLineId", "selectedItemId", "actualQuantity"::text, "varianceReason"
+        FROM "OutboundDecisionLine"
+        ORDER BY "approvalLineId"
+      `)).rows;
+      expect(decisions).toEqual([
+        { approvalLineId: "legacy-approval-line", selectedItemId: "legacy-item", actualQuantity: "5.0000", varianceReason: null },
+        { approvalLineId: "legacy-zero-line", selectedItemId: null, actualQuantity: "0.0000", varianceReason: "historical shortage" },
+      ]);
     });
   });
 
@@ -713,7 +808,7 @@ async function seedHistoricalOutbound(client: PoolClient, allocations: Array<{ i
       ('legacy-balance-2', 'legacy-warehouse', 'legacy-item', 'legacy-batch-2', 7, 12.5, '2026-08-11T00:00:00Z'),
       ('legacy-balance-other', 'legacy-warehouse', 'legacy-item-2', 'legacy-batch-other', 10, 12.5, '2026-08-11T00:00:00Z');
     INSERT INTO "OutboundOrder" ("id", "approvalRequestId", "orderNo", "status", "actualQuantity", "amount", "reason", "issuedAt", "operatorId", "createdAt")
-      VALUES ('legacy-outbound', 'legacy-approval', 'OUT-LEGACY', 'PARTIALLY_ISSUED', 5, 62.50, 'historical shortage', '2026-08-11T01:00:00Z', 'task3-operator', '2026-08-11T01:00:00Z');
+      VALUES ('legacy-outbound', 'legacy-approval', 'OUT-LEGACY', 'PARTIALLY_ISSUED', 5, 62.50, 'historical shortage', '2026-08-11T01:00:00Z', 'task3-operator', '2026-08-11T00:30:00Z');
   `);
 
   for (const allocation of allocations) {
