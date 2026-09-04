@@ -15,6 +15,7 @@ import { ReturnService } from "../../../apps/api/src/application/inventory/retur
 import { StocktakeService } from "../../../apps/api/src/application/inventory/stocktake-service.js";
 import { TransferService } from "../../../apps/api/src/application/inventory/transfer-service.js";
 import { PeriodCloseService } from "../../../apps/api/src/application/periods/period-close-service.js";
+import { ApprovalSyncQueryService } from "../../../apps/api/src/application/wecom/approval-sync-query-service.js";
 import { ApprovalSyncService, type ApprovalSyncRecord, type ApprovalSyncStore } from "../../../apps/api/src/application/wecom/approval-sync-service.js";
 import type { WeComApprovalPayload } from "../../../apps/api/src/infrastructure/wecom/approval-parser.js";
 import { createAccountingPeriod } from "../../../apps/api/src/domain/periods/accounting-period.js";
@@ -1358,6 +1359,75 @@ describe.skipIf(!databaseUrl)("Prisma approval synchronization after the intent 
       }),
     ]);
     await expect(prisma.syncAttempt.count({ where: { weComSpNo: record.weComSpNo } })).resolves.toBe(2);
+  });
+
+  it("reads only recent failed synchronization attempts in descending order", async () => {
+    await prisma.syncAttempt.createMany({
+      data: [
+        {
+          id: "sync-attempt-old-failure",
+          weComSpNo: "2026090400000011",
+          status: "FAILED",
+          attemptNo: 1,
+          payload: { callback: "private-old-callback" },
+          error: "approval form is malformed",
+          attemptedAt: new Date("2026-09-04T01:00:00.000Z"),
+        },
+        {
+          id: "sync-attempt-success",
+          weComSpNo: "2026090400000012",
+          status: "SUCCEEDED",
+          attemptNo: 1,
+          payload: { access_token: "private-success-token" },
+          attemptedAt: new Date("2026-09-04T03:00:00.000Z"),
+        },
+        {
+          id: "sync-attempt-new-failure",
+          weComSpNo: "2026090400000013",
+          status: "FAILED",
+          attemptNo: 1,
+          payload: { EncodingAESKey: "private-aes-key", cookie: "private-cookie" },
+          error: "Secret private-secret appeared in callback headers",
+          attemptedAt: new Date("2026-09-04T02:00:00.000Z"),
+        },
+      ],
+    });
+
+    const failures = await new ApprovalSyncQueryService(new PrismaApprovalSyncStore(prisma)).listRecentFailures(2);
+
+    expect(failures).toEqual([
+      {
+        weComSpNo: "2026090400000013",
+        attemptedAt: "2026-09-04T02:00:00.000Z",
+        error: "approval synchronization failed",
+      },
+      {
+        weComSpNo: "2026090400000011",
+        attemptedAt: "2026-09-04T01:00:00.000Z",
+        error: "approval form is malformed",
+      },
+    ]);
+    expect(JSON.stringify(failures)).not.toMatch(/private-|access_token|headers|secret|token|EncodingAESKey|cookie/i);
+  });
+
+  it("counts reapplication work and post-issue revocation exceptions separately", async () => {
+    const store = new PrismaApprovalSyncStore(prisma);
+    await store.save(intentRecord({
+      id: "sync-reapply-approval",
+      weComSpNo: "2026090400000021",
+      outboundStatus: "REAPPLY_REQUIRED",
+      lines: [{ requestedItemName: "Legacy item", requestedQuantity: "1", unit: "box", legacyResolutionStatus: "REAPPLY_REQUIRED" }],
+    }));
+    await store.save(intentRecord({
+      id: "sync-revoked-approval",
+      weComSpNo: "2026090400000022",
+      status: "REVOKED",
+      outboundStatus: "COMPLETED",
+    }));
+    const source = new PrismaReportSource(prisma);
+
+    await expect(source.getPendingOutboundCount()).resolves.toBe(1);
+    await expect(source.getApprovalExceptionCount()).resolves.toBe(1);
   });
 
   it("promotes a pre-migration reapply line only when exact selector evidence is persisted", async () => {

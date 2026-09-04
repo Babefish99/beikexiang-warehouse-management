@@ -7,7 +7,6 @@ import {
   type AllocationBatch,
   type AllocationLine,
   type AllocationValidationResult,
-  type OutboundAllocationInput,
   type OutboundDecisionInput,
   type SelectableOutboundItem,
 } from "./outbound-allocator.js";
@@ -64,12 +63,6 @@ export interface ConfirmOutboundInput {
   approvalId: string;
   operatorId: string;
   decisions: OutboundDecisionInput[];
-}
-
-interface LegacyConfirmOutboundInput {
-  approvalId: string;
-  allocations: OutboundAllocationInput[];
-  reason?: string;
 }
 
 export interface OutboundStore {
@@ -356,33 +349,6 @@ function compareItemCode(left: SelectableOutboundItem, right: SelectableOutbound
   return left.code === right.code ? left.id.localeCompare(right.id) : left.code.localeCompare(right.code);
 }
 
-function toLegacyDecisions(approval: PendingApproval, input: LegacyConfirmOutboundInput): OutboundDecisionInput[] {
-  const allocationsByLine = new Map<string, OutboundAllocationInput[]>();
-  for (const allocation of input.allocations) {
-    const allocations = allocationsByLine.get(allocation.approvalLineId) ?? [];
-    allocations.push(allocation);
-    allocationsByLine.set(allocation.approvalLineId, allocations);
-  }
-  const decisions: OutboundDecisionInput[] = approval.lines.map((line) => {
-    const allocations = allocationsByLine.get(line.id) ?? [];
-    allocationsByLine.delete(line.id);
-    return {
-      approvalLineId: line.id,
-      selectedItemId: allocations.length > 0 ? line.itemId : undefined,
-      allocations: allocations.map(({ warehouseId, batchId, quantity }) => ({ warehouseId, batchId, quantity })),
-      varianceReason: input.reason,
-    };
-  });
-  for (const [approvalLineId, allocations] of allocationsByLine) {
-    decisions.push({
-      approvalLineId,
-      allocations: allocations.map(({ warehouseId, batchId, quantity }) => ({ warehouseId, batchId, quantity })),
-      varianceReason: input.reason,
-    });
-  }
-  return decisions;
-}
-
 export class OutboundService {
   private readonly allocator = new OutboundAllocator();
 
@@ -432,23 +398,18 @@ export class OutboundService {
     };
   }
 
-  async confirm(input: ConfirmOutboundInput): Promise<OutboundOrderResult>;
-  /** @deprecated Task 7 will migrate the route to authenticated decision input. */
-  async confirm(input: LegacyConfirmOutboundInput): Promise<OutboundOrderResult>;
-  async confirm(input: ConfirmOutboundInput | LegacyConfirmOutboundInput): Promise<OutboundOrderResult> {
+  async confirm(input: ConfirmOutboundInput): Promise<OutboundOrderResult> {
     const approval = await this.store.getApproval(input.approvalId);
     if (!approval) throw new Error(`approval not found: ${input.approvalId}`);
     if (approval.status !== "PENDING_OUTBOUND") throw new Error("approval is already closed");
-    const decisions = "decisions" in input ? input.decisions : toLegacyDecisions(approval, input);
-    const operatorId = "decisions" in input ? input.operatorId : "system";
-    const selectedItemIds = decisions.flatMap((decision) => decision.selectedItemId ? [decision.selectedItemId] : []);
+    const selectedItemIds = input.decisions.flatMap((decision) => decision.selectedItemId ? [decision.selectedItemId] : []);
     const [items, batches] = await Promise.all([
       this.store.listCandidateItems(),
       this.store.listBatches(selectedItemIds),
     ]);
-    const validation = this.allocator.validate({ lines: approval.lines, items, batches, decisions });
+    const validation = this.allocator.validate({ lines: approval.lines, items, batches, decisions: input.decisions });
     await this.assertPeriodOpen?.();
-    return this.store.commitOutbound(approval, validation, operatorId);
+    return this.store.commitOutbound(approval, validation, input.operatorId);
   }
 
   async cancelBeforeIssue(input: { approvalId: string; reason: string }): Promise<{ approvalId: string; status: "VOIDED" }> {

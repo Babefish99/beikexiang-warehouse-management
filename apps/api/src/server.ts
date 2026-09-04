@@ -22,6 +22,7 @@ import { PeriodCloseService, type AccountingPeriodStore } from "./application/pe
 import { InventoryReportService, TransactionReportService } from "./application/reports/report-query-service.js";
 import { WarehouseService } from "./application/warehouses/warehouse-service.js";
 import { ApprovalSyncService } from "./application/wecom/approval-sync-service.js";
+import { ApprovalSyncQueryService } from "./application/wecom/approval-sync-query-service.js";
 import { createPersistenceAdapters, readServerConfig } from "./infrastructure/db/runtime.js";
 import { ExcelOpeningStockWorkbookParser } from "./infrastructure/import/excel-opening-stock-workbook-parser.js";
 import { HttpApprovalGateway } from "./infrastructure/wecom/approval-gateway.js";
@@ -29,6 +30,7 @@ import { ApprovalParser } from "./infrastructure/wecom/approval-parser.js";
 import { WeComOAuthClient } from "./infrastructure/wecom/oauth-client.js";
 import { WeComSignatureVerifier } from "./infrastructure/wecom/signature-verifier.js";
 import { registerApprovalResyncRoute } from "./routes/admin/approvals-resync.js";
+import { registerApprovalSyncFailureRoutes } from "./routes/admin/approval-sync-failures.js";
 import "./routes/admin/admin-request-context.js";
 import { registerInboundRoutes } from "./routes/admin/inbound.js";
 import { registerItemRoutes } from "./routes/admin/items.js";
@@ -154,6 +156,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     },
     getStocktakeNotice: async () => ({ count: await readSource.getStocktakeCount(), href: "/admin/stocktake" }),
     getAnomalyCount: () => readSource.getAnomalyCount(),
+    getApprovalExceptionCount: () => readSource.getApprovalExceptionCount(),
   });
   const listReportEntries = () => readSource.listEntries();
   const inventoryReportService = new InventoryReportService(listReportEntries);
@@ -182,6 +185,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     store: inventoryPersistence.approvalSyncStore,
     approvalTemplateIds: config.approvalTemplateIds,
   });
+  const approvalSyncQueryService = new ApprovalSyncQueryService(inventoryPersistence.approvalSyncStore);
   const signatureVerifier = new WeComSignatureVerifier({
     token: process.env.WE_COM_CALLBACK_TOKEN ?? "",
     encodingAesKey: process.env.WE_COM_ENCODING_AES_KEY ?? "",
@@ -327,6 +331,7 @@ export function buildServer(options: BuildServerOptions = {}) {
   });
   registerApprovalCallbackRoute(app, { verifier: signatureVerifier, syncService: approvalSyncService });
   registerApprovalResyncRoute(app, { syncService: approvalSyncService });
+  registerApprovalSyncFailureRoutes(app, { queryService: approvalSyncQueryService });
   registerItemRoutes(app, { itemService });
   registerWarehouseRoutes(app, { warehouseService });
   registerInboundRoutes(app, { inboundService });

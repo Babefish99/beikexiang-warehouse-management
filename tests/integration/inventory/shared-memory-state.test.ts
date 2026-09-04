@@ -331,7 +331,11 @@ describe("shared inventory memory state", () => {
         headers: { cookie },
         payload: {
           approvalId,
-          allocations: [{ approvalLineId, warehouseId: "warehouse-1", batchId, quantity: "2" }],
+          decisions: [{
+            approvalLineId,
+            selectedItemId: item.id,
+            allocations: [{ warehouseId: "warehouse-1", batchId, quantity: "2" }],
+          }],
         },
       });
       expect(confirm.statusCode).toBe(200);

@@ -14,6 +14,7 @@ import { InMemoryAccountingPeriodStore, type AccountingPeriodStore } from "../..
 import type { ReportEntry } from "../../application/reports/report-query-service.js";
 import { InMemoryWarehouseRepository, type WarehouseRepository } from "../../application/warehouses/warehouse-service.js";
 import { InMemoryApprovalSyncStore, type ApprovalSyncStore } from "../../application/wecom/approval-sync-service.js";
+import type { ApprovalSyncFailureSource } from "../../application/wecom/approval-sync-query-service.js";
 import type { ItemDefinition } from "../../domain/items/item.js";
 import { CANONICAL_ITEM_CATEGORIES } from "../../domain/items/item-category.js";
 import type { WarehouseDefinition } from "../../domain/warehouses/warehouse.js";
@@ -83,6 +84,7 @@ export interface InventoryReadSource {
   getPendingOutboundCount(): Promise<number>;
   getStocktakeCount(): Promise<number>;
   getAnomalyCount(): Promise<number>;
+  getApprovalExceptionCount(): Promise<number>;
   getUnpostedAdjustmentCount(): Promise<number>;
 }
 
@@ -93,7 +95,7 @@ export interface InventoryPersistence {
   movementStore: MovementStore;
   stocktakeStore: StocktakeStore;
   periodStore: AccountingPeriodStore;
-  approvalSyncStore: ApprovalSyncStore;
+  approvalSyncStore: ApprovalSyncStore & ApprovalSyncFailureSource;
   readSource: InventoryReadSource;
 }
 
@@ -540,9 +542,10 @@ export function createPersistenceAdapters(options: { driver: "memory" } | { driv
           async listBatches() { return entryStore.batches(); },
           async listBalances() { return entryStore.balances(); },
           async listEntries() { return entryStore.ledger().map(({ batchId: _batchId, referenceId: _referenceId, ...entry }) => entry); },
-          async getPendingOutboundCount() { return [...state.approvals.values()].filter((approval) => approval.outboundStatus === "PENDING_OUTBOUND").length; },
+          async getPendingOutboundCount() { return [...state.approvals.values()].filter((approval) => approval.outboundStatus === "PENDING_OUTBOUND" || approval.outboundStatus === "REAPPLY_REQUIRED").length; },
           async getStocktakeCount() { return state.stocktakeAdjustments.length; },
           async getAnomalyCount() { return state.stocktakeAdjustments.filter((adjustment) => adjustment.quantityDelta !== "0").length; },
+          async getApprovalExceptionCount() { return [...state.approvals.values()].filter((approval) => approval.outboundStatus === "REVOCATION_EXCEPTION").length; },
           async getUnpostedAdjustmentCount() { return 0; },
         },
       },

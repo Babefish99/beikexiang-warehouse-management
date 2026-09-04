@@ -3,6 +3,7 @@ import { apiUrl, apiUrlPattern, loginAs } from "./mobile-test-helpers";
 
 const tasks = [
   { id: "pending-outbound", kind: "PENDING_OUTBOUND", title: "待出库审批", description: "1 条审批待确认出库。", href: "/admin/outbound", priority: 1 },
+  { id: "approval-exception", kind: "APPROVAL_EXCEPTION", title: "审批撤销异常", description: "1 条已结案审批被撤销。", href: "/admin/outbound", priority: 1 },
   { id: "low-stock-item-1", kind: "LOW_STOCK", title: "库存预警：Tea", description: "Tea 当前库存 1，低于最低库存 3。", href: "/admin/inventory?query=TEA-001", priority: 1 },
   { id: "anomaly", kind: "ANOMALY", title: "盘点差异待处理", description: "1 条盘点差异需要处理。", href: "/admin/stocktake", priority: 1 },
   { id: "stocktake", kind: "STOCKTAKE", title: "盘点调整待复核", description: "1 条记录等待复核。", href: "/admin/stocktake", priority: 2 },
@@ -12,7 +13,7 @@ const tasks = [
 async function openMobileNotificationCenter(page: Page, beforeOpen?: () => void) {
   await page.getByRole("button", { name: "更多" }).click();
   const moreSheet = page.getByRole("dialog", { name: "更多功能" });
-  await expect(moreSheet.getByRole("button", { name: /通知中心/ })).toContainText("5");
+  await expect(moreSheet.getByRole("button", { name: /通知中心/ })).toContainText("6");
   beforeOpen?.();
   await moreSheet.getByRole("button", { name: /通知中心/ }).click();
   return page.getByRole("dialog", { name: "通知与待办" });
@@ -27,6 +28,7 @@ test("mobile notifications open as a readable task sheet with real routes", asyn
   const center = await openMobileNotificationCenter(page);
   await expect(center).toBeVisible();
   await expect(center.getByRole("link", { name: /待出库审批/ })).toHaveAttribute("href", "/admin/outbound");
+  await expect(center.getByRole("link", { name: /审批撤销异常/ })).toHaveAttribute("href", "/admin/outbound");
   await expect(center.getByRole("link", { name: /库存预警：Tea/ })).toHaveAttribute("href", "/admin/inventory?query=TEA-001");
   await expect(center.getByText("请在电脑端处理")).toHaveCount(3);
 
@@ -195,7 +197,7 @@ test("dashboard notification metrics follow the shared live task snapshot", asyn
   });
   await loginAs(page, "/", "ADMIN");
   const overview = page.getByRole("region", { name: "今日概览" });
-  await expect(overview.getByText("通知").locator("..").getByText("5")).toBeVisible();
+  await expect(overview.getByText("通知").locator("..").getByText("6")).toBeVisible();
 
   const requestsBeforeCompletion = requestCount;
   tasksResolved = true;

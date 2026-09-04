@@ -1,11 +1,12 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 
+import type { ApprovalSyncFailureSource } from "../../application/wecom/approval-sync-query-service.js";
 import { deriveOutboundStatus, type ApprovalSyncAttemptInput, type ApprovalSyncRecord, type ApprovalSyncStore } from "../../application/wecom/approval-sync-service.js";
 import type { InventoryTransactionClient } from "./prisma-inventory-transaction.js";
 
 const closedOutboundStatuses = new Set(["COMPLETED", "PARTIALLY_ISSUED", "UNAVAILABLE", "VOIDED", "REVOCATION_EXCEPTION"]);
 
-export class PrismaApprovalSyncStore implements ApprovalSyncStore {
+export class PrismaApprovalSyncStore implements ApprovalSyncStore, ApprovalSyncFailureSource {
   constructor(private readonly prisma: PrismaClient) {}
 
   async findBySpNo(weComSpNo: string): Promise<ApprovalSyncRecord | undefined> {
@@ -62,6 +63,21 @@ export class PrismaApprovalSyncStore implements ApprovalSyncStore {
       await lockApprovalSync(transaction, attempt.weComSpNo);
       await createAttempt(transaction, attempt);
     });
+  }
+
+  async listRecentFailures(limit: number) {
+    const take = Math.min(100, Math.max(1, Math.trunc(limit)));
+    const attempts = await this.prisma.syncAttempt.findMany({
+      where: { status: "FAILED" },
+      orderBy: [{ attemptedAt: "desc" }, { id: "desc" }],
+      take,
+      select: { weComSpNo: true, attemptedAt: true, error: true },
+    });
+    return attempts.map((attempt) => ({
+      weComSpNo: attempt.weComSpNo,
+      attemptedAt: attempt.attemptedAt.toISOString(),
+      error: attempt.error ?? undefined,
+    }));
   }
 
   private async upsertApproval(transaction: InventoryTransactionClient, record: ApprovalSyncRecord): Promise<ApprovalSyncRecord["outboundStatus"]> {

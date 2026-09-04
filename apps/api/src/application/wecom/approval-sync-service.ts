@@ -1,6 +1,7 @@
 import type { ApprovalGateway } from "../../infrastructure/wecom/approval-gateway.js";
 import type { ParsedApproval, WeComApprovalPayload } from "../../infrastructure/wecom/approval-parser.js";
 import { createInventoryMemoryState, type InventoryApprovalOutboundStatus, type InventoryApprovalState, type InventoryMemoryState } from "../inventory/inventory-memory-state.js";
+import type { ApprovalSyncFailureSource } from "./approval-sync-query-service.js";
 
 export type ApprovalOutboundStatus = InventoryApprovalOutboundStatus;
 
@@ -28,11 +29,12 @@ export interface ApprovalSyncAttempt {
   weComSpNo: string;
   status: "SUCCEEDED" | "FAILED";
   attemptNo: number;
+  attemptedAt: string;
   payload?: unknown;
   error?: string;
 }
 
-export type ApprovalSyncAttemptInput = Omit<ApprovalSyncAttempt, "attemptNo">;
+export type ApprovalSyncAttemptInput = Omit<ApprovalSyncAttempt, "attemptNo" | "attemptedAt">;
 
 export interface ApprovalSyncStore {
   findBySpNo(weComSpNo: string): Promise<ApprovalSyncRecord | undefined>;
@@ -45,7 +47,7 @@ export interface ApprovalDetailParser {
   parse(detail: WeComApprovalPayload): ParsedApproval | Promise<ParsedApproval>;
 }
 
-export class InMemoryApprovalSyncStore implements ApprovalSyncStore {
+export class InMemoryApprovalSyncStore implements ApprovalSyncStore, ApprovalSyncFailureSource {
   private readonly approvalRecords = new Map<string, ApprovalSyncRecord>();
   private readonly syncAttempts: ApprovalSyncAttempt[] = [];
   private readonly state?: InventoryMemoryState;
@@ -103,7 +105,7 @@ export class InMemoryApprovalSyncStore implements ApprovalSyncStore {
 
   async recordSyncAttempt(attempt: ApprovalSyncAttemptInput): Promise<void> {
     const attemptNo = this.syncAttempts.filter((stored) => stored.weComSpNo === attempt.weComSpNo).length + 1;
-    this.syncAttempts.push(structuredClone({ ...attempt, attemptNo }));
+    this.syncAttempts.push(structuredClone({ ...attempt, attemptNo, attemptedAt: new Date().toISOString() }));
   }
 
   async saveWithAttempt(record: ApprovalSyncRecord, attempt: ApprovalSyncAttemptInput): Promise<ApprovalOutboundStatus> {
@@ -121,6 +123,19 @@ export class InMemoryApprovalSyncStore implements ApprovalSyncStore {
 
   attempts(): ApprovalSyncAttempt[] {
     return this.syncAttempts.map((attempt) => structuredClone(attempt));
+  }
+
+  async listRecentFailures(limit: number) {
+    const take = Math.min(100, Math.max(1, Math.trunc(limit)));
+    return this.syncAttempts
+      .filter((attempt) => attempt.status === "FAILED")
+      .slice(-take)
+      .reverse()
+      .map((attempt) => ({
+        weComSpNo: attempt.weComSpNo,
+        attemptedAt: attempt.attemptedAt,
+        error: attempt.error,
+      }));
   }
 }
 

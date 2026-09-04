@@ -7,6 +7,8 @@ import {
   InMemoryOutboundStore,
   type PendingApproval,
 } from "../../../apps/api/src/application/inventory/outbound-service.js";
+import { InMemoryAuditService } from "../../../apps/api/src/infrastructure/audit/audit-service.js";
+import { createPersistenceAdapters } from "../../../apps/api/src/infrastructure/db/runtime.js";
 import { registerOutboundRoutes } from "../../../apps/api/src/routes/admin/outbound.js";
 import { buildServer } from "../../../apps/api/src/server.js";
 
@@ -47,9 +49,32 @@ function seedIntentApproval(store: InMemoryOutboundStore, overrides: Partial<Pen
   });
 }
 
+function seedSingleQuantityApproval(store: InMemoryOutboundStore): void {
+  store.seedApproval({
+    id: "approval-1",
+    weComSpNo: "202607230021",
+    status: "PENDING_OUTBOUND",
+    lines: [{
+      id: "line-1",
+      requestedItemName: "Tea leaves",
+      requestedQuantity: "1",
+      unit: "box",
+      itemId: "item-1",
+      legacyResolutionStatus: "EXACT_LOCKED",
+    }],
+  });
+}
+
 async function createSessionCookie(app: ReturnType<typeof buildServer>, role: "ADMIN" | "FINANCE"): Promise<string> {
   const response = await app.inject({ method: "GET", url: `/auth/local?returnTo=/admin/outbound&role=${role}`, remoteAddress: "127.0.0.1", headers: { host: "localhost:3001" } });
   return response.headers["set-cookie"] as string;
+}
+
+function addAdminActor(app: ReturnType<typeof Fastify>, id = "local-admin"): void {
+  app.decorateRequest("adminUser", undefined);
+  app.addHook("onRequest", async (request) => {
+    request.adminUser = { id, weComUserId: id, name: "Local Administrator", role: "ADMIN" };
+  });
 }
 
 beforeEach(() => {
@@ -329,6 +354,44 @@ describe("outbound service", () => {
   });
 });
 
+describe("in-memory outbound operational counts", () => {
+  it("counts reapplication work and post-issue revocation exceptions separately", async () => {
+    const persistence = createPersistenceAdapters({ driver: "memory" });
+
+    try {
+      await persistence.inventory.approvalSyncStore.save({
+        id: "reapply-approval",
+        weComSpNo: "2026090400000101",
+        sourceTemplateId: "legacy-template",
+        status: "APPROVED",
+        outboundStatus: "REAPPLY_REQUIRED",
+        applicantUserId: "applicant-1",
+        applicantName: "Applicant One",
+        purpose: "Legacy request",
+        submittedAt: "2026-09-04T00:00:00.000Z",
+        lines: [{ requestedItemName: "Legacy item", requestedQuantity: "1", unit: "box", legacyResolutionStatus: "REAPPLY_REQUIRED" }],
+      });
+      await persistence.inventory.approvalSyncStore.save({
+        id: "revoked-approval",
+        weComSpNo: "2026090400000102",
+        sourceTemplateId: "intent-template",
+        status: "REVOKED",
+        outboundStatus: "COMPLETED",
+        applicantUserId: "applicant-2",
+        applicantName: "Applicant Two",
+        purpose: "Revoked request",
+        submittedAt: "2026-09-04T00:00:00.000Z",
+        lines: [{ requestedItemName: "Issued item", requestedQuantity: "1", unit: "box", legacyResolutionStatus: "NOT_APPLICABLE" }],
+      });
+
+      await expect(persistence.inventory.readSource.getPendingOutboundCount()).resolves.toBe(1);
+      await expect(persistence.inventory.readSource.getApprovalExceptionCount()).resolves.toBe(1);
+    } finally {
+      await persistence.disconnect();
+    }
+  });
+});
+
 describe("outbound options route", () => {
   it("uses the approvalId path parameter and returns options", async () => {
     const app = Fastify();
@@ -386,6 +449,121 @@ describe("outbound options route", () => {
 });
 
 describe("outbound mutation routes", () => {
+  it("forwards only decision input and the authenticated administrator identity", async () => {
+    const app = Fastify();
+    addAdminActor(app);
+    const { store, service } = makeService();
+    seedSingleQuantityApproval(store);
+    const confirm = vi.spyOn(service, "confirm");
+    registerOutboundRoutes(app, { outboundService: service });
+    const decisions = [{
+      approvalLineId: "line-1",
+      selectedItemId: "item-1",
+      allocations: [{ warehouseId: "wh-1", batchId: "batch-1", quantity: "1" }],
+    }];
+
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/admin/outbound/confirm",
+        payload: { approvalId: "approval-1", decisions, operatorId: "forged-client-actor" },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(confirm).toHaveBeenCalledWith({ approvalId: "approval-1", operatorId: "local-admin", decisions });
+      expect(store.decisions()).toMatchObject([{ approvalLineId: "line-1", decidedBy: "local-admin" }]);
+    } finally { await app.close(); }
+  });
+
+  it("records only allowlisted confirmation request and result fields in the mutation audit", async () => {
+    const app = Fastify();
+    addAdminActor(app);
+    const auditService = new InMemoryAuditService();
+    app.decorate("auditService", auditService);
+    const { store, service } = makeService();
+    seedSingleQuantityApproval(store);
+    registerOutboundRoutes(app, { outboundService: service });
+    const decisions = [{
+      approvalLineId: "line-1",
+      selectedItemId: "item-1",
+      allocations: [{ warehouseId: "wh-1", batchId: "batch-1", quantity: "1" }],
+    }];
+
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/admin/outbound/confirm",
+        payload: {
+          approvalId: "approval-1",
+          decisions,
+          callbackPayload: "sensitive-callback-payload",
+          EncodingAESKey: "sensitive-aes-key",
+          headers: { authorization: "Bearer sensitive-access-token" },
+        },
+      });
+      const result = response.json();
+
+      expect(response.statusCode).toBe(200);
+      expect(auditService.events).toHaveLength(1);
+      expect(auditService.events[0]?.afterData).toEqual({
+        request: { approvalId: "approval-1", decisions },
+        result: {
+          id: result.id,
+          approvalId: "approval-1",
+          status: "COMPLETED",
+          actualQuantity: "1",
+          amount: "20.00",
+        },
+      });
+      expect(JSON.stringify(auditService.events)).not.toMatch(/sensitive|callbackPayload|EncodingAESKey|authorization/i);
+    } finally { await app.close(); }
+  });
+
+  it("defensively rejects confirmation when the administrator hook did not attach an actor", async () => {
+    const app = Fastify();
+    const { store, service } = makeService();
+    seedSingleQuantityApproval(store);
+    registerOutboundRoutes(app, { outboundService: service });
+
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/admin/outbound/confirm",
+        payload: {
+          approvalId: "approval-1",
+          decisions: [{
+            approvalLineId: "line-1",
+            selectedItemId: "item-1",
+            allocations: [{ warehouseId: "wh-1", batchId: "batch-1", quantity: "1" }],
+          }],
+        },
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(response.json()).toEqual({ error: "unauthorized" });
+    } finally { await app.close(); }
+  });
+
+  it("rejects the removed flat allocation request instead of assigning a system actor", async () => {
+    const app = Fastify();
+    addAdminActor(app);
+    const { service } = makeService();
+    registerOutboundRoutes(app, { outboundService: service });
+
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/admin/outbound/confirm",
+        payload: {
+          approvalId: "approval-1",
+          allocations: [{ approvalLineId: "line-1", warehouseId: "wh-1", batchId: "batch-1", quantity: "10" }],
+        },
+      });
+
+      expect(response.statusCode).toBe(400);
+    } finally { await app.close(); }
+  });
+
   it("cancels only a pending approval with a reason", async () => {
     const app = Fastify();
     const { service } = makeService();
@@ -411,17 +589,63 @@ describe("outbound mutation routes", () => {
 
   it("keeps duplicate confirmation and changed stock as conflicts", async () => {
     const app = Fastify();
+    addAdminActor(app);
     const { service } = makeService();
     registerOutboundRoutes(app, { outboundService: service });
     try {
-      const payload = { approvalId: "approval-1", allocations: [{ approvalLineId: "line-1", warehouseId: "wh-1", batchId: "batch-1", quantity: "10" }] };
+      const payload = {
+        approvalId: "approval-1",
+        decisions: [{
+          approvalLineId: "line-1",
+          selectedItemId: "item-1",
+          allocations: [{ warehouseId: "wh-1", batchId: "batch-1", quantity: "10" }],
+        }],
+      };
       expect((await app.inject({ method: "POST", url: "/admin/outbound/confirm", payload })).statusCode).toBe(200);
       expect((await app.inject({ method: "POST", url: "/admin/outbound/confirm", payload })).statusCode).toBe(409);
     } finally { await app.close(); }
   });
 
+  it.each([
+    {
+      name: "non-integer quantity",
+      prepare: (_store: InMemoryOutboundStore) => undefined,
+      decision: { approvalLineId: "line-1", selectedItemId: "item-1", allocations: [{ warehouseId: "wh-1", batchId: "batch-1", quantity: "1.5" }] },
+      error: "approval quantity must be a positive integer",
+    },
+    {
+      name: "unit mismatch",
+      prepare: (store: InMemoryOutboundStore) => {
+        store.seedItem({ id: "item-each", code: "EACH-1", name: "Each item", unit: "each", isActive: true });
+        store.seedBatch({ id: "batch-each", warehouseId: "wh-1", itemId: "item-each", remainingQuantity: "1", unitCost: "20" });
+      },
+      decision: { approvalLineId: "line-1", selectedItemId: "item-each", allocations: [{ warehouseId: "wh-1", batchId: "batch-each", quantity: "1" }] },
+      error: "selected item unit does not match approval unit",
+    },
+    {
+      name: "unknown approval line",
+      prepare: (_store: InMemoryOutboundStore) => undefined,
+      decision: { approvalLineId: "line-other", selectedItemId: "item-1", allocations: [{ warehouseId: "wh-1", batchId: "batch-1", quantity: "1" }] },
+      error: "approval decision lines must exactly match approval lines",
+    },
+  ])("maps $name to a 400 business response", async ({ prepare, decision, error }) => {
+    const app = Fastify();
+    addAdminActor(app);
+    const { store, service } = makeService();
+    prepare(store);
+    registerOutboundRoutes(app, { outboundService: service });
+
+    try {
+      const response = await app.inject({ method: "POST", url: "/admin/outbound/confirm", payload: { approvalId: "approval-1", decisions: [decision] } });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ error });
+    } finally { await app.close(); }
+  });
+
   it("returns 409 when stock changes between route validation and commit", async () => {
     const app = Fastify();
+    addAdminActor(app);
     const { store } = makeService();
     const service = new OutboundService({
       getApproval: (approvalId) => store.getApproval(approvalId),
@@ -441,7 +665,11 @@ describe("outbound mutation routes", () => {
         url: "/admin/outbound/confirm",
         payload: {
           approvalId: "approval-1",
-          allocations: [{ approvalLineId: "line-1", warehouseId: "wh-1", batchId: "batch-1", quantity: "10" }],
+          decisions: [{
+            approvalLineId: "line-1",
+            selectedItemId: "item-1",
+            allocations: [{ warehouseId: "wh-1", batchId: "batch-1", quantity: "10" }],
+          }],
         },
       });
 
