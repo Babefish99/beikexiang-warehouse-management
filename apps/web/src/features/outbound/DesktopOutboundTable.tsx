@@ -1,4 +1,4 @@
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { CheckCircle2 } from "lucide-react";
 
 import { inventoryStatusLabel } from "../inventory/inventory-status-label";
@@ -61,15 +61,23 @@ export function DesktopOutboundTable({ pending, onReloadOptions, onConfirm }: {
   onConfirm(input: { approvalId: string; decisions: NormalizedDecision[] }): Promise<OutboundResult>;
 }) {
   const [editors, setEditors] = useState<Record<string, EditorState>>({});
+  const mounted = useRef(true);
   const optionRequestEpochs = useRef<Record<string, number>>({});
   const submitLocks = useRef(new Set<string>());
   const completedApprovals = useRef(new Set<string>());
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      optionRequestEpochs.current = {};
+    };
+  }, []);
   const beginOptionsRequest = (approvalId: string) => {
     const epoch = (optionRequestEpochs.current[approvalId] ?? 0) + 1;
     optionRequestEpochs.current[approvalId] = epoch;
     return epoch;
   };
-  const isCurrentOptionsRequest = (approvalId: string, epoch: number) => optionRequestEpochs.current[approvalId] === epoch;
+  const isCurrentOptionsRequest = (approvalId: string, epoch: number) => mounted.current && optionRequestEpochs.current[approvalId] === epoch;
   const updateEditor = (approvalId: string, update: (editor: EditorState) => EditorState) => setEditors((previous) => {
     const editor = previous[approvalId];
     return editor ? { ...previous, [approvalId]: update(editor) } : previous;
@@ -79,19 +87,26 @@ export function DesktopOutboundTable({ pending, onReloadOptions, onConfirm }: {
     const current = editors[approval.id];
     if (current?.loading || current?.submitting || current?.completed || completedApprovals.current.has(approval.id)) return;
     if (current?.expanded && !current.loading) {
-      updateEditor(approval.id, (editor) => ({ ...editor, expanded: false }));
+      updateEditor(approval.id, (editor) => ({ ...editor, expanded: false, reviewing: false }));
       return;
     }
     const editor = current ?? initialEditor(approval);
     const epoch = beginOptionsRequest(approval.id);
-    setEditors((previous) => ({ ...previous, [approval.id]: { ...editor, expanded: true, loading: true, error: null } }));
+    setEditors((previous) => ({ ...previous, [approval.id]: { ...editor, expanded: true, loading: true, reviewing: false, error: null } }));
     try {
       const options = await onReloadOptions(approval.id);
       if (!isCurrentOptionsRequest(approval.id, epoch)) return;
-      setEditors((previous) => ({
-        ...previous,
-        [approval.id]: { ...(previous[approval.id] ?? editor), expanded: true, loading: false, options, error: null },
-      }));
+      setEditors((previous) => {
+        const previousEditor = previous[approval.id] ?? editor;
+        const reconciled = reconcileOutboundOptions(previousEditor.draft, options);
+        const errors: Record<string, string> = {};
+        for (const lineId of reconciled.staleSelectedItemLineIds) errors[`line:${lineId}`] = "所选标准物品已失效，请重新选择";
+        for (const allocationId of reconciled.staleAllocationIds) errors[allocationId] = "库存已变化，请重新选择";
+        return {
+          ...previous,
+          [approval.id]: { ...previousEditor, expanded: true, loading: false, reviewing: false, options, draft: reconciled.draft, errors, error: null },
+        };
+      });
     } catch (error) {
       if (!isCurrentOptionsRequest(approval.id, epoch)) return;
       updateEditor(approval.id, (value) => ({ ...value, loading: false, error: error instanceof Error ? error.message : "读取出库选项失败" }));
@@ -152,7 +167,7 @@ export function DesktopOutboundTable({ pending, onReloadOptions, onConfirm }: {
   return <div className="table-wrap"><table><thead><tr><th>审批编号</th><th>申请行数</th><th>状态</th><th>操作</th></tr></thead><tbody>{pending.map((approval) => {
     const editor = editors[approval.id];
     const requiresReapplication = approval.lines.some((line) => line.legacyResolutionStatus === "REAPPLY_REQUIRED");
-    return <Fragment key={approval.id}><tr><td><strong>{approval.weComSpNo}</strong></td><td>{approval.lines.length} 行</td><td><span className="status-pill status-pill--active">{editor?.completed ? "已完成" : inventoryStatusLabel(approval.status)}</span></td><td>{!requiresReapplication ? <button className="button button--primary button--small" type="button" aria-label={editor?.completed ? "办理出库" : undefined} disabled={Boolean(editor?.loading || editor?.submitting || editor?.completed)} onClick={() => void openEditor(approval)}>{editor?.completed ? "已完成" : editor?.expanded ? "收起" : "办理出库"}</button> : <span className="status-pill">需重新申请</span>}</td></tr>
+    return <Fragment key={approval.id}><tr><td><strong>{approval.weComSpNo}</strong></td><td>{approval.lines.length} 行</td><td><span className="status-pill status-pill--active">{editor?.completed ? "已完成" : inventoryStatusLabel(approval.status)}</span></td><td>{!requiresReapplication ? <button className="button button--primary button--small" type="button" disabled={Boolean(editor?.loading || editor?.submitting || editor?.completed)} onClick={() => void openEditor(approval)}>{editor?.completed ? "已完成" : editor?.expanded ? "收起" : "办理出库"}</button> : <span className="status-pill">需重新申请</span>}</td></tr>
       {requiresReapplication ? <tr><td colSpan={4}><article className="outbound-reapply-card" data-testid={`outbound-reapply-${approval.id}`}><strong>旧审批信息不完整，需重新申请</strong>{approval.lines.map((line) => <p key={line.id}>{line.requestedItemName} {line.requestedQuantity} {line.unit}</p>)}<p>该审批不能办理出库，请申请人使用当前模板重新提交。</p></article></td></tr> : null}
       {editor?.expanded ? <tr><td colSpan={4}><div className="form-grid outbound-desktop-editor">
         {editor.loading ? <div className="form-grid__wide notice">正在读取最新出库选项…</div> : null}

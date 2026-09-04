@@ -264,6 +264,65 @@ test("desktop keeps the latest review result when an older options request finis
   await expect(line.getByLabel("实际数量")).toHaveValue("2");
 });
 
+test("desktop reopening a reviewed draft reconciles stale options and exits review", async ({ page }) => {
+  await mockPending(page);
+  let optionReads = 0;
+  let confirmPosts = 0;
+  const staleOptions = { ...initialOptions, lines: [{ approvalLineId: "line-wine", items: [] }], batches: [] };
+  await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => {
+    optionReads += 1;
+    return route.fulfill({ json: optionReads < 3 ? initialOptions : staleOptions });
+  });
+  await page.route(apiUrl("/admin/outbound/confirm"), (route) => {
+    confirmPosts += 1;
+    return route.fulfill({ status: 201, json: { id: "must-not-submit" } });
+  });
+
+  await loginAs(page, "/admin/outbound", "ADMIN");
+  await page.getByRole("button", { name: "办理出库" }).click();
+  const line = page.getByTestId("outbound-decision-line-line-wine");
+  await line.getByLabel("标准物品").selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("一号仓");
+  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByLabel("实际数量").fill("2");
+  await page.getByRole("button", { name: "复核出库" }).click();
+  await expect(page.getByRole("button", { name: "确认并提交" })).toBeVisible();
+
+  await page.getByRole("button", { name: "收起" }).click();
+  await page.getByRole("button", { name: "办理出库" }).click();
+
+  await expect(page.getByRole("alert")).toContainText("所选标准物品已失效");
+  await expect(page.getByRole("button", { name: "确认并提交" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "复核出库" })).toBeVisible();
+  expect(optionReads).toBe(3);
+  expect(confirmPosts).toBe(0);
+});
+
+test("desktop reopening a valid reviewed draft still requires a new review", async ({ page }) => {
+  await mockPending(page);
+  let optionReads = 0;
+  await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => {
+    optionReads += 1;
+    return route.fulfill({ json: initialOptions });
+  });
+
+  await loginAs(page, "/admin/outbound", "ADMIN");
+  await page.getByRole("button", { name: "办理出库" }).click();
+  const line = page.getByTestId("outbound-decision-line-line-wine");
+  await line.getByLabel("标准物品").selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("一号仓");
+  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByLabel("实际数量").fill("2");
+  await page.getByRole("button", { name: "复核出库" }).click();
+  await page.getByRole("button", { name: "收起" }).click();
+  await page.getByRole("button", { name: "办理出库" }).click();
+
+  await expect(page.getByRole("button", { name: "确认并提交" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "复核出库" })).toBeVisible();
+  await expect(line.getByLabel("实际数量")).toHaveValue("2");
+  expect(optionReads).toBe(3);
+});
+
 test("desktop confirmation becomes terminal even when pending still returns the approval", async ({ page }) => {
   await mockPending(page);
   let confirmPosts = 0;
@@ -285,7 +344,7 @@ test("desktop confirmation becomes terminal even when pending still returns the 
 
   await expect(page.getByRole("status")).toContainText("outbound-terminal");
   await expect(page.getByRole("button", { name: "确认并提交" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "办理出库" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "已完成", exact: true })).toBeDisabled();
   await page.waitForTimeout(50);
   expect(confirmPosts).toBe(1);
 });
