@@ -1,3 +1,10 @@
+import {
+  approvalUnitsMatch,
+  normalizeApprovalUnit,
+  parsePositiveIntegerQuantity,
+  type LegacyResolutionStatus,
+} from "../../domain/approvals/approval-intent.js";
+
 export type ParsedApprovalStatus = "PENDING" | "APPROVED" | "REJECTED" | "REVOKED" | "CANCELED" | "DELETED" | "UNKNOWN";
 
 export interface WeComApprovalField {
@@ -32,11 +39,13 @@ export interface WeComApprovalPayload {
 }
 
 export interface ParsedApprovalLine {
-  itemId: string;
-  itemOptionKey: string;
-  itemName: string;
+  requestedItemName: string;
   requestedQuantity: string;
   unit: string;
+  note?: string;
+  itemId?: string;
+  itemOptionKey?: string;
+  legacyResolutionStatus: LegacyResolutionStatus;
 }
 
 export interface ParsedApproval {
@@ -47,6 +56,7 @@ export interface ParsedApproval {
   department?: string;
   purpose: string;
   submittedAt: string;
+  sourceTemplateId?: string;
   lines: ParsedApprovalLine[];
 }
 
@@ -102,7 +112,12 @@ export class ApprovalParser {
 
     const purposeField = detail.contents.find((content): content is WeComApprovalField => content.control !== "Table" && content.title === "用途");
     const purpose = purposeField?.value?.text?.trim() ?? "";
-    const lines = rows.length > 0 ? rows.map((row) => this.parseLine(row)) : this.parseFixedTextLines(detail.contents);
+    const isIntentTable = rows.some((row) => row.list.some((field) => field.title === "意向物品名称"));
+    const lines = isIntentTable
+      ? rows.map((row) => this.parseIntentLine(row))
+      : rows.length > 0
+        ? rows.map((row) => this.parseLegacySelectorLine(row))
+        : this.parseFixedTextLines(detail.contents);
     return {
       weComSpNo: detail.sp_no,
       status: parseStatus(detail.sp_status),
@@ -111,25 +126,47 @@ export class ApprovalParser {
       department: detail.department ?? detail.applyer.department,
       purpose,
       submittedAt: toSubmittedAt(detail.apply_time),
+      sourceTemplateId: detail.template_id?.trim() || undefined,
       lines,
     };
   }
 
-  private parseLine(row: WeComApprovalRow): ParsedApprovalLine {
+  private parseIntentLine(row: WeComApprovalRow): ParsedApprovalLine {
+    const requestedItemName = textValue(row.list.find((field) => field.title === "意向物品名称"));
+    const requestedQuantity = parsePositiveIntegerQuantity(numberOrTextValue(row.list.find((field) => field.title === "审批数量")));
+    const unit = normalizeApprovalUnit(textValue(row.list.find((field) => field.title === "单位")));
+    const note = textValue(row.list.find((field) => field.title === "补充要求"));
+    if (!requestedItemName) throw new Error("approval requested item name is required");
+    if (!unit) throw new Error("approval unit is required");
+    return {
+      requestedItemName,
+      requestedQuantity,
+      unit,
+      ...(note ? { note } : {}),
+      legacyResolutionStatus: "NOT_APPLICABLE",
+    };
+  }
+
+  private parseLegacySelectorLine(row: WeComApprovalRow): ParsedApprovalLine {
     const selector = row.list.find((field) => field.control === "Selector")?.value?.selector?.options?.[0];
     const numberField = row.list.find((field) => field.control === "Number" || field.control === "Decimal");
-    const number = numberField?.value?.new_number ?? numberField?.value?.number;
     const itemOptionKey = selector?.key?.trim();
-    const requestedQuantity = number?.value === undefined ? "" : String(number.value).trim();
-    const unit = number?.unit?.trim() ?? "";
-    if (!itemOptionKey) throw new Error("approval item option key is required");
-    if (!requestedQuantity || !Number.isFinite(Number(requestedQuantity)) || Number(requestedQuantity) <= 0) {
-      throw new Error(`approval quantity is invalid for item option key: ${itemOptionKey}`);
+    const requestedQuantity = numberOrTextValue(numberField);
+    const unit = normalizeApprovalUnit(numberField?.value?.new_number?.unit ?? numberField?.value?.number?.unit ?? "");
+    const requestedItemName = selector?.value?.trim() ?? "";
+    const parsedQuantity = tryParsePositiveIntegerQuantity(requestedQuantity);
+    const item = itemOptionKey && parsedQuantity && unit ? this.resolveItem(itemOptionKey) : undefined;
+    if (item && item.unit && itemOptionKey && approvalUnitsMatch(unit, item.unit)) {
+      return {
+        requestedItemName,
+        requestedQuantity: parsedQuantity,
+        unit,
+        itemId: item.id,
+        itemOptionKey,
+        legacyResolutionStatus: "EXACT_LOCKED",
+      };
     }
-    if (!unit) throw new Error(`approval unit is required for item option key: ${itemOptionKey}`);
-    const item = this.resolveItem(itemOptionKey);
-    if (!item) throw new Error(`unknown item option key: ${itemOptionKey}`);
-    return { itemId: item.id, itemOptionKey, itemName: selector?.value?.trim() ?? "", requestedQuantity, unit };
+    return { requestedItemName, requestedQuantity, unit, legacyResolutionStatus: "REAPPLY_REQUIRED" };
   }
 
   private parseFixedTextLines(contents: Array<WeComApprovalField | WeComApprovalTable>): ParsedApprovalLine[] {
@@ -142,33 +179,33 @@ export class ApprovalParser {
 
     return names
       .filter(({ value }) => value !== "" && value !== "无")
-      .map(({ index, value: itemName }) => {
+      .map(({ index, value: requestedItemName }) => {
         const quantityField = fields.find((field) => field.title?.match(new RegExp(`^物品${index}\\s*数量及单位`)));
         const rawQuantity = quantityField?.value?.text?.trim() ?? "";
         const quantityMatch = rawQuantity.match(/^([0-9]+(?:\.[0-9]+)?)\s*(.*)$/);
-        if (!quantityMatch || Number(quantityMatch[1]) <= 0) throw new Error(`approval quantity is invalid for item: ${itemName}`);
-
-        const references = [itemName, ...(itemName.match(/[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+/g) ?? []).reverse()];
-        let reference = "";
-        let item: ResolvedApprovalItem | undefined;
-        for (const candidate of references) {
-          item = this.resolveItem(candidate);
-          if (item) {
-            reference = item.code ?? candidate;
-            break;
-          }
-        }
-        if (!item) throw new Error(`unknown approval item: ${itemName}`);
-        const unit = quantityMatch[2]?.trim() || item.unit?.trim() || "";
-        if (!unit) throw new Error(`approval unit is required for item: ${itemName}`);
-
         return {
-          itemId: item.id,
-          itemOptionKey: reference,
-          itemName,
-          requestedQuantity: quantityMatch[1],
-          unit,
+          requestedItemName,
+          requestedQuantity: quantityMatch?.[1] ?? rawQuantity,
+          unit: normalizeApprovalUnit(quantityMatch?.[2] ?? ""),
+          legacyResolutionStatus: "REAPPLY_REQUIRED",
         };
       });
+  }
+}
+
+function textValue(field: WeComApprovalField | undefined): string {
+  return field?.value?.text?.trim() ?? "";
+}
+
+function numberOrTextValue(field: WeComApprovalField | undefined): string {
+  const number = field?.value?.new_number ?? field?.value?.number;
+  return number?.value === undefined ? textValue(field) : String(number.value).trim();
+}
+
+function tryParsePositiveIntegerQuantity(value: string): string | undefined {
+  try {
+    return parsePositiveIntegerQuantity(value);
+  } catch {
+    return undefined;
   }
 }
