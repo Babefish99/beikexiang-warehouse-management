@@ -564,6 +564,118 @@ describe("outbound mutation routes", () => {
     } finally { await app.close(); }
   });
 
+  it.each([
+    {
+      name: "a null decision",
+      decisions: [null],
+      error: "decisions[0] must be an object",
+    },
+    {
+      name: "a non-string approval line id",
+      decisions: [{ approvalLineId: 7, allocations: [] }],
+      error: "decisions[0].approvalLineId must be a non-empty string",
+    },
+    {
+      name: "a non-string selected item id",
+      decisions: [{ approvalLineId: "line-1", selectedItemId: 7, allocations: [] }],
+      error: "decisions[0].selectedItemId must be a non-empty string",
+    },
+    {
+      name: "a non-string variance reason",
+      decisions: [{ approvalLineId: "line-1", allocations: [], varianceReason: 7 }],
+      error: "decisions[0].varianceReason must be a string",
+    },
+    {
+      name: "missing allocations",
+      decisions: [{ approvalLineId: "line-1" }],
+      error: "decisions[0].allocations must be an array",
+    },
+    {
+      name: "non-array allocations",
+      decisions: [{ approvalLineId: "line-1", allocations: {} }],
+      error: "decisions[0].allocations must be an array",
+    },
+    {
+      name: "a null allocation",
+      decisions: [{ approvalLineId: "line-1", allocations: [null] }],
+      error: "decisions[0].allocations[0] must be an object",
+    },
+    {
+      name: "an allocation missing its warehouse id",
+      decisions: [{ approvalLineId: "line-1", allocations: [{ batchId: "batch-1", quantity: "1" }] }],
+      error: "decisions[0].allocations[0].warehouseId must be a non-empty string",
+    },
+    {
+      name: "an allocation missing its batch id",
+      decisions: [{ approvalLineId: "line-1", allocations: [{ warehouseId: "wh-1", quantity: "1" }] }],
+      error: "decisions[0].allocations[0].batchId must be a non-empty string",
+    },
+    {
+      name: "a numeric allocation quantity",
+      decisions: [{ approvalLineId: "line-1", allocations: [{ warehouseId: "wh-1", batchId: "batch-1", quantity: 1 }] }],
+      error: "decisions[0].allocations[0].quantity must be a non-empty string",
+    },
+    {
+      name: "an allocation missing its quantity",
+      decisions: [{ approvalLineId: "line-1", allocations: [{ warehouseId: "wh-1", batchId: "batch-1" }] }],
+      error: "decisions[0].allocations[0].quantity must be a non-empty string",
+    },
+  ])("returns a stable 400 for $name", async ({ decisions, error }) => {
+    const app = Fastify();
+    addAdminActor(app);
+    const { service } = makeService();
+    registerOutboundRoutes(app, { outboundService: service });
+
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/admin/outbound/confirm",
+        payload: { approvalId: "approval-1", decisions },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ error });
+    } finally { await app.close(); }
+  });
+
+  it("keeps malformed confirmation details out of failed mutation audits", async () => {
+    const app = Fastify();
+    addAdminActor(app);
+    const auditService = new InMemoryAuditService();
+    app.decorate("auditService", auditService);
+    const { service } = makeService();
+    registerOutboundRoutes(app, { outboundService: service });
+
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/admin/outbound/confirm",
+        payload: {
+          approvalId: "approval-1",
+          decisions: [{
+            approvalLineId: "line-1",
+            allocations: { password: "private-password" },
+            Authorization: "Bearer private-token",
+          }],
+          callbackPayload: { apiKey: "private-api-key" },
+        },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(auditService.events).toEqual([expect.objectContaining({
+        status: "FAILED",
+        errorMessage: "decisions[0].allocations must be an array",
+        afterData: {
+          request: {
+            approvalId: "approval-1",
+            decisions: [{ approvalLineId: "line-1", allocations: [] }],
+          },
+        },
+      })]);
+      expect(JSON.stringify(auditService.events)).not.toMatch(/private-|password|authorization|callbackPayload|apiKey/i);
+    } finally { await app.close(); }
+  });
+
   it("cancels only a pending approval with a reason", async () => {
     const app = Fastify();
     const { service } = makeService();

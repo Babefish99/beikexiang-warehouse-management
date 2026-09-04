@@ -1370,7 +1370,7 @@ describe.skipIf(!databaseUrl)("Prisma approval synchronization after the intent 
           status: "FAILED",
           attemptNo: 1,
           payload: { callback: "private-old-callback" },
-          error: "approval form is malformed",
+          error: "approval quantity must be a positive integer",
           attemptedAt: new Date("2026-09-04T01:00:00.000Z"),
         },
         {
@@ -1399,15 +1399,22 @@ describe.skipIf(!databaseUrl)("Prisma approval synchronization after the intent 
       {
         weComSpNo: "2026090400000013",
         attemptedAt: "2026-09-04T02:00:00.000Z",
-        error: "approval synchronization failed",
+        error: "审批同步失败，请检查审批内容或同步配置后重试",
       },
       {
         weComSpNo: "2026090400000011",
         attemptedAt: "2026-09-04T01:00:00.000Z",
-        error: "approval form is malformed",
+        error: "审批数量必须为正整数",
       },
     ]);
     expect(JSON.stringify(failures)).not.toMatch(/private-|access_token|headers|secret|token|EncodingAESKey|cookie/i);
+    await expect(prisma.syncAttempt.findUnique({
+      where: { id: "sync-attempt-new-failure" },
+      select: { payload: true, error: true },
+    })).resolves.toEqual({
+      payload: { EncodingAESKey: "private-aes-key", cookie: "private-cookie" },
+      error: "Secret private-secret appeared in callback headers",
+    });
   });
 
   it("counts reapplication work and post-issue revocation exceptions separately", async () => {

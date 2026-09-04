@@ -26,7 +26,7 @@ test.describe("approval synchronization administration", () => {
       weComSpNo: "2026090400000001",
       status: "FAILED",
       payload: { callback: "raw-callback", headers: { cookie: "private-cookie" } },
-      error: "approval form is malformed",
+      error: "approval quantity must be a positive integer",
     });
     await store.recordSyncAttempt({
       weComSpNo: "2026090400000002",
@@ -52,12 +52,12 @@ test.describe("approval synchronization administration", () => {
         {
           weComSpNo: "2026090400000003",
           attemptedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
-          error: "approval synchronization failed",
+          error: "审批同步失败，请检查审批内容或同步配置后重试",
         },
         {
           weComSpNo: "2026090400000001",
           attemptedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
-          error: "approval form is malformed",
+          error: "审批数量必须为正整数",
         },
       ]);
       expect(JSON.stringify(failures)).not.toMatch(/raw-callback|private-|access_token|headers|secret|token|EncodingAESKey|cookie/i);

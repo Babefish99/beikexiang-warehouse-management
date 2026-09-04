@@ -10,7 +10,7 @@ Implemented the authenticated outbound confirmation contract, sanitized approval
 - Confirmation business validation maps invalid integer, unit, and approval-line input to 400; already-closed, changed-stock, and concurrent conflicts remain 409. Existing admin authentication continues to provide 401/403.
 - Confirmation audit data is built from explicit request/result allowlists. Client-added credentials, callback data, headers, and other unknown fields are not retained.
 - `GET /admin/approvals/sync-failures` reads failed attempts newest-first from both memory and Prisma, applies a default limit of 20 and maximum of 100, and returns only `{ weComSpNo, attemptedAt, error }`.
-- Error text containing credential/transport markers is replaced with a generic business message and all returned error text is bounded to 500 characters. The Prisma query explicitly selects only the three response fields.
+- Only exact, internally defined parser/domain/gateway errors are mapped to Chinese public messages. Every empty or unknown persisted message receives the same generic Chinese fallback. The Prisma query explicitly selects only the three response fields.
 - Pending-work/month-close counts include `PENDING_OUTBOUND` and `REAPPLY_REQUIRED` in both persistence modes. `REVOCATION_EXCEPTION` is counted separately and emits `APPROVAL_EXCEPTION` linked to `/admin/outbound`.
 - The web client recognizes `APPROVAL_EXCEPTION`, makes it actionable, and displays labels for `REAPPLY_REQUIRED` and `REVOCATION_EXCEPTION`.
 - Removed the Task 5 transitional flat confirmation adapter and its `system` actor fallback from `OutboundService`.
@@ -40,7 +40,7 @@ One later Playwright repetition was invalidated by the manually started API miss
 - Global admin authorization still rejects unauthenticated and unauthorized callers before handlers; the confirmation handler also rejects an absent actor defensively.
 - Confirmation audits retain only approval/decision/allocation identifiers, quantities, variance reasons, and allowlisted result facts. Credentials and unfiltered external payload fields are excluded.
 - Synchronization-failure persistence queries never select callback payloads. Public results contain exactly approval number, attempt time, and sanitized business error text.
-- Sensitive marker coverage includes callback, headers, access token, Secret/Token, AES key, and cookie; no credential values were added to source, tests, this report, or the commit.
+- Error projection is default-deny rather than keyword-based: Authorization/Bearer, password, API key, URL, SQL, high-entropy, and ordinary unknown messages all receive the same public fallback. Test fixtures contain synthetic sentinel values only; no real credential values were added to source, tests, this report, or the commit.
 - Read limits are positive, bounded, and safe in both service and persistence implementations.
 - Memory and Prisma implementations preserve the existing atomic attempt-write paths; the new failure method is read-only.
 
@@ -50,3 +50,21 @@ One later Playwright repetition was invalidated by the manually started API miss
 - `business-rule-error.ts` was changed to map the specific approval-unit mismatch to 400 without broadening unrelated error classification.
 - Additional affected tests cover shared-memory route usage, status labels, and mobile notification behavior.
 - Until Task 8 migrates the outbound form, its current legacy flat submit shape will receive the intentional 400 response. No Task 8 workflow/UI implementation was modified here.
+
+## Review fix round 1
+
+### RED
+
+- Added a dedicated query-service test before implementation. The allowlisted business mapping and seven unsafe/unknown cases all failed: 8/8 new query assertions were red because the previous keyword denylist returned unrecognized persisted messages verbatim.
+- Added nested route validation and failed-audit tests before implementation. Twelve assertions were red: malformed nested values either returned 500 or exposed runtime `TypeError` text in 400 responses. The combined RED run was 20 failed and 29 passed across 49 tests.
+- Unsafe query cases cover Authorization/Bearer, password, API key, an internal URL, SQL detail, an unlabelled high-entropy value, and an ordinary unknown upstream error.
+
+### GREEN
+
+- Replaced the denylist with an exact internal-error allowlist mapped to Chinese public messages. Unknown values now fail closed to `审批同步失败，请检查审批内容或同步配置后重试`.
+- Added explicit nested parsing for decision/allocation objects, required arrays, non-empty string identifiers and quantity, and optional selected-item/reason types. The route constructs a fresh `OutboundDecisionInput[]` before calling the service.
+- The failed-mutation audit test proves a 400 response, a safe validation error, and allowlisted request data only; synthetic password, Authorization, callback, and API-key fields do not appear in the audit event.
+- Core route/query GREEN: 2 files, 49/49 passed.
+- Real PostgreSQL route/query/sync/notification regression: 5 files, 118/118 passed, including proof that querying leaves the raw historical attempt payload and error unchanged while returning only the safe three-field projection.
+- Effective headless Playwright run used an API with local auth enabled (`NODE_ENV=development`, `LOCAL_AUTH_BYPASS=true`) plus an isolated Vite server: 11/11 passed. An intermediate 10/11 run identified only a stale English fallback expectation; it was corrected and the entire set rerun.
+- API and web typechecks passed. The disposable PostgreSQL container and both isolated test servers were removed after verification.

@@ -11,14 +11,53 @@ interface ConfirmOutboundBody {
   decisions: OutboundDecisionInput[];
 }
 
-function parseConfirmOutboundBody(value: unknown): ConfirmOutboundBody {
-  if (!value || typeof value !== "object") throw new BusinessRuleError("confirmation request is required", 400);
-  const body = value as { approvalId?: unknown; decisions?: unknown };
-  if (typeof body.approvalId !== "string" || !body.approvalId.trim()) {
-    throw new BusinessRuleError("approvalId is required", 400);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function requiredString(value: unknown, path: string): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new BusinessRuleError(`${path} must be a non-empty string`, 400);
   }
-  if (!Array.isArray(body.decisions)) throw new BusinessRuleError("decisions are required", 400);
-  return { approvalId: body.approvalId, decisions: body.decisions as OutboundDecisionInput[] };
+  return value;
+}
+
+function parseAllocation(value: unknown, path: string): OutboundDecisionInput["allocations"][number] {
+  if (!isRecord(value)) throw new BusinessRuleError(`${path} must be an object`, 400);
+  return {
+    warehouseId: requiredString(value.warehouseId, `${path}.warehouseId`),
+    batchId: requiredString(value.batchId, `${path}.batchId`),
+    quantity: requiredString(value.quantity, `${path}.quantity`),
+  };
+}
+
+function parseDecision(value: unknown, index: number): OutboundDecisionInput {
+  const path = `decisions[${index}]`;
+  if (!isRecord(value)) throw new BusinessRuleError(`${path} must be an object`, 400);
+  if (!Array.isArray(value.allocations)) {
+    throw new BusinessRuleError(`${path}.allocations must be an array`, 400);
+  }
+  if (value.selectedItemId !== undefined && (typeof value.selectedItemId !== "string" || !value.selectedItemId.trim())) {
+    throw new BusinessRuleError(`${path}.selectedItemId must be a non-empty string`, 400);
+  }
+  if (value.varianceReason !== undefined && typeof value.varianceReason !== "string") {
+    throw new BusinessRuleError(`${path}.varianceReason must be a string`, 400);
+  }
+  return {
+    approvalLineId: requiredString(value.approvalLineId, `${path}.approvalLineId`),
+    ...(value.selectedItemId === undefined ? {} : { selectedItemId: value.selectedItemId }),
+    allocations: value.allocations.map((allocation, allocationIndex) => parseAllocation(allocation, `${path}.allocations[${allocationIndex}]`)),
+    ...(value.varianceReason === undefined ? {} : { varianceReason: value.varianceReason }),
+  };
+}
+
+function parseConfirmOutboundBody(value: unknown): ConfirmOutboundBody {
+  if (!isRecord(value)) throw new BusinessRuleError("confirmation request is required", 400);
+  if (!Array.isArray(value.decisions)) throw new BusinessRuleError("decisions are required", 400);
+  return {
+    approvalId: requiredString(value.approvalId, "approvalId"),
+    decisions: value.decisions.map(parseDecision),
+  };
 }
 
 function auditString(value: unknown): string | undefined {
