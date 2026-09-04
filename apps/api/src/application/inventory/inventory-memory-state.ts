@@ -24,20 +24,23 @@ export interface InventoryBalanceState {
 }
 
 export type InventoryApprovalSyncStatus = "PENDING" | "APPROVED" | "REJECTED" | "REVOKED" | "CANCELED" | "DELETED" | "UNKNOWN";
-export type InventoryApprovalOutboundStatus = "NONE" | "PENDING_OUTBOUND" | "COMPLETED" | "PARTIALLY_ISSUED" | "UNAVAILABLE" | "VOIDED";
+export type InventoryApprovalOutboundStatus = "NONE" | "PENDING_OUTBOUND" | "REAPPLY_REQUIRED" | "COMPLETED" | "PARTIALLY_ISSUED" | "UNAVAILABLE" | "VOIDED" | "REVOCATION_EXCEPTION";
 
 export interface InventoryApprovalLineState {
   id: string;
-  itemId: string;
+  requestedItemName: string;
   requestedQuantity: string;
   unit: string;
+  note?: string;
+  itemId?: string;
   itemOptionKey?: string;
-  itemName?: string;
+  legacyResolutionStatus: "NOT_APPLICABLE" | "EXACT_LOCKED" | "REAPPLY_REQUIRED";
 }
 
 export interface InventoryApprovalState {
   id: string;
   weComSpNo: string;
+  sourceTemplateId?: string;
   syncStatus: InventoryApprovalSyncStatus;
   outboundStatus: InventoryApprovalOutboundStatus;
   applicantUserId: string;
@@ -45,6 +48,7 @@ export interface InventoryApprovalState {
   department?: string;
   purpose: string;
   submittedAt: string;
+  hasOutboundDecision?: boolean;
   lines: InventoryApprovalLineState[];
 }
 

@@ -9,11 +9,19 @@ const CLOSED_OUTBOUND_STATUSES = new Set<ApprovalOutboundStatus>([
   "PARTIALLY_ISSUED",
   "UNAVAILABLE",
   "VOIDED",
+  "REVOCATION_EXCEPTION",
+]);
+
+const ISSUED_OUTBOUND_STATUSES = new Set<ApprovalOutboundStatus>([
+  "COMPLETED",
+  "PARTIALLY_ISSUED",
+  "UNAVAILABLE",
 ]);
 
 export interface ApprovalSyncRecord extends ParsedApproval {
   id: string;
   outboundStatus: ApprovalOutboundStatus;
+  hasOutboundDecision?: boolean;
 }
 
 export interface ApprovalSyncAttempt {
@@ -60,10 +68,15 @@ export class InMemoryApprovalSyncStore implements ApprovalSyncStore {
       const existingId = this.state.approvalsBySpNo.get(record.weComSpNo);
       const existing = existingId ? this.state.approvals.get(existingId) : undefined;
       const approvalId = existing?.id ?? record.id;
+      const preserveLines = existing !== undefined
+        && (CLOSED_OUTBOUND_STATUSES.has(existing.outboundStatus)
+          || CLOSED_OUTBOUND_STATUSES.has(record.outboundStatus)
+          || existing.hasOutboundDecision === true);
       this.state.approvalsBySpNo.set(record.weComSpNo, approvalId);
       this.state.approvals.set(approvalId, {
         id: approvalId,
         weComSpNo: record.weComSpNo,
+        sourceTemplateId: existing?.sourceTemplateId ?? record.sourceTemplateId,
         syncStatus: record.status,
         outboundStatus: record.outboundStatus,
         applicantUserId: record.applicantUserId,
@@ -71,13 +84,16 @@ export class InMemoryApprovalSyncStore implements ApprovalSyncStore {
         department: record.department,
         purpose: record.purpose,
         submittedAt: record.submittedAt,
-        lines: record.lines.map((line, index) => ({
+        hasOutboundDecision: existing?.hasOutboundDecision ?? record.hasOutboundDecision,
+        lines: preserveLines ? existing.lines : record.lines.map((line, index) => ({
           id: existing?.lines[index]?.id ?? `${approvalId}-line-${index + 1}`,
+          requestedItemName: line.requestedItemName,
           itemId: line.itemId,
           requestedQuantity: line.requestedQuantity,
           unit: line.unit,
+          note: line.note,
           itemOptionKey: line.itemOptionKey,
-          itemName: line.itemName,
+          legacyResolutionStatus: line.legacyResolutionStatus,
         })),
       });
       return;
@@ -114,6 +130,7 @@ function toApprovalSyncRecord(record: InventoryApprovalState): ApprovalSyncRecor
   return {
     id: record.id,
     weComSpNo: record.weComSpNo,
+    sourceTemplateId: record.sourceTemplateId,
     status: record.syncStatus,
     applicantUserId: record.applicantUserId,
     applicantName: record.applicantName,
@@ -122,17 +139,64 @@ function toApprovalSyncRecord(record: InventoryApprovalState): ApprovalSyncRecor
     submittedAt: record.submittedAt,
     lines: record.lines.map((line) => ({
       itemId: line.itemId,
-      itemOptionKey: line.itemOptionKey ?? "",
-      itemName: line.itemName ?? "",
+      itemOptionKey: line.itemOptionKey,
+      requestedItemName: line.requestedItemName,
       requestedQuantity: line.requestedQuantity,
       unit: line.unit,
+      note: line.note,
+      legacyResolutionStatus: line.legacyResolutionStatus,
     })),
     outboundStatus: record.outboundStatus as ApprovalOutboundStatus,
+    hasOutboundDecision: record.hasOutboundDecision,
   };
 }
 
+function hasCompleteExactEvidence(line: ParsedApproval["lines"][number], sourceTemplateId: string | undefined): boolean {
+  return Boolean(
+    sourceTemplateId
+    && line.itemId?.trim()
+    && line.itemOptionKey?.trim()
+    && line.requestedItemName.trim()
+    && /^[1-9]\d*$/.test(line.requestedQuantity)
+    && line.unit.trim(),
+  );
+}
+
+function normalizeResolutionEvidence(parsed: ParsedApproval): ParsedApproval {
+  return {
+    ...parsed,
+    lines: parsed.lines.map((line) => line.legacyResolutionStatus !== "EXACT_LOCKED" || hasCompleteExactEvidence(line, parsed.sourceTemplateId)
+      ? line
+      : {
+          requestedItemName: line.requestedItemName,
+          requestedQuantity: line.requestedQuantity,
+          unit: line.unit,
+          ...(line.note ? { note: line.note } : {}),
+          legacyResolutionStatus: "REAPPLY_REQUIRED",
+        }),
+  };
+}
+
+export function deriveOutboundStatus(input: {
+  approvalStatus: ParsedApproval["status"];
+  existingOutboundStatus?: ApprovalOutboundStatus;
+  lines: ParsedApproval["lines"];
+}): ApprovalOutboundStatus {
+  const existing = input.existingOutboundStatus ?? "NONE";
+  if (input.approvalStatus === "REVOKED") {
+    if (ISSUED_OUTBOUND_STATUSES.has(existing)) return "REVOCATION_EXCEPTION";
+    if (existing === "VOIDED" || existing === "REVOCATION_EXCEPTION") return existing;
+    return "VOIDED";
+  }
+  if (CLOSED_OUTBOUND_STATUSES.has(existing)) return existing;
+  if (input.approvalStatus !== "APPROVED") return existing;
+  return input.lines.some((line) => line.legacyResolutionStatus === "REAPPLY_REQUIRED")
+    ? "REAPPLY_REQUIRED"
+    : "PENDING_OUTBOUND";
+}
+
 export class ApprovalSyncService {
-  constructor(private readonly dependencies: { gateway: ApprovalGateway; parser: ApprovalDetailParser; store: ApprovalSyncStore; approvalTemplateId?: string }) {}
+  constructor(private readonly dependencies: { gateway: ApprovalGateway; parser: ApprovalDetailParser; store: ApprovalSyncStore; approvalTemplateIds?: string[] }) {}
 
   async sync(spNo: string, options: { callbackPayload?: unknown } = {}): Promise<{ approvalId: string; created: boolean; status: string }> {
     if (!/^\d{8,32}$/.test(spNo)) throw new Error("enterprise WeChat approval number is invalid");
@@ -141,18 +205,25 @@ export class ApprovalSyncService {
     let retainFailurePayload = true;
     try {
       detail = await this.dependencies.gateway.fetchDetail(spNo);
-      if (this.dependencies.approvalTemplateId !== undefined && detail.template_id !== this.dependencies.approvalTemplateId) {
+      const detailTemplateId = detail.template_id?.trim();
+      if (this.dependencies.approvalTemplateIds?.length && (!detailTemplateId || !this.dependencies.approvalTemplateIds.includes(detailTemplateId))) {
         retainFailurePayload = false;
         throw new Error("enterprise WeChat approval template is not allowed");
       }
-      const parsed = await this.dependencies.parser.parse(detail);
+      const parsed = normalizeResolutionEvidence(await this.dependencies.parser.parse(detail));
       const existing = await this.dependencies.store.findBySpNo(spNo);
+      if (existing?.sourceTemplateId && parsed.sourceTemplateId && existing.sourceTemplateId !== parsed.sourceTemplateId) {
+        throw new Error("approval source template does not match the existing record");
+      }
       const record: ApprovalSyncRecord = {
         id: existing?.id ?? `approval-${spNo}`,
         ...parsed,
-        outboundStatus: parsed.status === "APPROVED"
-          ? existing && CLOSED_OUTBOUND_STATUSES.has(existing.outboundStatus) ? existing.outboundStatus : "PENDING_OUTBOUND"
-          : existing?.outboundStatus ?? "NONE",
+        outboundStatus: deriveOutboundStatus({
+          approvalStatus: parsed.status,
+          existingOutboundStatus: existing?.outboundStatus,
+          lines: parsed.lines,
+        }),
+        hasOutboundDecision: existing?.hasOutboundDecision,
       };
       const payload = options.callbackPayload === undefined ? detail : { callback: options.callbackPayload, detail };
       const attempt: ApprovalSyncAttempt = { weComSpNo: spNo, status: "SUCCEEDED", attemptNo, payload };
@@ -161,7 +232,11 @@ export class ApprovalSyncService {
         await this.dependencies.store.save(record);
         await this.dependencies.store.recordSyncAttempt(attempt);
       }
-      return { approvalId: record.id, created: !existing, status: parsed.status === "APPROVED" ? record.outboundStatus : parsed.status };
+      return {
+        approvalId: record.id,
+        created: !existing,
+        status: record.outboundStatus === "NONE" ? parsed.status : record.outboundStatus,
+      };
     } catch (error) {
       const payload = retainFailurePayload
         ? options.callbackPayload === undefined ? detail : { callback: options.callbackPayload, detail }

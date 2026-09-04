@@ -52,6 +52,7 @@ function mockApprovalDetail(detail: WeComApprovalPayload): void {
 function approvalDetail(): WeComApprovalPayload {
   return {
     sp_no: "202607230021",
+    template_id: "tpl-selector-v1",
     sp_status: 2,
     apply_time: 1784773140,
     applyer: { userid: "wx-1", name: "Tea Applicant", department: "Operations" },
@@ -86,6 +87,8 @@ describe("shared inventory memory state", () => {
     vi.stubEnv("WE_COM_SECRET", "test-secret");
     vi.stubEnv("WE_COM_CALLBACK_TOKEN", "test-token");
     vi.stubEnv("WE_COM_ENCODING_AES_KEY", "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG");
+    vi.stubEnv("WE_COM_APPROVAL_TEMPLATE_ID", "tpl-intent-v2");
+    vi.stubEnv("WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS", "tpl-selector-v1");
   });
 
   afterEach(() => {
@@ -238,7 +241,8 @@ describe("shared inventory memory state", () => {
   });
 
   it("keeps a configured legacy selector template on the selector parser path", async () => {
-    vi.stubEnv("WE_COM_APPROVAL_TEMPLATE_ID", "tpl-selector-v1");
+    vi.stubEnv("WE_COM_APPROVAL_TEMPLATE_ID", "tpl-intent-v2");
+    vi.stubEnv("WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS", " tpl-selector-v1, tpl-fixed-v1, tpl-selector-v1 ");
     mockApprovalDetail({ ...approvalDetail(), template_id: "tpl-selector-v1" });
     const app = buildServer();
 

@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { readServerConfig } from "../../apps/api/src/infrastructure/db/runtime.js";
+
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 
 async function readJson(relativePath: string): Promise<Record<string, unknown>> {
@@ -37,6 +39,29 @@ function memoryLimitMiB(service: string): number {
 }
 
 describe("production deployment configuration", () => {
+  it("builds a trimmed and deduplicated approval template allow-list with the primary template first", () => {
+    const config = readServerConfig({
+      NODE_ENV: "production",
+      PERSISTENCE_DRIVER: "prisma",
+      DATABASE_URL: "postgresql://warehouse@db:5432/warehouse",
+      API_BASE_URL: "https://warehouse.example.com",
+      WEB_BASE_URL: "https://warehouse.example.com",
+      SESSION_SECRET: "production-session-secret-at-least-32-characters",
+      LOCAL_AUTH_BYPASS: "false",
+      WE_COM_CORP_ID: "corp-id",
+      WE_COM_AGENT_ID: "1000001",
+      WE_COM_SECRET: "secret",
+      WE_COM_ADMIN_IDS: "warehouse-admin",
+      WE_COM_CALLBACK_TOKEN: "callback-token",
+      WE_COM_ENCODING_AES_KEY: Buffer.alloc(32, 1).toString("base64").replace(/=+$/, ""),
+      WE_COM_APPROVAL_TEMPLATE_ID: " tpl-intent-v2 ",
+      WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS: "tpl-selector-v1, ,tpl-fixed-v1,tpl-selector-v1,tpl-intent-v2",
+    });
+
+    expect(config.approvalTemplateIds).toEqual(["tpl-intent-v2", "tpl-selector-v1", "tpl-fixed-v1"]);
+    expect(config.approvalTemplateId).toBe("tpl-intent-v2");
+  });
+
   it("declares every compiled API import as an API runtime dependency", async () => {
     const apiPackage = await readJson("apps/api/package.json");
     const dependencies = apiPackage.dependencies as Record<string, string>;

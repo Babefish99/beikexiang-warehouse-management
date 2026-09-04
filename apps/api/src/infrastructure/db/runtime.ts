@@ -41,6 +41,7 @@ export interface ServerConfig {
   nodeEnv: string;
   approvalSecret?: string;
   approvalTemplateId?: string;
+  approvalTemplateIds: string[];
 }
 
 export interface CoreEntityRecord {
@@ -171,6 +172,10 @@ export function readServerConfig(env: Record<string, string | undefined>): Serve
   const databaseUrl = env.DATABASE_URL?.trim() || undefined;
   const approvalSecret = env.WE_COM_APPROVAL_SECRET?.trim() || undefined;
   const approvalTemplateId = env.WE_COM_APPROVAL_TEMPLATE_ID?.trim() || undefined;
+  const approvalTemplateIds = [...new Set([
+    ...(approvalTemplateId ? [approvalTemplateId] : []),
+    ...(env.WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS ?? "").split(",").map((value) => value.trim()).filter(Boolean),
+  ])];
   const localAuthEnabled = isLocalAuthEnabled({
     bypassEnabled: env.LOCAL_AUTH_BYPASS === "true",
     nodeEnv,
@@ -223,6 +228,7 @@ export function readServerConfig(env: Record<string, string | undefined>): Serve
     nodeEnv,
     approvalSecret,
     approvalTemplateId,
+    approvalTemplateIds,
   };
 }
 

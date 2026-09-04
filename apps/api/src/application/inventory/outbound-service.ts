@@ -6,7 +6,7 @@ import { createInventoryMemoryState, inventoryBalanceKey, type InventoryApproval
 export interface PendingApproval {
   id: string;
   weComSpNo: string;
-  status: "PENDING_OUTBOUND" | "COMPLETED" | "PARTIALLY_ISSUED" | "UNAVAILABLE" | "VOIDED";
+  status: Exclude<InventoryApprovalOutboundStatus, "NONE">;
   lines: AllocationLine[];
 }
 
@@ -58,7 +58,14 @@ export class InMemoryOutboundStore implements OutboundStore {
       applicantName: "",
       purpose: "",
       submittedAt: new Date(0).toISOString(),
-      lines: approval.lines.map((line) => ({ id: line.id, itemId: line.itemId, requestedQuantity: line.requestedQuantity, unit: "" })),
+      lines: approval.lines.map((line) => ({
+        id: line.id,
+        requestedItemName: "",
+        itemId: line.itemId,
+        requestedQuantity: line.requestedQuantity,
+        unit: "",
+        legacyResolutionStatus: "EXACT_LOCKED",
+      })),
     });
     this.state.approvalsBySpNo.set(approval.weComSpNo, approval.id);
   }
@@ -148,11 +155,15 @@ export class InMemoryOutboundStore implements OutboundStore {
 }
 
 function toPendingApproval(approval: InventoryApprovalState): PendingApproval {
+  const lines = approval.lines.map((line) => {
+    if (!line.itemId) throw new Error("approval line requires item selection before legacy outbound processing");
+    return { id: line.id, itemId: line.itemId, requestedQuantity: line.requestedQuantity };
+  });
   return {
     id: approval.id,
     weComSpNo: approval.weComSpNo,
     status: approval.outboundStatus as Exclude<InventoryApprovalOutboundStatus, "NONE">,
-    lines: approval.lines.map((line) => ({ id: line.id, itemId: line.itemId, requestedQuantity: line.requestedQuantity })),
+    lines,
   };
 }
 

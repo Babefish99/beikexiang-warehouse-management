@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { PrismaPg } from "@prisma/adapter-pg";
-import { Prisma, type PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { Pool, type PoolClient } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -15,6 +15,7 @@ import { ReturnService } from "../../../apps/api/src/application/inventory/retur
 import { StocktakeService } from "../../../apps/api/src/application/inventory/stocktake-service.js";
 import { TransferService } from "../../../apps/api/src/application/inventory/transfer-service.js";
 import { PeriodCloseService } from "../../../apps/api/src/application/periods/period-close-service.js";
+import type { ApprovalSyncRecord } from "../../../apps/api/src/application/wecom/approval-sync-service.js";
 import { createAccountingPeriod } from "../../../apps/api/src/domain/periods/accounting-period.js";
 import { PrismaAccountingPeriodStore } from "../../../apps/api/src/infrastructure/db/prisma-accounting-period-store.js";
 import { PrismaApprovalSyncStore } from "../../../apps/api/src/infrastructure/db/prisma-approval-sync-store.js";
@@ -573,35 +574,6 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     await expect(prisma.approvalRequest.findUniqueOrThrow({ where: { id: cancelApproval.id } })).resolves.toMatchObject({ outboundStatus: "PENDING_OUTBOUND" });
   });
 
-  it("upserts approval lines and sync attempts without reopening a closed approval", async () => {
-    const store = new PrismaApprovalSyncStore(prisma);
-    const record = {
-      id: "task3-synced-approval",
-      weComSpNo: "2026081100000001",
-      status: "APPROVED" as const,
-      outboundStatus: "PENDING_OUTBOUND" as const,
-      applicantUserId: "task3-sync-user",
-      applicantName: "Sync User",
-      department: "Operations",
-      purpose: "supplies",
-      submittedAt: "2026-08-11T00:00:00.000Z",
-      lines: [{ itemId, itemOptionKey: "task3-option", itemName: "Task 3 test item", requestedQuantity: "2", unit: "box" }],
-    };
-    await store.saveWithAttempt(record, { weComSpNo: record.weComSpNo, status: "SUCCEEDED", attemptNo: 1, payload: { callback: 1 } });
-    await prisma.approvalRequest.update({ where: { id: record.id }, data: { outboundStatus: "COMPLETED" } });
-    await store.saveWithAttempt({ ...record, outboundStatus: "PENDING_OUTBOUND" }, { weComSpNo: record.weComSpNo, status: "SUCCEEDED", attemptNo: 2, payload: { callback: 2 } });
-
-    const storedApproval = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: record.id }, include: { lines: true } });
-    expect(storedApproval.outboundStatus).toBe("COMPLETED");
-    expect(storedApproval.lines.map((line) => ({ itemId: line.itemId, requestedQuantity: line.requestedQuantity.toString() }))).toEqual([{ itemId, requestedQuantity: "2" }]);
-    await expect(prisma.approvalRequest.count({ where: { weComSpNo: record.weComSpNo } })).resolves.toBe(1);
-    await expect(prisma.approvalLine.count({ where: { approvalRequestId: record.id } })).resolves.toBe(1);
-    await expect(prisma.syncAttempt.findMany({ where: { weComSpNo: record.weComSpNo }, orderBy: { attemptNo: "asc" } })).resolves.toMatchObject([
-      { attemptNo: 1, status: "SUCCEEDED" },
-      { attemptNo: 2, status: "SUCCEEDED" },
-    ]);
-  });
-
   it("reads ledger and balances from PostgreSQL after reconnecting", async () => {
     const stock = await recordStock({ batchNo: "TASK3-RESTART" });
     await prisma.$disconnect();
@@ -782,6 +754,198 @@ describe.skipIf(!databaseUrl)("approval intent outbound decision migration", () 
       await expect(client.query(readFileSync(resolve(process.cwd(), approvalIntentMigrationPath), "utf8")))
         .rejects.toThrow(/without an outbound decision/i);
     });
+  });
+});
+
+describe.skipIf(!databaseUrl)("Prisma approval synchronization after the intent migration", () => {
+  const syncSchemaName = `warehouse_task3_sync_${process.pid}_${Date.now()}`;
+  let adminPool: Pool;
+  let prisma: PrismaClient;
+
+  beforeAll(async () => {
+    if (!/^warehouse_task3_sync_\d+_\d+$/.test(syncSchemaName)) throw new Error("unsafe sync test schema name");
+    const isolatedDatabaseUrl = schemaUrlFor(databaseUrl as string, syncSchemaName);
+    adminPool = new Pool({ connectionString: databaseUrl });
+    await adminPool.query(`CREATE SCHEMA "${syncSchemaName}"`);
+    const migrationPool = new Pool({ connectionString: isolatedDatabaseUrl });
+    const migrationClient = await migrationPool.connect();
+    try {
+      await migrationClient.query(`SET search_path TO "${syncSchemaName}"`);
+      await applyMigrations(migrationClient, [...historicalMigrationPaths, approvalIntentMigrationPath]);
+    } finally {
+      migrationClient.release();
+      await migrationPool.end();
+    }
+    prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: isolatedDatabaseUrl }, { schema: syncSchemaName }) });
+    await prisma.itemCategory.create({ data: { id: "sync-category", code: "SYNC", prefix: "SY", name: "Sync" } });
+    await prisma.item.create({
+      data: {
+        id: "sync-item",
+        code: "SY-001",
+        name: "Exact item",
+        unit: "box",
+        categoryId: "sync-category",
+        weComOptionKey: "sync-option",
+      },
+    });
+  });
+
+  beforeEach(async () => {
+    await prisma.outboundDecisionLine.deleteMany();
+    await prisma.outboundOrder.deleteMany();
+    await prisma.approvalLine.deleteMany();
+    await prisma.approvalRequest.deleteMany();
+    await prisma.syncAttempt.deleteMany();
+    await prisma.user.deleteMany({ where: { id: { startsWith: "sync-" }, NOT: { id: "sync-item" } } });
+  });
+
+  afterAll(async () => {
+    await prisma?.$disconnect();
+    if (adminPool) {
+      await adminPool.query(`DROP SCHEMA IF EXISTS "${syncSchemaName}" CASCADE`);
+      await adminPool.end();
+    }
+  });
+
+  function intentRecord(overrides: Partial<ApprovalSyncRecord> = {}): ApprovalSyncRecord {
+    return {
+      id: "sync-approval",
+      weComSpNo: "2026090400000001",
+      sourceTemplateId: "tpl-intent-v2",
+      status: "APPROVED",
+      outboundStatus: "PENDING_OUTBOUND",
+      applicantUserId: "sync-applicant",
+      applicantName: "Sync Applicant",
+      department: "Operations",
+      purpose: "Supplies",
+      submittedAt: "2026-09-04T00:00:00.000Z",
+      lines: [{
+        requestedItemName: "Tea supplies",
+        requestedQuantity: "2",
+        unit: "box",
+        note: "Keep dry",
+        legacyResolutionStatus: "NOT_APPLICABLE",
+      }],
+      ...overrides,
+    };
+  }
+
+  it("persists immutable intent facts and reuses line IDs on an unprocessed duplicate sync", async () => {
+    const store = new PrismaApprovalSyncStore(prisma);
+    const record = intentRecord();
+
+    await store.saveWithAttempt(record, { weComSpNo: record.weComSpNo, status: "SUCCEEDED", attemptNo: 1, payload: { callback: 1 } });
+    const first = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: record.id }, include: { lines: true } });
+    await store.saveWithAttempt(intentRecord({
+      lines: [{ requestedItemName: "Updated supplies", requestedQuantity: "3", unit: "box", legacyResolutionStatus: "NOT_APPLICABLE" }],
+    }), { weComSpNo: record.weComSpNo, status: "SUCCEEDED", attemptNo: 2, payload: { callback: 2 } });
+
+    const stored = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: record.id }, include: { lines: true } });
+    expect(stored).toMatchObject({ sourceTemplateId: "tpl-intent-v2", outboundStatus: "PENDING_OUTBOUND" });
+    expect(stored.lines).toEqual([
+      expect.objectContaining({
+        id: first.lines[0]!.id,
+        requestedItemName: "Updated supplies",
+        itemId: null,
+        note: null,
+        legacyResolutionStatus: "NOT_APPLICABLE",
+      }),
+    ]);
+    await expect(prisma.syncAttempt.count({ where: { weComSpNo: record.weComSpNo } })).resolves.toBe(2);
+  });
+
+  it("promotes a pre-migration reapply line only when exact selector evidence is persisted", async () => {
+    const store = new PrismaApprovalSyncStore(prisma);
+    await store.save(intentRecord({
+      sourceTemplateId: undefined,
+      outboundStatus: "REAPPLY_REQUIRED",
+      lines: [{ requestedItemName: "Legacy item", requestedQuantity: "2", unit: "box", legacyResolutionStatus: "REAPPLY_REQUIRED" }],
+    }));
+    const original = await prisma.approvalLine.findFirstOrThrow({ where: { approvalRequestId: "sync-approval" } });
+
+    await store.save(intentRecord({
+      sourceTemplateId: "tpl-selector-v1",
+      lines: [{
+        requestedItemName: "Exact item",
+        requestedQuantity: "2",
+        unit: "box",
+        itemId: "sync-item",
+        itemOptionKey: "sync-option",
+        legacyResolutionStatus: "EXACT_LOCKED",
+      }],
+    }));
+
+    await expect(store.findBySpNo("2026090400000001")).resolves.toMatchObject({
+      sourceTemplateId: "tpl-selector-v1",
+      outboundStatus: "PENDING_OUTBOUND",
+      lines: [{
+        requestedItemName: "Exact item",
+        itemId: "sync-item",
+        itemOptionKey: "sync-option",
+        legacyResolutionStatus: "EXACT_LOCKED",
+      }],
+    });
+    await expect(prisma.approvalLine.findFirstOrThrow({ where: { approvalRequestId: "sync-approval" } }))
+      .resolves.toMatchObject({ id: original.id });
+  });
+
+  it("records a post-issue revocation exception without rewriting lines or deleting the outbound order", async () => {
+    const store = new PrismaApprovalSyncStore(prisma);
+    const record = intentRecord({
+      sourceTemplateId: "tpl-selector-v1",
+      lines: [{
+        requestedItemName: "Exact item",
+        requestedQuantity: "2",
+        unit: "box",
+        itemId: "sync-item",
+        itemOptionKey: "sync-option",
+        legacyResolutionStatus: "EXACT_LOCKED",
+      }],
+    });
+    await store.save(record);
+    const originalLine = await prisma.approvalLine.findFirstOrThrow({ where: { approvalRequestId: record.id } });
+    await prisma.outboundOrder.create({
+      data: {
+        id: "sync-order",
+        approvalRequestId: record.id,
+        orderNo: "OUT-SYNC",
+        status: "COMPLETED",
+        actualQuantity: "2",
+        amount: "20",
+        operatorId: "sync-operator",
+        decisions: {
+          create: {
+            id: "sync-decision",
+            approvalLineId: originalLine.id,
+            selectedItemId: "sync-item",
+            actualQuantity: "2",
+            decidedBy: "sync-operator",
+            decidedAt: new Date("2026-09-04T01:00:00.000Z"),
+          },
+        },
+      },
+    });
+    await store.save(intentRecord({
+      status: "REVOKED",
+      outboundStatus: "REVOCATION_EXCEPTION",
+      sourceTemplateId: "tpl-intent-v2",
+      lines: [{ requestedItemName: "Changed", requestedQuantity: "5", unit: "case", legacyResolutionStatus: "NOT_APPLICABLE" }],
+    }));
+
+    const stored = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: record.id }, include: { lines: true, outboundOrder: true } });
+    expect(stored).toMatchObject({
+      status: "REVOKED",
+      outboundStatus: "REVOCATION_EXCEPTION",
+      sourceTemplateId: "tpl-selector-v1",
+      outboundOrder: { id: "sync-order" },
+      lines: [expect.objectContaining({
+        id: originalLine.id,
+        requestedItemName: "Exact item",
+        itemId: "sync-item",
+        legacyResolutionStatus: "EXACT_LOCKED",
+      })],
+    });
+    await expect(prisma.outboundDecisionLine.count({ where: { outboundOrderId: "sync-order" } })).resolves.toBe(1);
   });
 });
 
