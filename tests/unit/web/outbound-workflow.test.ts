@@ -12,6 +12,7 @@ import {
   validateDecisionStep,
   type OutboundDraft,
 } from "../../../apps/web/src/features/outbound/outbound-workflow";
+import { readSessionDraft } from "../../../apps/web/src/features/drafts/session-draft";
 
 const approval = {
   id: "approval-1", weComSpNo: "202609040001", status: "PENDING_OUTBOUND",
@@ -44,6 +45,18 @@ function draft(overrides: Partial<OutboundDraft> = {}): OutboundDraft {
   };
 }
 
+function createStorage(): Storage {
+  const entries = new Map<string, string>();
+  return {
+    getItem: (key) => entries.get(key) ?? null,
+    setItem: (key, value) => { entries.set(key, value); },
+    removeItem: (key) => { entries.delete(key); },
+    clear: () => entries.clear(),
+    key: (index) => [...entries.keys()][index] ?? null,
+    get length() { return entries.size; },
+  };
+}
+
 describe("outbound decision workflow", () => {
   it("rejects non-positive, decimal, or overlong allocation quantities", () => {
     for (const quantity of ["", "0", "-1", "1.5", "123456789012345"]) {
@@ -57,6 +70,28 @@ describe("outbound decision workflow", () => {
     expect(validateDecisionStep(approval, noItem.decisions, options)).toMatchObject({ "line:line-wine": "请选择标准物品" });
     const short = draft({ decisions: [{ ...draft().decisions[0]!, allocations: [{ id: "a1", warehouseId: "wh-1", batchId: "b1", quantity: "1" }] }] });
     expect(validateDecisionStep(approval, short.decisions, options)).toMatchObject({ "reason:line-wine": "少出或零出必须填写原因" });
+  });
+
+  it("reports a duplicate decision even when both duplicate decisions are otherwise valid", () => {
+    const decision = draft().decisions[0]!;
+    expect(validateDecisionStep(approval, [decision, { ...decision, allocations: [...decision.allocations] }], options)).toEqual({
+      "line:line-wine": "每个审批意向只能有一个出库决定",
+    });
+  });
+
+  it("reports a missing decision without relying on an invalid allocation", () => {
+    expect(validateDecisionStep(approval, [], options)).toEqual({
+      "line:line-wine": "每个审批意向都需要出库决定",
+    });
+  });
+
+  it("rejects a foreign decision even when every known approval line is valid", () => {
+    const decisions = [...draft().decisions, {
+      approvalLineId: "foreign-line", selectedItemId: "", zeroIssue: true, varianceReason: "该行不属于本审批", allocations: [],
+    }];
+    expect(validateDecisionStep(approval, decisions, options)).toEqual({
+      "line:foreign-line": "出库决定不属于当前审批",
+    });
   });
 
   it("requires zero issue to have no item or allocations and its own reason", () => {
@@ -86,6 +121,13 @@ describe("outbound decision workflow", () => {
     expect(reconciled.staleSelectedItemLineIds).toEqual(["line-wine"]);
     expect(reconciled.staleAllocationIds).toEqual(["stale-batch"]);
     expect(reconciled.draft.decisions[0]!.varianceReason).toBe("保留原因");
+  });
+
+  it("clears stale markers after restored options without changing user input", () => {
+    const current = draft({ decisions: [{ ...draft().decisions[0]!, varianceReason: "保留原因" }] });
+    const reconciled = reconcileOutboundOptions(current, options);
+    expect(reconciled).toEqual({ draft: current, staleSelectedItemLineIds: [], staleAllocationIds: [] });
+    expect(current.decisions[0]!.varianceReason).toBe("保留原因");
   });
 
   it("marks every allocation stale when their combined batch quantity no longer fits", () => {
@@ -126,5 +168,20 @@ describe("outbound decision workflow", () => {
     expect(outboundDraftIndexKey("user/a")).toBe("warehouse.outbound.index.v2.user%2Fa");
     expect(isOutboundDraft({ approvalId: "a", step: "allocate", reason: "", allocations: [] })).toBe(false);
     expect(isOutboundDraft(draft())).toBe(true);
+  });
+
+  it("returns null for wrong-version, partial, corrupt, or prototype-shaped draft envelopes", () => {
+    const storage = createStorage();
+    const key = outboundDraftKey("admin", "approval-1");
+    for (const raw of [
+      JSON.stringify({ version: 1, userId: "admin", value: draft() }),
+      JSON.stringify({ version: 2, userId: "admin" }),
+      "{not json",
+      '{"version":2,"userId":"admin","value":{"__proto__":{"polluted":true}}}',
+    ]) {
+      storage.setItem(key, raw);
+      expect(readSessionDraft(storage, key, "admin", 2, isOutboundDraft)).toBeNull();
+    }
+    expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
   });
 });

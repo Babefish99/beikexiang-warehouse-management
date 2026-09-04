@@ -164,16 +164,27 @@ export function summarizeOutbound(approval: PendingApproval, decisions: readonly
   };
 }
 
-export function validateDecisionStep(approval: PendingApproval, decisions: readonly DecisionDraft[], options: OutboundOptions): Record<string, string> {
-  const errors: Record<string, string> = {};
-  const decisionsByLine = new Map<string, DecisionDraft>();
+function validateExactDecisionLineSet(approval: PendingApproval, decisions: readonly DecisionDraft[], errors: Record<string, string>): void {
+  const approvalLineIds = new Set(approval.lines.map((line) => line.id));
+  const decisionCounts = new Map<string, number>();
   for (const decision of decisions) {
-    if (decisionsByLine.has(decision.approvalLineId)) errors[`line:${decision.approvalLineId}`] = "每个审批意向只能有一个出库决定";
-    decisionsByLine.set(decision.approvalLineId, decision);
+    decisionCounts.set(decision.approvalLineId, (decisionCounts.get(decision.approvalLineId) ?? 0) + 1);
+    if (!approvalLineIds.has(decision.approvalLineId)) errors[`line:${decision.approvalLineId}`] = "出库决定不属于当前审批";
   }
   for (const line of approval.lines) {
+    const count = decisionCounts.get(line.id) ?? 0;
+    if (count === 0) errors[`line:${line.id}`] = "每个审批意向都需要出库决定";
+    if (count > 1) errors[`line:${line.id}`] = "每个审批意向只能有一个出库决定";
+  }
+}
+
+export function validateDecisionStep(approval: PendingApproval, decisions: readonly DecisionDraft[], options: OutboundOptions): Record<string, string> {
+  const errors: Record<string, string> = {};
+  validateExactDecisionLineSet(approval, decisions, errors);
+  const decisionsByLine = new Map<string, DecisionDraft>(decisions.map((decision) => [decision.approvalLineId, decision]));
+  for (const line of approval.lines) {
     const decision = decisionsByLine.get(line.id);
-    if (!decision) { errors[`line:${line.id}`] = "每个审批意向都需要出库决定"; continue; }
+    if (!decision) continue;
     const requested = parsePositiveInteger(line.requestedQuantity) ?? new Decimal(0);
     if (decision.zeroIssue) {
       if (decision.selectedItemId || decision.allocations.length) errors[`line:${line.id}`] = "零出库不能选择标准物品或填写批次分配";
