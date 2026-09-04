@@ -358,7 +358,7 @@ test("mobile locks the active editor while the final options reload is pending",
   let optionReads = 0;
   await page.route(apiUrl("/admin/outbound/approval-1/options"), async (route) => {
     optionReads += 1;
-    if (optionReads === 1) return route.fulfill({ json: initialOptions });
+    if (optionReads <= 2) return route.fulfill({ json: initialOptions });
     reloadStarted();
     await reloadResponse.promise;
     return route.fulfill({ json: initialOptions });
@@ -372,14 +372,17 @@ test("mobile locks the active editor while the final options reload is pending",
   await line.getByLabel("实际仓库").selectOption("一号仓");
   await line.getByLabel("采购批次").selectOption("期初-260827");
   await line.getByLabel("实际数量").fill("2");
+  await page.getByRole("button", { name: "复核出库" }).click();
+  await expect(page.getByRole("heading", { name: "复核出库" })).toBeVisible();
   await page.getByRole("button", { name: "确认出库" }).click();
   await reloadRequestStarted;
 
-  await expect(page.getByRole("button", { name: "返回待办" })).toBeDisabled();
-  await expect(line.getByLabel("标准物品")).toBeDisabled();
-  await expect(line.getByLabel("实际数量")).toBeDisabled();
-  await expect(line.getByRole("button", { name: "本项不出库" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "返回修改" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "校验中…" })).toBeDisabled();
   reloadResponse.release();
+  const confirmation = page.getByRole("dialog", { name: "确认实际出库" });
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole("button", { name: "确认提交" }).click();
   await expect(page.getByRole("status")).toContainText("mobile-safe");
 });
 
@@ -415,7 +418,7 @@ test("mobile does not post an old decision after SPA navigation invalidates a pe
   let confirmPosts = 0;
   await page.route(apiUrl("/admin/outbound/approval-1/options"), async (route) => {
     optionReads += 1;
-    if (optionReads === 1) return route.fulfill({ json: initialOptions });
+    if (optionReads <= 2) return route.fulfill({ json: initialOptions });
     reloadStarted();
     await reloadResponse.promise;
     return route.fulfill({ json: initialOptions });
@@ -432,6 +435,8 @@ test("mobile does not post an old decision after SPA navigation invalidates a pe
   await line.getByLabel("实际仓库").selectOption("一号仓");
   await line.getByLabel("采购批次").selectOption("期初-260827");
   await line.getByLabel("实际数量").fill("2");
+  await page.getByRole("button", { name: "复核出库" }).click();
+  await expect(page.getByRole("heading", { name: "复核出库" })).toBeVisible();
   await page.getByRole("button", { name: "确认出库" }).click();
   await reloadRequestStarted;
   await page.getByRole("link", { name: "首页" }).click();
