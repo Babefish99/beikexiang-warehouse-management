@@ -116,8 +116,9 @@ export class ApprovalParser {
 
     const purposeField = detail.contents.find((content): content is WeComApprovalField => content.control !== "Table" && content.title === "用途");
     const purpose = purposeField?.value?.text?.trim() ?? "";
-    const isIntentTable = (this.intentTemplateId !== undefined && detail.template_id === this.intentTemplateId)
-      || rows.some((row) => row.list.filter((field) => isIntentFieldTitle(field.title)).length >= 2);
+    const isIntentTable = this.intentTemplateId !== undefined
+      ? detail.template_id === this.intentTemplateId
+      : rows.some((row) => row.list.filter((field) => isIntentFieldTitle(field.title)).length >= 2);
     const lines = isIntentTable
       ? rows.map((row) => this.parseIntentLine(row))
       : rows.length > 0

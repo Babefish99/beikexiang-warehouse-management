@@ -417,6 +417,55 @@ describe("approval synchronization service", () => {
       lines: [{ requestedItemName: "Tea leaves" }],
     });
   });
+
+  it("applies revocation status and line freezing at the default memory store save boundary", async () => {
+    const store = new InMemoryApprovalSyncStore();
+    await store.save({
+      id: "approval-202607230021",
+      ...parsedApproval(),
+      outboundStatus: "COMPLETED",
+    });
+
+    await store.save({
+      id: "approval-202607230021",
+      ...parsedApproval({
+        status: "REVOKED",
+        lines: [{ requestedItemName: "Stale revoke line", requestedQuantity: "5", unit: "case", legacyResolutionStatus: "NOT_APPLICABLE" }],
+      }),
+      outboundStatus: "VOIDED",
+    });
+
+    expect(store.records()).toMatchObject([{
+      outboundStatus: "REVOCATION_EXCEPTION",
+      lines: [{ requestedItemName: "Tea leaves", requestedQuantity: "2", unit: "box", note: "Green tea" }],
+    }]);
+  });
+
+  it("rejects source-template mixing at the default memory store save boundary", async () => {
+    const store = new InMemoryApprovalSyncStore();
+    await store.save({ id: "approval-202607230021", ...parsedApproval(), outboundStatus: "PENDING_OUTBOUND" });
+
+    await expect(store.save({
+      id: "approval-202607230021",
+      ...parsedApproval({
+        sourceTemplateId: "tpl-selector-v1",
+        lines: [{
+          requestedItemName: "Legacy exact item",
+          requestedQuantity: "2",
+          unit: "box",
+          itemId: "item-tea",
+          itemOptionKey: "opt-tea",
+          legacyResolutionStatus: "EXACT_LOCKED",
+        }],
+      }),
+      outboundStatus: "PENDING_OUTBOUND",
+    })).rejects.toThrow("approval source template does not match the existing record");
+
+    expect(store.records()).toMatchObject([{
+      sourceTemplateId: "tpl-intent-v2",
+      lines: [{ requestedItemName: "Tea leaves", legacyResolutionStatus: "NOT_APPLICABLE" }],
+    }]);
+  });
 });
 
 describe("approval outbound status derivation", () => {

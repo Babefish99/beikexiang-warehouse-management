@@ -32,12 +32,13 @@ export interface ApprovalSyncAttempt {
   error?: string;
 }
 
+export type ApprovalSyncAttemptInput = Omit<ApprovalSyncAttempt, "attemptNo">;
+
 export interface ApprovalSyncStore {
   findBySpNo(weComSpNo: string): Promise<ApprovalSyncRecord | undefined>;
-  save(record: ApprovalSyncRecord): Promise<void>;
-  nextAttemptNo(weComSpNo: string): Promise<number>;
-  recordSyncAttempt(attempt: ApprovalSyncAttempt): Promise<void>;
-  saveWithAttempt?(record: ApprovalSyncRecord, attempt: ApprovalSyncAttempt): Promise<void>;
+  save(record: ApprovalSyncRecord): Promise<ApprovalOutboundStatus>;
+  recordSyncAttempt(attempt: ApprovalSyncAttemptInput): Promise<void>;
+  saveWithAttempt(record: ApprovalSyncRecord, attempt: ApprovalSyncAttemptInput): Promise<ApprovalOutboundStatus>;
 }
 
 export interface ApprovalDetailParser {
@@ -63,30 +64,26 @@ export class InMemoryApprovalSyncStore implements ApprovalSyncStore {
     return record ? structuredClone(record) : undefined;
   }
 
-  async save(record: ApprovalSyncRecord): Promise<void> {
+  async save(record: ApprovalSyncRecord): Promise<ApprovalOutboundStatus> {
     if (this.state) {
       const existingId = this.state.approvalsBySpNo.get(record.weComSpNo);
       const existing = existingId ? this.state.approvals.get(existingId) : undefined;
-      const approvalId = existing?.id ?? record.id;
-      const preserveLines = existing !== undefined
-        && (CLOSED_OUTBOUND_STATUSES.has(existing.outboundStatus)
-          || CLOSED_OUTBOUND_STATUSES.has(record.outboundStatus)
-          || existing.hasOutboundDecision === true);
-      this.state.approvalsBySpNo.set(record.weComSpNo, approvalId);
-      this.state.approvals.set(approvalId, {
-        id: approvalId,
-        weComSpNo: record.weComSpNo,
-        sourceTemplateId: existing?.sourceTemplateId ?? record.sourceTemplateId,
-        syncStatus: record.status,
-        outboundStatus: record.outboundStatus,
-        applicantUserId: record.applicantUserId,
-        applicantName: record.applicantName,
-        department: record.department,
-        purpose: record.purpose,
-        submittedAt: record.submittedAt,
-        hasOutboundDecision: existing?.hasOutboundDecision ?? record.hasOutboundDecision,
-        lines: preserveLines ? existing.lines : record.lines.map((line, index) => ({
-          id: existing?.lines[index]?.id ?? `${approvalId}-line-${index + 1}`,
+      const reconciled = reconcileApprovalRecord(existing ? toApprovalSyncRecord(existing) : undefined, record);
+      this.state.approvalsBySpNo.set(record.weComSpNo, reconciled.id);
+      this.state.approvals.set(reconciled.id, {
+        id: reconciled.id,
+        weComSpNo: reconciled.weComSpNo,
+        sourceTemplateId: reconciled.sourceTemplateId,
+        syncStatus: reconciled.status,
+        outboundStatus: reconciled.outboundStatus,
+        applicantUserId: reconciled.applicantUserId,
+        applicantName: reconciled.applicantName,
+        department: reconciled.department,
+        purpose: reconciled.purpose,
+        submittedAt: reconciled.submittedAt,
+        hasOutboundDecision: reconciled.hasOutboundDecision,
+        lines: reconciled.lines.map((line, index) => ({
+          id: existing?.lines[index]?.id ?? `${reconciled.id}-line-${index + 1}`,
           requestedItemName: line.requestedItemName,
           itemId: line.itemId,
           requestedQuantity: line.requestedQuantity,
@@ -96,22 +93,23 @@ export class InMemoryApprovalSyncStore implements ApprovalSyncStore {
           legacyResolutionStatus: line.legacyResolutionStatus,
         })),
       });
-      return;
+      return reconciled.outboundStatus;
     }
-    this.approvalRecords.set(record.weComSpNo, structuredClone(record));
+    const existing = this.approvalRecords.get(record.weComSpNo);
+    const reconciled = reconcileApprovalRecord(existing, record);
+    this.approvalRecords.set(record.weComSpNo, structuredClone(reconciled));
+    return reconciled.outboundStatus;
   }
 
-  async nextAttemptNo(weComSpNo: string): Promise<number> {
-    return this.syncAttempts.filter((attempt) => attempt.weComSpNo === weComSpNo).length + 1;
+  async recordSyncAttempt(attempt: ApprovalSyncAttemptInput): Promise<void> {
+    const attemptNo = this.syncAttempts.filter((stored) => stored.weComSpNo === attempt.weComSpNo).length + 1;
+    this.syncAttempts.push(structuredClone({ ...attempt, attemptNo }));
   }
 
-  async recordSyncAttempt(attempt: ApprovalSyncAttempt): Promise<void> {
-    this.syncAttempts.push(structuredClone(attempt));
-  }
-
-  async saveWithAttempt(record: ApprovalSyncRecord, attempt: ApprovalSyncAttempt): Promise<void> {
-    await this.save(record);
+  async saveWithAttempt(record: ApprovalSyncRecord, attempt: ApprovalSyncAttemptInput): Promise<ApprovalOutboundStatus> {
+    const outboundStatus = await this.save(record);
     await this.recordSyncAttempt(attempt);
+    return outboundStatus;
   }
 
   records(): ApprovalSyncRecord[] {
@@ -195,12 +193,34 @@ export function deriveOutboundStatus(input: {
     : "PENDING_OUTBOUND";
 }
 
+function reconcileApprovalRecord(existing: ApprovalSyncRecord | undefined, incoming: ApprovalSyncRecord): ApprovalSyncRecord {
+  if (existing?.sourceTemplateId && incoming.sourceTemplateId && existing.sourceTemplateId !== incoming.sourceTemplateId) {
+    throw new Error("approval source template does not match the existing record");
+  }
+  const outboundStatus = deriveOutboundStatus({
+    approvalStatus: incoming.status,
+    existingOutboundStatus: existing?.outboundStatus ?? incoming.outboundStatus,
+    lines: incoming.lines,
+  });
+  const preserveLines = existing !== undefined
+    && (CLOSED_OUTBOUND_STATUSES.has(existing.outboundStatus)
+      || CLOSED_OUTBOUND_STATUSES.has(outboundStatus)
+      || existing.hasOutboundDecision === true);
+  return {
+    ...incoming,
+    id: existing?.id ?? incoming.id,
+    sourceTemplateId: existing?.sourceTemplateId ?? incoming.sourceTemplateId,
+    outboundStatus,
+    hasOutboundDecision: existing?.hasOutboundDecision ?? incoming.hasOutboundDecision,
+    lines: preserveLines ? existing.lines : incoming.lines,
+  };
+}
+
 export class ApprovalSyncService {
   constructor(private readonly dependencies: { gateway: ApprovalGateway; parser: ApprovalDetailParser; store: ApprovalSyncStore; approvalTemplateIds?: string[] }) {}
 
   async sync(spNo: string, options: { callbackPayload?: unknown } = {}): Promise<{ approvalId: string; created: boolean; status: string }> {
     if (!/^\d{8,32}$/.test(spNo)) throw new Error("enterprise WeChat approval number is invalid");
-    const attemptNo = await this.dependencies.store.nextAttemptNo(spNo);
     let detail: WeComApprovalPayload | undefined;
     let retainFailurePayload = true;
     try {
@@ -212,9 +232,6 @@ export class ApprovalSyncService {
       }
       const parsed = normalizeResolutionEvidence(await this.dependencies.parser.parse(detail));
       const existing = await this.dependencies.store.findBySpNo(spNo);
-      if (existing?.sourceTemplateId && parsed.sourceTemplateId && existing.sourceTemplateId !== parsed.sourceTemplateId) {
-        throw new Error("approval source template does not match the existing record");
-      }
       const record: ApprovalSyncRecord = {
         id: existing?.id ?? `approval-${spNo}`,
         ...parsed,
@@ -226,22 +243,17 @@ export class ApprovalSyncService {
         hasOutboundDecision: existing?.hasOutboundDecision,
       };
       const payload = options.callbackPayload === undefined ? detail : { callback: options.callbackPayload, detail };
-      const attempt: ApprovalSyncAttempt = { weComSpNo: spNo, status: "SUCCEEDED", attemptNo, payload };
-      if (this.dependencies.store.saveWithAttempt) await this.dependencies.store.saveWithAttempt(record, attempt);
-      else {
-        await this.dependencies.store.save(record);
-        await this.dependencies.store.recordSyncAttempt(attempt);
-      }
+      const outboundStatus = await this.dependencies.store.saveWithAttempt(record, { weComSpNo: spNo, status: "SUCCEEDED", payload });
       return {
         approvalId: record.id,
         created: !existing,
-        status: record.outboundStatus === "NONE" ? parsed.status : record.outboundStatus,
+        status: outboundStatus === "NONE" ? parsed.status : outboundStatus,
       };
     } catch (error) {
       const payload = retainFailurePayload
         ? options.callbackPayload === undefined ? detail : { callback: options.callbackPayload, detail }
         : undefined;
-      await this.dependencies.store.recordSyncAttempt({ weComSpNo: spNo, status: "FAILED", attemptNo, payload, error: error instanceof Error ? error.message : "approval synchronization failed" });
+      await this.dependencies.store.recordSyncAttempt({ weComSpNo: spNo, status: "FAILED", payload, error: error instanceof Error ? error.message : "approval synchronization failed" });
       throw error;
     }
   }

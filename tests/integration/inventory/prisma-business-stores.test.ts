@@ -15,7 +15,8 @@ import { ReturnService } from "../../../apps/api/src/application/inventory/retur
 import { StocktakeService } from "../../../apps/api/src/application/inventory/stocktake-service.js";
 import { TransferService } from "../../../apps/api/src/application/inventory/transfer-service.js";
 import { PeriodCloseService } from "../../../apps/api/src/application/periods/period-close-service.js";
-import type { ApprovalSyncRecord } from "../../../apps/api/src/application/wecom/approval-sync-service.js";
+import { ApprovalSyncService, type ApprovalSyncRecord, type ApprovalSyncStore } from "../../../apps/api/src/application/wecom/approval-sync-service.js";
+import type { WeComApprovalPayload } from "../../../apps/api/src/infrastructure/wecom/approval-parser.js";
 import { createAccountingPeriod } from "../../../apps/api/src/domain/periods/accounting-period.js";
 import { PrismaAccountingPeriodStore } from "../../../apps/api/src/infrastructure/db/prisma-accounting-period-store.js";
 import { PrismaApprovalSyncStore } from "../../../apps/api/src/infrastructure/db/prisma-approval-sync-store.js";
@@ -830,15 +831,56 @@ describe.skipIf(!databaseUrl)("Prisma approval synchronization after the intent 
     };
   }
 
+  function pauseOneFind(store: PrismaApprovalSyncStore): {
+    store: ApprovalSyncStore;
+    reached: Promise<void>;
+    release(): void;
+  } {
+    let markReached!: () => void;
+    let release!: () => void;
+    const reached = new Promise<void>((resolve) => { markReached = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let shouldPause = true;
+    return {
+      reached,
+      release,
+      store: {
+        findBySpNo: async (weComSpNo) => {
+          const result = await store.findBySpNo(weComSpNo);
+          if (shouldPause) {
+            shouldPause = false;
+            markReached();
+            await gate;
+          }
+          return result;
+        },
+        save: (record) => store.save(record),
+        recordSyncAttempt: (attempt) => store.recordSyncAttempt(attempt),
+        saveWithAttempt: (record, attempt) => store.saveWithAttempt(record, attempt),
+      },
+    };
+  }
+
+  function syncDetail(templateId = "tpl-intent-v2"): WeComApprovalPayload {
+    return {
+      sp_no: "2026090400000001",
+      template_id: templateId,
+      sp_status: 4,
+      apply_time: 1788480000,
+      applyer: { userid: "sync-applicant", name: "Sync Applicant" },
+      contents: [],
+    };
+  }
+
   it("persists immutable intent facts and reuses line IDs on an unprocessed duplicate sync", async () => {
     const store = new PrismaApprovalSyncStore(prisma);
     const record = intentRecord();
 
-    await store.saveWithAttempt(record, { weComSpNo: record.weComSpNo, status: "SUCCEEDED", attemptNo: 1, payload: { callback: 1 } });
+    await store.saveWithAttempt(record, { weComSpNo: record.weComSpNo, status: "SUCCEEDED", payload: { callback: 1 } });
     const first = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: record.id }, include: { lines: true } });
     await store.saveWithAttempt(intentRecord({
       lines: [{ requestedItemName: "Updated supplies", requestedQuantity: "3", unit: "box", legacyResolutionStatus: "NOT_APPLICABLE" }],
-    }), { weComSpNo: record.weComSpNo, status: "SUCCEEDED", attemptNo: 2, payload: { callback: 2 } });
+    }), { weComSpNo: record.weComSpNo, status: "SUCCEEDED", payload: { callback: 2 } });
 
     const stored = await prisma.approvalRequest.findUniqueOrThrow({ where: { id: record.id }, include: { lines: true } });
     expect(stored).toMatchObject({ sourceTemplateId: "tpl-intent-v2", outboundStatus: "PENDING_OUTBOUND" });
@@ -925,10 +967,14 @@ describe.skipIf(!databaseUrl)("Prisma approval synchronization after the intent 
         },
       },
     });
+    await prisma.approvalRequest.update({
+      where: { id: record.id },
+      data: { outboundStatus: "COMPLETED" },
+    });
     await store.save(intentRecord({
       status: "REVOKED",
       outboundStatus: "REVOCATION_EXCEPTION",
-      sourceTemplateId: "tpl-intent-v2",
+      sourceTemplateId: "tpl-selector-v1",
       lines: [{ requestedItemName: "Changed", requestedQuantity: "5", unit: "case", legacyResolutionStatus: "NOT_APPLICABLE" }],
     }));
 
@@ -946,6 +992,111 @@ describe.skipIf(!databaseUrl)("Prisma approval synchronization after the intent 
       })],
     });
     await expect(prisma.outboundDecisionLine.count({ where: { outboundOrderId: "sync-order" } })).resolves.toBe(1);
+  });
+
+  it("re-derives a revoke against the status locked inside the save transaction", async () => {
+    const realStore = new PrismaApprovalSyncStore(prisma);
+    await realStore.save(intentRecord());
+    const paused = pauseOneFind(realStore);
+    const service = new ApprovalSyncService({
+      gateway: { fetchDetail: async () => syncDetail() },
+      parser: { parse: async () => ({
+        ...intentRecord({ status: "REVOKED" }),
+        status: "REVOKED" as const,
+      }) },
+      store: paused.store,
+      approvalTemplateIds: ["tpl-intent-v2"],
+    });
+
+    const synchronization = service.sync("2026090400000001");
+    await paused.reached;
+    await prisma.approvalRequest.update({ where: { id: "sync-approval" }, data: { outboundStatus: "COMPLETED" } });
+    paused.release();
+
+    await expect(synchronization).resolves.toMatchObject({ status: "REVOCATION_EXCEPTION" });
+    await expect(prisma.approvalRequest.findUniqueOrThrow({ where: { id: "sync-approval" } }))
+      .resolves.toMatchObject({ status: "REVOKED", outboundStatus: "REVOCATION_EXCEPTION" });
+  });
+
+  it("rejects a source-template race inside the save transaction without mixing provenance and lines", async () => {
+    const realStore = new PrismaApprovalSyncStore(prisma);
+    await realStore.save(intentRecord());
+    const paused = pauseOneFind(realStore);
+    const service = new ApprovalSyncService({
+      gateway: { fetchDetail: async () => syncDetail() },
+      parser: { parse: async () => ({
+        ...intentRecord({
+          lines: [{ requestedItemName: "Incoming intent", requestedQuantity: "3", unit: "box", legacyResolutionStatus: "NOT_APPLICABLE" }],
+        }),
+      }) },
+      store: paused.store,
+      approvalTemplateIds: ["tpl-intent-v2", "tpl-selector-v1"],
+    });
+
+    const synchronization = service.sync("2026090400000001");
+    await paused.reached;
+    await prisma.$transaction([
+      prisma.approvalRequest.update({ where: { id: "sync-approval" }, data: { sourceTemplateId: "tpl-selector-v1" } }),
+      prisma.approvalLine.update({
+        where: { id: "sync-approval-line-1" },
+        data: {
+          requestedItemName: "Concurrent legacy",
+          itemId: "sync-item",
+          legacyResolutionStatus: "EXACT_LOCKED",
+        },
+      }),
+    ]);
+    paused.release();
+
+    await expect(synchronization).rejects.toThrow("approval source template does not match the existing record");
+    await expect(prisma.approvalRequest.findUniqueOrThrow({
+      where: { id: "sync-approval" },
+      include: { lines: true },
+    })).resolves.toMatchObject({
+      sourceTemplateId: "tpl-selector-v1",
+      lines: [{ requestedItemName: "Concurrent legacy", itemId: "sync-item", legacyResolutionStatus: "EXACT_LOCKED" }],
+    });
+  });
+
+  it("retains distinct success and failure audit events when two synchronizations start together", async () => {
+    const realStore = new PrismaApprovalSyncStore(prisma);
+    let gatewayCalls = 0;
+    let releaseGateway!: () => void;
+    const gatewayGate = new Promise<void>((resolve) => { releaseGateway = resolve; });
+    const details = [syncDetail(), syncDetail("tpl-unlisted")];
+    const coordinatedStore = {
+      findBySpNo: (weComSpNo: string) => realStore.findBySpNo(weComSpNo),
+      save: (record: ApprovalSyncRecord) => realStore.save(record),
+      recordSyncAttempt: (attempt: Parameters<ApprovalSyncStore["recordSyncAttempt"]>[0]) => realStore.recordSyncAttempt(attempt),
+      saveWithAttempt: (record: ApprovalSyncRecord, attempt: Parameters<NonNullable<ApprovalSyncStore["saveWithAttempt"]>>[1]) => realStore.saveWithAttempt(record, attempt),
+    };
+    const service = new ApprovalSyncService({
+      gateway: {
+        fetchDetail: async () => {
+          const index = gatewayCalls;
+          gatewayCalls += 1;
+          if (gatewayCalls === 2) releaseGateway();
+          await gatewayGate;
+          return details[index]!;
+        },
+      },
+      parser: { parse: async () => intentRecord() },
+      store: coordinatedStore,
+      approvalTemplateIds: ["tpl-intent-v2"],
+    });
+
+    const outcomes = await Promise.allSettled([
+      service.sync("2026090400000001"),
+      service.sync("2026090400000001"),
+    ]);
+    expect(outcomes.map((outcome) => outcome.status).sort()).toEqual(["fulfilled", "rejected"]);
+    const attempts = await prisma.syncAttempt.findMany({
+      where: { weComSpNo: "2026090400000001" },
+      orderBy: { attemptNo: "asc" },
+    });
+    expect(attempts.map((attempt) => attempt.attemptNo)).toEqual([1, 2]);
+    expect(attempts.map((attempt) => attempt.status).sort()).toEqual(["FAILED", "SUCCEEDED"]);
+    expect(new Set(attempts.map((attempt) => attempt.id)).size).toBe(2);
   });
 });
 

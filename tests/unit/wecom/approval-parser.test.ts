@@ -156,6 +156,29 @@ describe("enterprise WeChat approval parser", () => {
     });
   });
 
+  it("keeps an allow-listed legacy template on the legacy parser path even when field titles resemble intent fields", () => {
+    const detail = makeDetail();
+    const table = detail.contents.find((content) => content.control === "Table");
+    if (!table || table.control !== "Table") throw new Error("fixture table missing");
+    table.value.children[0]!.list[0]!.title = "意向物品名称";
+    table.value.children[0]!.list[1]!.title = "审批数量";
+    table.value.children[0]!.list.push({ control: "Text", title: "单位", value: { text: "包" } });
+    table.value.children = [table.value.children[0]!];
+    const parser = new ApprovalParser(
+      () => ({ id: "item-1", unit: "包", isActive: true }),
+      "tpl-intent-v2",
+    );
+
+    expect(parser.parse(detail).lines).toEqual([{
+      itemId: "item-1",
+      itemOptionKey: "opt-powder",
+      requestedItemName: "盒装粉条",
+      requestedQuantity: "4",
+      unit: "包",
+      legacyResolutionStatus: "EXACT_LOCKED",
+    }]);
+  });
+
   it.each([
     { fields: [{ control: "Number", title: "数量", value: { new_number: { value: "1.5", unit: "包" } } }], label: "fractional quantity" },
     { fields: [{ control: "Number", title: "数量", value: { new_number: { value: "4" } } }], label: "missing unit" },

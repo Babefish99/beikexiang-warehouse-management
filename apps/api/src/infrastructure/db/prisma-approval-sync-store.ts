@@ -1,7 +1,7 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 
-import type { ApprovalSyncAttempt, ApprovalSyncRecord, ApprovalSyncStore } from "../../application/wecom/approval-sync-service.js";
-import { runInventoryTransaction, type InventoryTransactionClient } from "./prisma-inventory-transaction.js";
+import { deriveOutboundStatus, type ApprovalSyncAttemptInput, type ApprovalSyncRecord, type ApprovalSyncStore } from "../../application/wecom/approval-sync-service.js";
+import type { InventoryTransactionClient } from "./prisma-inventory-transaction.js";
 
 const closedOutboundStatuses = new Set(["COMPLETED", "PARTIALLY_ISSUED", "UNAVAILABLE", "VOIDED", "REVOCATION_EXCEPTION"]);
 
@@ -41,27 +41,31 @@ export class PrismaApprovalSyncStore implements ApprovalSyncStore {
     };
   }
 
-  async save(record: ApprovalSyncRecord): Promise<void> {
-    await runInventoryTransaction(this.prisma, (transaction) => this.upsertApproval(transaction, record));
-  }
-
-  async saveWithAttempt(record: ApprovalSyncRecord, attempt: ApprovalSyncAttempt): Promise<void> {
-    await runInventoryTransaction(this.prisma, async (transaction) => {
-      await this.upsertApproval(transaction, record);
-      await upsertAttempt(transaction, attempt);
+  async save(record: ApprovalSyncRecord): Promise<ApprovalSyncRecord["outboundStatus"]> {
+    return runApprovalSyncTransaction(this.prisma, async (transaction) => {
+      await lockApprovalSync(transaction, record.weComSpNo);
+      return this.upsertApproval(transaction, record);
     });
   }
 
-  async nextAttemptNo(weComSpNo: string): Promise<number> {
-    const latest = await this.prisma.syncAttempt.findFirst({ where: { weComSpNo }, orderBy: { attemptNo: "desc" } });
-    return (latest?.attemptNo ?? 0) + 1;
+  async saveWithAttempt(record: ApprovalSyncRecord, attempt: ApprovalSyncAttemptInput): Promise<ApprovalSyncRecord["outboundStatus"]> {
+    return runApprovalSyncTransaction(this.prisma, async (transaction) => {
+      await lockApprovalSync(transaction, record.weComSpNo);
+      const outboundStatus = await this.upsertApproval(transaction, record);
+      await createAttempt(transaction, attempt);
+      return outboundStatus;
+    });
   }
 
-  async recordSyncAttempt(attempt: ApprovalSyncAttempt): Promise<void> {
-    await runInventoryTransaction(this.prisma, (transaction) => upsertAttempt(transaction, attempt));
+  async recordSyncAttempt(attempt: ApprovalSyncAttemptInput): Promise<void> {
+    await runApprovalSyncTransaction(this.prisma, async (transaction) => {
+      await lockApprovalSync(transaction, attempt.weComSpNo);
+      await createAttempt(transaction, attempt);
+    });
   }
 
-  private async upsertApproval(transaction: InventoryTransactionClient, record: ApprovalSyncRecord): Promise<void> {
+  private async upsertApproval(transaction: InventoryTransactionClient, record: ApprovalSyncRecord): Promise<ApprovalSyncRecord["outboundStatus"]> {
+    await transaction.$queryRaw`SELECT "id" FROM "ApprovalRequest" WHERE "weComSpNo" = ${record.weComSpNo} FOR UPDATE`;
     await transaction.role.upsert({
       where: { id: "role-applicant" },
       update: { code: "APPLICANT", name: "领用人" },
@@ -79,9 +83,17 @@ export class PrismaApprovalSyncStore implements ApprovalSyncStore {
         outboundOrder: { include: { decisions: { select: { id: true } } } },
       },
     });
+    if (existing?.sourceTemplateId && record.sourceTemplateId && existing.sourceTemplateId !== record.sourceTemplateId) {
+      throw new Error("approval source template does not match the existing record");
+    }
+    const outboundStatus = deriveOutboundStatus({
+      approvalStatus: record.status,
+      existingOutboundStatus: (existing?.outboundStatus as ApprovalSyncRecord["outboundStatus"] | undefined) ?? record.outboundStatus,
+      lines: record.lines,
+    });
     const preserveClosed = existing ? closedOutboundStatuses.has(existing.outboundStatus) : false;
     const preserveLines = Boolean(existing)
-      && (preserveClosed || closedOutboundStatuses.has(record.outboundStatus) || Boolean(existing?.outboundOrder?.decisions.length));
+      && (preserveClosed || closedOutboundStatuses.has(outboundStatus) || Boolean(existing?.outboundOrder?.decisions.length));
     const approvalId = existing?.id ?? record.id;
     await transaction.approvalRequest.upsert({
       where: { weComSpNo: record.weComSpNo },
@@ -91,9 +103,7 @@ export class PrismaApprovalSyncStore implements ApprovalSyncStore {
         department: record.department,
         purpose: record.purpose,
         status: record.status,
-        outboundStatus: preserveClosed && record.outboundStatus !== "REVOCATION_EXCEPTION"
-          ? existing!.outboundStatus
-          : record.outboundStatus,
+        outboundStatus,
         sourceTemplateId: existing?.sourceTemplateId ?? record.sourceTemplateId,
         submittedAt: new Date(record.submittedAt),
       },
@@ -105,12 +115,12 @@ export class PrismaApprovalSyncStore implements ApprovalSyncStore {
         department: record.department,
         purpose: record.purpose,
         status: record.status,
-        outboundStatus: record.outboundStatus,
+        outboundStatus,
         sourceTemplateId: record.sourceTemplateId,
         submittedAt: new Date(record.submittedAt),
       },
     });
-    if (preserveLines) return;
+    if (preserveLines) return outboundStatus;
 
     const retainedIds: string[] = [];
     for (const [index, line] of record.lines.entries()) {
@@ -139,15 +149,26 @@ export class PrismaApprovalSyncStore implements ApprovalSyncStore {
       });
     }
     await transaction.approvalLine.deleteMany({ where: { approvalRequestId: approvalId, id: { notIn: retainedIds } } });
+    return outboundStatus;
   }
 }
 
-async function upsertAttempt(transaction: InventoryTransactionClient, attempt: ApprovalSyncAttempt): Promise<void> {
-  const id = `sync-${attempt.weComSpNo}-${attempt.attemptNo}`;
+function runApprovalSyncTransaction<T>(
+  prisma: PrismaClient,
+  operation: (transaction: InventoryTransactionClient) => Promise<T>,
+): Promise<T> {
+  return prisma.$transaction(operation, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+}
+
+async function lockApprovalSync(transaction: InventoryTransactionClient, weComSpNo: string): Promise<void> {
+  await transaction.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${weComSpNo}, 0))::text AS "lock"`;
+}
+
+async function createAttempt(transaction: InventoryTransactionClient, attempt: ApprovalSyncAttemptInput): Promise<void> {
+  const latest = await transaction.syncAttempt.findFirst({ where: { weComSpNo: attempt.weComSpNo }, orderBy: { attemptNo: "desc" } });
+  const attemptNo = (latest?.attemptNo ?? 0) + 1;
   const payload = attempt.payload === undefined ? undefined : attempt.payload as Prisma.InputJsonValue;
-  await transaction.syncAttempt.upsert({
-    where: { id },
-    update: { status: attempt.status, payload, error: attempt.error },
-    create: { id, weComSpNo: attempt.weComSpNo, status: attempt.status, attemptNo: attempt.attemptNo, payload, error: attempt.error },
+  await transaction.syncAttempt.create({
+    data: { id: `sync-${crypto.randomUUID()}`, weComSpNo: attempt.weComSpNo, status: attempt.status, attemptNo, payload, error: attempt.error },
   });
 }
