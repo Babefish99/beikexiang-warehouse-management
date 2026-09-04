@@ -203,8 +203,10 @@ describe("production deployment configuration", () => {
     expect(example).toContain("WE_COM_ADMIN_IDS=replace-with-production-admin-userid");
     expect(example).toContain("WE_COM_APPROVAL_SECRET=replace-with-wecom-approval-secret");
     expect(example).toContain("WE_COM_APPROVAL_TEMPLATE_ID=replace-with-approved-template-id");
+    expect(example).toContain("WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS=");
     expect(compose).toContain("WE_COM_APPROVAL_SECRET: ${WE_COM_APPROVAL_SECRET:-}");
     expect(compose).toContain("WE_COM_APPROVAL_TEMPLATE_ID: ${WE_COM_APPROVAL_TEMPLATE_ID:-}");
+    expect(compose).toContain("WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS: ${WE_COM_LEGACY_APPROVAL_TEMPLATE_IDS:-}");
     expect(example).not.toMatch(/106\.14\.224\.213|i-uf6ig2xdl67rqerk67l1/);
   });
 
