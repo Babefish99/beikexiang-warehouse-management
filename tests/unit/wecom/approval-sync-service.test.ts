@@ -365,11 +365,13 @@ describe("approval synchronization service", () => {
     sharedState.issuedAllocations.set("allocation-1", {
       id: "allocation-1",
       outboundOrderId: "order-1",
+      outboundDecisionLineId: "decision-1",
       warehouseId: "warehouse-1",
       itemId: "item-tea",
       batchId: "batch-1",
       issuedQuantity: "2",
       unitCost: "10",
+      amount: "20.00",
     });
     const parser = { parse: vi.fn().mockResolvedValue(parsedApproval({
       status: "REVOKED",

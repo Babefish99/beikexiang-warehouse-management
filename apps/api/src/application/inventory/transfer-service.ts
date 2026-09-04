@@ -29,6 +29,18 @@ export interface MovementStore {
   returnStock(input: { allocation: IssuedAllocation; quantity: string; reason: string }): Promise<{ returnId: string; unitCost: string }>;
 }
 
+function toIssuedAllocation(allocation: InventoryIssuedAllocationState): IssuedAllocation {
+  return {
+    id: allocation.id,
+    outboundOrderId: allocation.outboundOrderId,
+    warehouseId: allocation.warehouseId,
+    itemId: allocation.itemId,
+    batchId: allocation.batchId,
+    issuedQuantity: allocation.issuedQuantity,
+    unitCost: allocation.unitCost,
+  };
+}
+
 export class InMemoryMovementStore implements MovementStore {
   private readonly state: InventoryMemoryState;
 
@@ -37,11 +49,34 @@ export class InMemoryMovementStore implements MovementStore {
   }
 
   seedBalance(balance: MovementBalance): void {
-    this.state.balances.set(inventoryBalanceKey(balance.warehouseId, balance.batchId), structuredClone(balance));
+    const key = inventoryBalanceKey(balance.warehouseId, balance.batchId);
+    const previous = this.state.balances.get(key);
+    const batch = this.state.batches.get(balance.batchId);
+    const nextBatchRemaining = new Decimal(batch?.remainingQuantity ?? "0")
+      .minus(previous?.remainingQuantity ?? "0")
+      .plus(balance.remainingQuantity)
+      .toString();
+    this.state.balances.set(key, structuredClone(balance));
+    this.state.batches.set(balance.batchId, batch
+      ? { ...batch, remainingQuantity: nextBatchRemaining }
+      : {
+          id: balance.batchId,
+          warehouseId: balance.warehouseId,
+          itemId: balance.itemId,
+          batchNo: balance.batchId,
+          quantity: balance.remainingQuantity,
+          remainingQuantity: nextBatchRemaining,
+          unitCost: balance.unitCost,
+          purchasedAt: new Date(0).toISOString(),
+        });
   }
 
   seedIssuedAllocation(allocation: IssuedAllocation): void {
-    this.state.issuedAllocations.set(allocation.id, structuredClone(allocation));
+    this.state.issuedAllocations.set(allocation.id, {
+      ...structuredClone(allocation),
+      outboundDecisionLineId: `seed-decision-${allocation.id}`,
+      amount: new Decimal(allocation.issuedQuantity).mul(allocation.unitCost).toFixed(2),
+    });
   }
 
   balance(warehouseId: string, batchId: string): MovementBalance | undefined {
@@ -58,12 +93,12 @@ export class InMemoryMovementStore implements MovementStore {
   }
 
   async listIssuedAllocations(): Promise<IssuedAllocation[]> {
-    return [...this.state.issuedAllocations.values()].map((allocation) => structuredClone(allocation));
+    return [...this.state.issuedAllocations.values()].map(toIssuedAllocation);
   }
 
   getAllocation(id: string): IssuedAllocation | undefined {
     const allocation = this.state.issuedAllocations.get(id);
-    return allocation ? structuredClone(allocation) : undefined;
+    return allocation ? toIssuedAllocation(allocation) : undefined;
   }
 
   getReturnedQuantity(allocationId: string): string {
@@ -85,10 +120,11 @@ export class InMemoryMovementStore implements MovementStore {
     const target = destination ?? { ...source, warehouseId: input.destinationWarehouseId, remainingQuantity: "0" };
     if (target.unitCost !== source.unitCost) throw new Error("transferred batch cost cannot change");
     const transferId = crypto.randomUUID();
-    this.state.balances.set(sourceKey, { ...source, remainingQuantity: remaining.toString() });
-    this.state.balances.set(destinationKey, { ...target, remainingQuantity: new Decimal(target.remainingQuantity).plus(quantity).toString() });
     const amount = quantity.mul(source.unitCost).toFixed(2);
-    this.state.ledger.push(
+    const occurredAt = new Date().toISOString();
+    const nextSource = { ...source, remainingQuantity: remaining.toString() };
+    const nextDestination = { ...target, remainingQuantity: new Decimal(target.remainingQuantity).plus(quantity).toString() };
+    const ledgerEntries: InventoryLedgerEntry[] = [
       {
         id: crypto.randomUUID(),
         warehouseId: input.sourceWarehouseId,
@@ -100,7 +136,7 @@ export class InMemoryMovementStore implements MovementStore {
         amount,
         referenceType: "TRANSFER_ORDER",
         referenceId: transferId,
-        occurredAt: new Date().toISOString(),
+        occurredAt,
       },
       {
         id: crypto.randomUUID(),
@@ -113,9 +149,12 @@ export class InMemoryMovementStore implements MovementStore {
         amount,
         referenceType: "TRANSFER_ORDER",
         referenceId: transferId,
-        occurredAt: new Date().toISOString(),
+        occurredAt,
       },
-    );
+    ];
+    this.state.balances.set(sourceKey, nextSource);
+    this.state.balances.set(destinationKey, nextDestination);
+    this.state.ledger.push(...ledgerEntries);
     return { transferId, unitCost: source.unitCost };
   }
 
@@ -129,10 +168,17 @@ export class InMemoryMovementStore implements MovementStore {
     const balance = this.state.balances.get(key);
     if (!balance) throw new Error("return stock balance not found");
     if (balance.itemId !== input.allocation.itemId) throw new Error("return stock balance item mismatch");
+    const batch = this.state.batches.get(input.allocation.batchId);
+    if (!batch || batch.itemId !== input.allocation.itemId) throw new Error("return batch not found");
+    const balanceTotal = [...this.state.balances.values()]
+      .filter((candidate) => candidate.batchId === input.allocation.batchId)
+      .reduce((total, candidate) => total.plus(candidate.remainingQuantity), new Decimal(0));
+    if (!balanceTotal.eq(batch.remainingQuantity)) throw new Error("batch balance changed; retry transaction");
     const returnId = crypto.randomUUID();
-    this.state.balances.set(key, { ...balance, remainingQuantity: new Decimal(balance.remainingQuantity).plus(quantity).toString() });
-    this.state.returnedQuantities.set(input.allocation.id, returned.plus(quantity).toString());
-    this.state.ledger.push({
+    const nextBalance = { ...balance, remainingQuantity: new Decimal(balance.remainingQuantity).plus(quantity).toString() };
+    const nextBatch = { ...batch, remainingQuantity: new Decimal(batch.remainingQuantity).plus(quantity).toString() };
+    const nextReturnedQuantity = returned.plus(quantity).toString();
+    const ledgerEntry: InventoryLedgerEntry = {
       id: crypto.randomUUID(),
       warehouseId: input.allocation.warehouseId,
       itemId: input.allocation.itemId,
@@ -144,7 +190,11 @@ export class InMemoryMovementStore implements MovementStore {
       referenceType: "OUTBOUND_ALLOCATION",
       referenceId: input.allocation.id,
       occurredAt: new Date().toISOString(),
-    });
+    };
+    this.state.balances.set(key, nextBalance);
+    this.state.batches.set(batch.id, nextBatch);
+    this.state.returnedQuantities.set(input.allocation.id, nextReturnedQuantity);
+    this.state.ledger.push(ledgerEntry);
     return { returnId, unitCost: input.allocation.unitCost };
   }
 }

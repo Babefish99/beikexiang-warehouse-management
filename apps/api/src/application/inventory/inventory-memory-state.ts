@@ -55,11 +55,13 @@ export interface InventoryApprovalState {
 export interface InventoryIssuedAllocationState {
   id: string;
   outboundOrderId: string;
+  outboundDecisionLineId: string;
   warehouseId: string;
   itemId: string;
   batchId: string;
   issuedQuantity: string;
   unitCost: string;
+  amount: string;
 }
 
 export interface InventoryOutboundDecisionState {

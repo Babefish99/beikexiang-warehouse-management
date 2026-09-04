@@ -233,7 +233,7 @@ export class InMemoryOutboundStore implements OutboundStore {
       nextBalances.set(key, { ...current, remainingQuantity: remaining.toString() });
 
       const batch = nextBatches.get(group.allocation.batchId);
-      if (!batch || batch.itemId !== group.allocation.itemId || batch.warehouseId !== group.allocation.warehouseId) {
+      if (!batch || batch.itemId !== group.allocation.itemId) {
         throw new Error("stock balance changed; retry transaction");
       }
       const batchRemaining = new Decimal(batch.remainingQuantity).minus(group.quantity);
@@ -246,12 +246,16 @@ export class InMemoryOutboundStore implements OutboundStore {
       : validation.status === "ZERO"
         ? "UNAVAILABLE"
         : "PARTIALLY_ISSUED";
+    const persistedAllocationAmounts = validation.allocations.map((allocation) =>
+      new Decimal(allocation.quantity).mul(allocation.unitCost).toFixed(2));
     const order: OutboundOrderResult = {
       id: crypto.randomUUID(),
       approvalId: approval.id,
       status,
       actualQuantity: validation.totalQuantity,
-      amount: validation.amount,
+      amount: persistedAllocationAmounts
+        .reduce((total, amount) => total.plus(amount), new Decimal(0))
+        .toFixed(2),
     };
     const decidedAt = new Date().toISOString();
     const stagedDecisions = validation.decisions.map((decision) => ({
@@ -265,20 +269,22 @@ export class InMemoryOutboundStore implements OutboundStore {
       decidedAt,
     } satisfies InventoryOutboundDecisionState));
     const decisionsByLineId = new Map(stagedDecisions.map((decision) => [decision.approvalLineId, decision]));
-    const stagedAllocations = validation.allocations.map((allocation) => {
+    const stagedAllocations = validation.allocations.map((allocation, index) => {
       const decision = decisionsByLineId.get(allocation.approvalLineId);
       if (!decision) throw new Error(`outbound decision not found: ${allocation.approvalLineId}`);
       return {
         id: crypto.randomUUID(),
         outboundOrderId: order.id,
+        outboundDecisionLineId: decision.id,
         warehouseId: allocation.warehouseId,
         itemId: allocation.itemId,
         batchId: allocation.batchId,
         issuedQuantity: allocation.quantity,
         unitCost: allocation.unitCost,
+        amount: persistedAllocationAmounts[index]!,
       };
     });
-    const stagedLedger = validation.allocations.map((allocation) => ({
+    const stagedLedger = validation.allocations.map((allocation, index) => ({
       id: crypto.randomUUID(),
       warehouseId: allocation.warehouseId,
       itemId: allocation.itemId,
@@ -286,7 +292,7 @@ export class InMemoryOutboundStore implements OutboundStore {
       type: "OUTBOUND" as const,
       quantity: new Decimal(allocation.quantity).negated().toString(),
       unitCost: allocation.unitCost,
-      amount: new Decimal(allocation.quantity).mul(allocation.unitCost).toFixed(2),
+      amount: persistedAllocationAmounts[index]!,
       referenceType: "OUTBOUND_ORDER",
       referenceId: order.id,
       occurredAt: decidedAt,

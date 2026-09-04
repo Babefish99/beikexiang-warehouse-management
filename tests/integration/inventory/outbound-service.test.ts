@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createInventoryMemoryState } from "../../../apps/api/src/application/inventory/inventory-memory-state.js";
 import {
   OutboundService,
   InMemoryOutboundStore,
@@ -214,6 +215,66 @@ describe("outbound service", () => {
       varianceReason: undefined,
       decidedBy: "operator-1",
     }]);
+  });
+
+  it("preserves each allocation's decision when two lines use the same item and batch", async () => {
+    const state = createInventoryMemoryState();
+    const store = new InMemoryOutboundStore(state);
+    store.seedApproval({
+      id: "approval-1",
+      weComSpNo: "multi-line-1",
+      status: "PENDING_OUTBOUND",
+      lines: [
+        { id: "line-1", requestedItemName: "Shared item", requestedQuantity: "1", unit: "box", legacyResolutionStatus: "NOT_APPLICABLE" },
+        { id: "line-2", requestedItemName: "Shared item", requestedQuantity: "1", unit: "box", legacyResolutionStatus: "NOT_APPLICABLE" },
+      ],
+    });
+    store.seedItem({ id: "item-1", code: "ITEM-1", name: "Shared item", unit: "box", isActive: true });
+    store.seedBatch({ id: "batch-1", warehouseId: "wh-1", itemId: "item-1", remainingQuantity: "2", unitCost: "20" });
+
+    await new OutboundService(store).confirm({
+      approvalId: "approval-1",
+      operatorId: "operator-1",
+      decisions: [
+        { approvalLineId: "line-1", selectedItemId: "item-1", allocations: [{ warehouseId: "wh-1", batchId: "batch-1", quantity: "1" }] },
+        { approvalLineId: "line-2", selectedItemId: "item-1", allocations: [{ warehouseId: "wh-1", batchId: "batch-1", quantity: "1" }] },
+      ],
+    });
+
+    const decisions = [...state.outboundDecisions.values()];
+    expect([...state.issuedAllocations.values()]).toMatchObject([
+      { outboundDecisionLineId: decisions[0]?.id, itemId: "item-1", batchId: "batch-1" },
+      { outboundDecisionLineId: decisions[1]?.id, itemId: "item-1", batchId: "batch-1" },
+    ]);
+  });
+
+  it("sums persisted two-decimal allocation amounts for the order total", async () => {
+    const state = createInventoryMemoryState();
+    const store = new InMemoryOutboundStore(state);
+    store.seedApproval({
+      id: "approval-1",
+      weComSpNo: "rounding-1",
+      status: "PENDING_OUTBOUND",
+      lines: [
+        { id: "line-1", requestedItemName: "Fractional item", requestedQuantity: "1", unit: "piece", legacyResolutionStatus: "NOT_APPLICABLE" },
+        { id: "line-2", requestedItemName: "Fractional item", requestedQuantity: "1", unit: "piece", legacyResolutionStatus: "NOT_APPLICABLE" },
+      ],
+    });
+    store.seedItem({ id: "item-1", code: "ITEM-1", name: "Fractional item", unit: "piece", isActive: true });
+    store.seedBatch({ id: "batch-1", warehouseId: "wh-1", itemId: "item-1", remainingQuantity: "2", unitCost: "0.005" });
+
+    const order = await new OutboundService(store).confirm({
+      approvalId: "approval-1",
+      operatorId: "operator-1",
+      decisions: [
+        { approvalLineId: "line-1", selectedItemId: "item-1", allocations: [{ warehouseId: "wh-1", batchId: "batch-1", quantity: "1" }] },
+        { approvalLineId: "line-2", selectedItemId: "item-1", allocations: [{ warehouseId: "wh-1", batchId: "batch-1", quantity: "1" }] },
+      ],
+    });
+
+    expect(order.amount).toBe("0.02");
+    expect([...state.issuedAllocations.values()]).toMatchObject([{ amount: "0.01" }, { amount: "0.01" }]);
+    expect(store.ledger()).toMatchObject([{ amount: "0.01" }, { amount: "0.01" }]);
   });
 
   it("closes a partial issue and prevents a later top-up on the same approval", async () => {
