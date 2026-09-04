@@ -106,20 +106,26 @@ function toSubmittedAt(value: number | string): string {
 }
 
 export class ApprovalParser {
-  constructor(private readonly resolveItem: ApprovalItemResolver) {}
+  constructor(
+    private readonly resolveItem: ApprovalItemResolver,
+    private readonly intentTemplateId?: string,
+  ) {}
 
   parse(detail: WeComApprovalPayload): ParsedApproval {
     const table = detail.contents.find((content): content is WeComApprovalTable => content.control === "Table");
     const rows = table?.value.children ?? [];
     if (rows.length > 5) throw new Error("approval cannot contain more than five item rows");
 
+    const sourceTemplateId = detail.template_id?.trim() || undefined;
+    const isIntentTable = this.intentTemplateId
+      ? sourceTemplateId === this.intentTemplateId
+      : rows.some((row) => (
+        !row.list.some((field) => field.control === "Selector")
+        && row.list.some((field) => isIntentFieldTitle(field.title))
+      ));
     const purposeField = detail.contents.find((content): content is WeComApprovalField => content.control !== "Table" && content.title === "用途");
     const purpose = purposeField?.value?.text?.trim() ?? "";
-    if (!purpose) throw new Error("approval purpose is required");
-    const isIntentTable = rows.some((row) => (
-      !row.list.some((field) => field.control === "Selector")
-      && row.list.some((field) => isIntentFieldTitle(field.title))
-    ));
+    if (isIntentTable && !purpose) throw new Error("approval purpose is required");
     const lines = isIntentTable
       ? rows.map((row) => this.parseIntentLine(row))
       : rows.length > 0
@@ -136,7 +142,7 @@ export class ApprovalParser {
       department: detail.department ?? detail.applyer.department,
       purpose,
       submittedAt: toSubmittedAt(detail.apply_time),
-      sourceTemplateId: detail.template_id?.trim() || undefined,
+      sourceTemplateId,
       lines,
     };
   }

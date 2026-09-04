@@ -16,6 +16,17 @@ const intentApproval = {
   }],
 };
 
+const secondIntentApproval = {
+  ...intentApproval,
+  id: "approval-2",
+  weComSpNo: "202609040002",
+  lines: [{
+    ...intentApproval.lines[0],
+    id: "line-wine-2",
+    requestedItemName: "董事会用白酒",
+  }],
+};
+
 const initialOptions = {
   approvalId: "approval-1",
   lines: [{
@@ -261,12 +272,12 @@ test("desktop final reload ignores double submit and does not post after unmount
   expect(confirmPosts).toBe(0);
 });
 
-test("desktop final reload does not post after the approval leaves the current pending set", async ({ page }) => {
+test("desktop final reload does not post after its approval leaves a multi-row pending set", async ({ page }) => {
   let pendingReads = 0;
   let pendingRemoved = false;
   await page.route(apiUrl("/admin/outbound/pending"), (route) => {
     pendingReads += 1;
-    return route.fulfill({ json: pendingRemoved ? [] : [intentApproval] });
+    return route.fulfill({ json: pendingRemoved ? [secondIntentApproval] : [intentApproval, secondIntentApproval] });
   });
   await page.route(apiUrl("/admin/approvals/sync-failures?limit=20"), (route) => route.fulfill({ json: [] }));
   const finalReload = deferred();
@@ -287,7 +298,8 @@ test("desktop final reload does not post after the approval leaves the current p
   });
 
   await loginAs(page, "/admin/outbound", "ADMIN");
-  await page.getByRole("button", { name: "办理出库" }).click();
+  const firstApprovalRow = page.getByRole("row").filter({ hasText: intentApproval.weComSpNo });
+  await firstApprovalRow.getByRole("button", { name: "办理出库" }).click();
   const line = page.getByTestId("outbound-decision-line-line-wine");
   await line.getByLabel("标准物品").selectOption("item-maotai");
   await line.getByLabel("实际仓库").selectOption("一号仓");
@@ -298,7 +310,9 @@ test("desktop final reload does not post after the approval leaves the current p
   await finalReloadRequest;
   pendingRemoved = true;
   await page.getByRole("button", { name: "刷新" }).click();
-  await expect(page.getByRole("button", { name: "办理出库" })).toHaveCount(0);
+  await expect(page.getByText(intentApproval.weComSpNo)).toHaveCount(0);
+  const remainingApprovalRow = page.getByRole("row").filter({ hasText: secondIntentApproval.weComSpNo });
+  await expect(remainingApprovalRow.getByRole("button", { name: "办理出库" })).toBeEnabled();
   finalReload.release();
   await page.waitForTimeout(100);
 

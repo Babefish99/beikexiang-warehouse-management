@@ -23,7 +23,7 @@ import { InventoryReportService, TransactionReportService } from "./application/
 import { WarehouseService } from "./application/warehouses/warehouse-service.js";
 import { ApprovalSyncService } from "./application/wecom/approval-sync-service.js";
 import { ApprovalSyncQueryService } from "./application/wecom/approval-sync-query-service.js";
-import { createPersistenceAdapters, readServerConfig } from "./infrastructure/db/runtime.js";
+import { createPersistenceAdapters, readServerConfig, type ServerConfig } from "./infrastructure/db/runtime.js";
 import { ExcelOpeningStockWorkbookParser } from "./infrastructure/import/excel-opening-stock-workbook-parser.js";
 import { HttpApprovalGateway } from "./infrastructure/wecom/approval-gateway.js";
 import { ApprovalParser, type ApprovalItemResolver } from "./infrastructure/wecom/approval-parser.js";
@@ -82,8 +82,15 @@ interface BuildServerOptions {
   periodStore?: AccountingPeriodStore;
 }
 
-export function createApprovalParser(resolveItem: ApprovalItemResolver): ApprovalParser {
-  return new ApprovalParser(resolveItem);
+export function createApprovalParser(
+  resolveItem: ApprovalItemResolver,
+  config: Pick<ServerConfig, "approvalTemplateId" | "approvalTemplateIds">,
+): ApprovalParser {
+  const intentTemplateId = config.approvalTemplateId
+    && config.approvalTemplateIds.some((templateId) => templateId !== config.approvalTemplateId)
+    ? config.approvalTemplateId
+    : undefined;
+  return new ApprovalParser(resolveItem, intentTemplateId);
 }
 
 export function buildServer(options: BuildServerOptions = {}) {
@@ -171,7 +178,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     secret: process.env.WE_COM_SECRET ?? "",
     redirectUri: `${config.apiBaseUrl}/auth/wecom/callback`,
   });
-  const approvalParser = createApprovalParser((optionKey) => itemService.resolveByWeComOptionKey(optionKey));
+  const approvalParser = createApprovalParser((optionKey) => itemService.resolveByWeComOptionKey(optionKey), config);
   const approvalSyncService = new ApprovalSyncService({
     gateway: new HttpApprovalGateway({
       corpId: process.env.WE_COM_CORP_ID ?? "",

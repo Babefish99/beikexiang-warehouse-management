@@ -65,6 +65,8 @@ export function DesktopOutboundTable({ pending, onReloadOptions, onConfirm }: {
   const optionRequestEpochs = useRef<Record<string, number>>({});
   const submitLocks = useRef(new Set<string>());
   const completedApprovals = useRef(new Set<string>());
+  const latestPendingApprovalIds = useRef(new Set(pending.map((approval) => approval.id)));
+  latestPendingApprovalIds.current = new Set(pending.map((approval) => approval.id));
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -72,12 +74,29 @@ export function DesktopOutboundTable({ pending, onReloadOptions, onConfirm }: {
       optionRequestEpochs.current = {};
     };
   }, []);
+  useEffect(() => {
+    const pendingApprovalIds = latestPendingApprovalIds.current;
+    for (const approvalId of Object.keys(optionRequestEpochs.current)) {
+      if (pendingApprovalIds.has(approvalId)) continue;
+      optionRequestEpochs.current[approvalId] = (optionRequestEpochs.current[approvalId] ?? 0) + 1;
+      submitLocks.current.delete(approvalId);
+      completedApprovals.current.delete(approvalId);
+    }
+    setEditors((previous) => {
+      const remaining = Object.entries(previous).filter(([approvalId]) => pendingApprovalIds.has(approvalId));
+      return remaining.length === Object.keys(previous).length ? previous : Object.fromEntries(remaining);
+    });
+  }, [pending]);
   const beginOptionsRequest = (approvalId: string) => {
     const epoch = (optionRequestEpochs.current[approvalId] ?? 0) + 1;
     optionRequestEpochs.current[approvalId] = epoch;
     return epoch;
   };
-  const isCurrentOptionsRequest = (approvalId: string, epoch: number) => mounted.current && optionRequestEpochs.current[approvalId] === epoch;
+  const isCurrentOptionsRequest = (approvalId: string, epoch: number) => (
+    mounted.current
+    && latestPendingApprovalIds.current.has(approvalId)
+    && optionRequestEpochs.current[approvalId] === epoch
+  );
   const updateEditor = (approvalId: string, update: (editor: EditorState) => EditorState) => setEditors((previous) => {
     const editor = previous[approvalId];
     return editor ? { ...previous, [approvalId]: update(editor) } : previous;

@@ -101,7 +101,10 @@ describe("enterprise WeChat approval parser", () => {
       "opt-powder": { id: "item-1", unit: "包", isActive: true },
       "opt-tea": { id: "item-2", unit: "盒", isActive: true },
       "opt-wine": { id: "item-3", unit: "件", isActive: true },
-    }[optionKey]));
+    }[optionKey]), {
+      approvalTemplateId: "tpl-legacy-selector-v1",
+      approvalTemplateIds: ["tpl-legacy-selector-v1"],
+    });
 
     expect(parser.parse(makeDetail()).lines).toMatchObject([
       { itemId: "item-1", legacyResolutionStatus: "EXACT_LOCKED" },
@@ -157,7 +160,7 @@ describe("enterprise WeChat approval parser", () => {
     };
     const parser = new ApprovalParser(() => {
       throw new Error("new intent rows must not resolve an item");
-    });
+    }, "tpl-intent-v2");
 
     expect(parser.parse(detail)).toMatchObject({
       sourceTemplateId: "tpl-intent-v2",
@@ -171,13 +174,38 @@ describe("enterprise WeChat approval parser", () => {
     });
   });
 
-  it("rejects an empty or whitespace-only purpose", () => {
+  it("allows a compatible legacy selector approval without a purpose", () => {
     const detail = makeDetail();
-    const purpose = detail.contents.find((content) => content.control !== "Table" && content.title === "用途");
-    if (!purpose || purpose.control === "Table") throw new Error("fixture purpose missing");
-    purpose.value = { text: "  \u3000 " };
+    detail.contents = detail.contents.filter((content) => content.control === "Table" || content.title !== "用途");
 
-    expect(() => new ApprovalParser(() => undefined).parse(detail)).toThrow("approval purpose is required");
+    const parsed = new ApprovalParser((optionKey) => (
+      optionKey === "opt-powder" ? { id: "item-1", unit: "包", isActive: true } : undefined
+    )).parse(detail);
+
+    expect(parsed).toMatchObject({
+      purpose: "",
+    });
+    expect(parsed.lines[0]).toMatchObject({ itemId: "item-1", legacyResolutionStatus: "EXACT_LOCKED" });
+  });
+
+  it("rejects an empty or whitespace-only purpose on the intent template", () => {
+    const detail: WeComApprovalPayload = {
+      sp_no: "202609040012",
+      template_id: "tpl-intent-v2",
+      sp_status: 2,
+      apply_time: 1788516000,
+      applyer: { userid: "wx-lisi", name: "李四" },
+      contents: [
+        { control: "Text", title: "用途", value: { text: "  \u3000 " } },
+        { control: "Table", title: "物品明细", value: { children: [{ list: [
+          { control: "Text", title: "意向物品名称", value: { text: "招待用白酒" } },
+          { control: "Number", title: "审批数量", value: { new_number: { value: "2" } } },
+          { control: "Text", title: "单位", value: { text: "瓶" } },
+        ] }] } },
+      ],
+    };
+
+    expect(() => new ApprovalParser(() => undefined, "tpl-intent-v2").parse(detail)).toThrow("approval purpose is required");
   });
 
   it("rejects an intent-shaped row with required fields missing instead of falling back to legacy parsing", () => {
@@ -236,7 +264,7 @@ describe("enterprise WeChat approval parser", () => {
     table.value.children[0]!.list[1]!.title = "审批数量";
     table.value.children[0]!.list.push({ control: "Text", title: "单位", value: { text: "包" } });
     table.value.children = [table.value.children[0]!];
-    const parser = new ApprovalParser(() => ({ id: "item-1", unit: "包", isActive: true }));
+    const parser = new ApprovalParser(() => ({ id: "item-1", unit: "包", isActive: true }), "tpl-intent-v2");
 
     expect(parser.parse(detail).lines).toEqual([{
       itemId: "item-1",
@@ -246,6 +274,24 @@ describe("enterprise WeChat approval parser", () => {
       unit: "包",
       legacyResolutionStatus: "EXACT_LOCKED",
     }]);
+  });
+
+  it("treats a configured intent template as strict intent even when a selector makes the row hybrid", () => {
+    const detail = makeDetail();
+    detail.template_id = "tpl-intent-v2";
+    const table = detail.contents.find((content) => content.control === "Table");
+    if (!table || table.control !== "Table") throw new Error("fixture table missing");
+    table.value.children = [table.value.children[0]!];
+    table.value.children[0]!.list[0]!.title = "意向物品名称";
+    table.value.children[0]!.list[1]!.title = "审批数量";
+    table.value.children[0]!.list.push({ control: "Text", title: "单位", value: { text: "包" } });
+
+    const parser = createApprovalParser(() => ({ id: "item-must-not-bind", unit: "包", isActive: true }), {
+      approvalTemplateId: "tpl-intent-v2",
+      approvalTemplateIds: ["tpl-intent-v2", "tpl-legacy-selector-v1"],
+    });
+
+    expect(() => parser.parse(detail)).toThrow("approval requested item name is required");
   });
 
   it.each([

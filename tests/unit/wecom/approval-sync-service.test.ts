@@ -142,7 +142,7 @@ describe("approval synchronization service", () => {
     const store = new InMemoryApprovalSyncStore();
     const service = new ApprovalSyncService({
       gateway,
-      parser: new ApprovalParser(() => undefined),
+      parser: new ApprovalParser(() => undefined, "tpl-intent-v2"),
       store,
       approvalTemplateIds: ["tpl-intent-v2"],
     });
@@ -158,6 +158,19 @@ describe("approval synchronization service", () => {
       weComSpNo: detail.sp_no,
       error: "approval purpose is required",
     }]);
+  });
+
+  it("synchronizes a compatible legacy selector approval without a purpose", async () => {
+    const detail = makeDetail(2);
+    detail.contents = detail.contents.filter((content) => content.control === "Table" || content.title !== "用途");
+    const { store, service } = makeService(detail);
+
+    await expect(service.sync(detail.sp_no)).resolves.toMatchObject({ created: true, status: "PENDING_OUTBOUND" });
+    expect(store.records()).toMatchObject([{
+      purpose: "",
+      lines: [{ itemId: "item-tea", legacyResolutionStatus: "EXACT_LOCKED" }],
+    }]);
+    expect(store.attempts()).toMatchObject([{ status: "SUCCEEDED" }]);
   });
 
   it("rejects a fetched detail with a different template before parsing or saving", async () => {
