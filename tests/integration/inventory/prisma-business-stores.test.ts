@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "@prisma/client";
-import { Pool } from "pg";
+import { Prisma, PrismaClient } from "@prisma/client";
+import { Pool, type PoolClient } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { OutboundAllocator } from "../../../apps/api/src/application/inventory/outbound-allocator.js";
@@ -27,6 +27,20 @@ const databaseUrl = process.env.TEST_DATABASE_URL;
 const schemaName = `warehouse_task3_${process.pid}_${Date.now()}`;
 const itemId = "task3-item";
 const secondItemId = "task3-item-2";
+const historicalMigrationPaths = [
+  "prisma/migrations/00000000000000_init/migration.sql",
+  "prisma/migrations/20260811163000_production_persistence/migration.sql",
+  "prisma/migrations/20260811171500_stocktake_quantity_snapshots/migration.sql",
+  "prisma/migrations/20260814110000_inbound_batch_sequences/migration.sql",
+  "prisma/migrations/20260824170000_opening_stock_import/migration.sql",
+];
+const approvalIntentMigrationPath = "prisma/migrations/20260904183000_approval_intent_outbound_decisions/migration.sql";
+
+async function applyMigrations(client: PoolClient, paths: string[]) {
+  for (const path of paths) {
+    await client.query(readFileSync(resolve(process.cwd(), path), "utf8"));
+  }
+}
 
 function schemaUrl(connectionString: string): string {
   const url = new URL(connectionString);
@@ -52,11 +66,7 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     const migrationClient = await migrationPool.connect();
     try {
       await migrationClient.query(`SET search_path TO "${schemaName}"`);
-      await migrationClient.query(readFileSync(resolve(process.cwd(), "prisma/migrations/00000000000000_init/migration.sql"), "utf8"));
-      await migrationClient.query(readFileSync(resolve(process.cwd(), "prisma/migrations/20260811163000_production_persistence/migration.sql"), "utf8"));
-      await migrationClient.query(readFileSync(resolve(process.cwd(), "prisma/migrations/20260811171500_stocktake_quantity_snapshots/migration.sql"), "utf8"));
-      await migrationClient.query(readFileSync(resolve(process.cwd(), "prisma/migrations/20260814110000_inbound_batch_sequences/migration.sql"), "utf8"));
-      await migrationClient.query(readFileSync(resolve(process.cwd(), "prisma/migrations/20260824170000_opening_stock_import/migration.sql"), "utf8"));
+      await applyMigrations(migrationClient, [...historicalMigrationPaths, approvalIntentMigrationPath]);
     } finally {
       migrationClient.release();
       await migrationPool.end();
@@ -95,6 +105,7 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     await prisma.stockAdjustment.deleteMany();
     await prisma.stocktake.deleteMany();
     await prisma.outboundAllocation.deleteMany();
+    await prisma.outboundDecisionLine.deleteMany();
     await prisma.outboundOrder.deleteMany();
     await prisma.inboundLine.deleteMany();
     await prisma.inboundOrder.deleteMany();
@@ -185,7 +196,14 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
         submittedAt: new Date("2026-08-11T00:00:00.000Z"),
         approvedAt: new Date("2026-08-11T00:05:00.000Z"),
         lines: {
-          create: { id: `task3-line-${crypto.randomUUID()}`, itemId, requestedQuantity: quantity, unit: "box" },
+          create: {
+            id: `task3-line-${crypto.randomUUID()}`,
+            itemId,
+            requestedItemName: "Task 3 test item",
+            requestedQuantity: quantity,
+            unit: "box",
+            legacyResolutionStatus: "EXACT_LOCKED",
+          },
         },
       },
       include: { lines: true },
@@ -560,3 +578,152 @@ describe.skipIf(!databaseUrl)("Prisma inventory business stores", () => {
     ]));
   });
 });
+
+describe.skipIf(!databaseUrl)("approval intent outbound decision migration", () => {
+  const migrationSchemaName = `warehouse_task2_migration_${process.pid}_${Date.now()}`;
+  let migrationAdminPool: Pool;
+
+  async function withHistoricalSchema(run: (client: PoolClient) => Promise<void>) {
+    const isolatedUrl = schemaUrlFor(databaseUrl as string, migrationSchemaName);
+    await migrationAdminPool.query(`CREATE SCHEMA "${migrationSchemaName}"`);
+    const pool = new Pool({ connectionString: isolatedUrl });
+    const client = await pool.connect();
+    try {
+      await client.query(`SET search_path TO "${migrationSchemaName}"`);
+      await applyMigrations(client, historicalMigrationPaths);
+      await run(client);
+    } finally {
+      client.release();
+      await pool.end();
+      await migrationAdminPool.query(`DROP SCHEMA IF EXISTS "${migrationSchemaName}" CASCADE`);
+    }
+  }
+
+  beforeAll(() => {
+    if (!/^warehouse_task2_migration_\d+_\d+$/.test(migrationSchemaName)) throw new Error("unsafe migration test schema name");
+    migrationAdminPool = new Pool({ connectionString: databaseUrl });
+  });
+
+  afterAll(async () => {
+    await migrationAdminPool?.end();
+  });
+
+  it("backfills one decision for split historical allocations without changing inventory facts", async () => {
+    await withHistoricalSchema(async (client) => {
+      await seedHistoricalOutbound(client, [
+        { id: "legacy-allocation-1", itemId: "legacy-item", batchId: "legacy-batch-1", quantity: "2", amount: "25.00" },
+        { id: "legacy-allocation-2", itemId: "legacy-item", batchId: "legacy-batch-2", quantity: "3", amount: "37.50" },
+      ]);
+
+      const beforeBalances = (await client.query(`SELECT "id", "remainingQuantity"::text, "unitCost"::text FROM "StockBalance" ORDER BY "id"`)).rows;
+      const beforeBatches = (await client.query(`SELECT "id", "quantity"::text, "remainingQuantity"::text, "unitCost"::text FROM "ProcurementBatch" ORDER BY "id"`)).rows;
+      const beforeLedger = (await client.query(`SELECT "id", "quantity"::text, "unitCost"::text, "amount"::text FROM "InventoryLedgerEntry" ORDER BY "id"`)).rows;
+      const beforeOrder = (await client.query(`SELECT "actualQuantity"::text, "amount"::text FROM "OutboundOrder" WHERE "id" = 'legacy-outbound'`)).rows;
+
+      await client.query(readFileSync(resolve(process.cwd(), approvalIntentMigrationPath), "utf8"));
+
+      const decisions = (await client.query<{
+        id: string;
+        selectedItemId: string | null;
+        actualQuantity: string;
+        varianceReason: string | null;
+        decidedBy: string;
+      }>(`SELECT "id", "selectedItemId", "actualQuantity"::text, "varianceReason", "decidedBy" FROM "OutboundDecisionLine"`)).rows.map((row) => ({
+        ...row,
+        actualQuantity: new Prisma.Decimal(row.actualQuantity),
+      }));
+      const migratedAllocations = (await client.query<{ outboundDecisionLineId: string }>(`SELECT "outboundDecisionLineId" FROM "OutboundAllocation" ORDER BY "id"`)).rows;
+      const afterBalances = (await client.query(`SELECT "id", "remainingQuantity"::text, "unitCost"::text FROM "StockBalance" ORDER BY "id"`)).rows;
+      const afterBatches = (await client.query(`SELECT "id", "quantity"::text, "remainingQuantity"::text, "unitCost"::text FROM "ProcurementBatch" ORDER BY "id"`)).rows;
+      const afterLedger = (await client.query(`SELECT "id", "quantity"::text, "unitCost"::text, "amount"::text FROM "InventoryLedgerEntry" ORDER BY "id"`)).rows;
+      const afterOrder = (await client.query(`SELECT "actualQuantity"::text, "amount"::text FROM "OutboundOrder" WHERE "id" = 'legacy-outbound'`)).rows;
+      const migratedIntent = (await client.query(`SELECT "requestedItemName", "legacyResolutionStatus" FROM "ApprovalLine" WHERE "id" = 'legacy-approval-line'`)).rows;
+
+      expect(decisions).toMatchObject([{
+        selectedItemId: "legacy-item",
+        actualQuantity: new Prisma.Decimal("5"),
+        varianceReason: "historical shortage",
+        decidedBy: "task3-operator",
+      }]);
+      expect(migratedAllocations.every((row) => row.outboundDecisionLineId === decisions[0]!.id)).toBe(true);
+      expect(migratedIntent).toEqual([{ requestedItemName: "Legacy item", legacyResolutionStatus: "REAPPLY_REQUIRED" }]);
+      expect(afterBalances).toEqual(beforeBalances);
+      expect(afterBatches).toEqual(beforeBatches);
+      expect(afterLedger).toEqual(beforeLedger);
+      expect(afterOrder).toEqual(beforeOrder);
+    });
+  });
+
+  it("rejects a historical approval line allocated to multiple items", async () => {
+    await withHistoricalSchema(async (client) => {
+      await seedHistoricalOutbound(client, [
+        { id: "legacy-allocation-1", itemId: "legacy-item", batchId: "legacy-batch-1", quantity: "2", amount: "25.00" },
+        { id: "legacy-allocation-2", itemId: "legacy-item-2", batchId: "legacy-batch-other", quantity: "3", amount: "37.50" },
+      ]);
+
+      await expect(client.query(readFileSync(resolve(process.cwd(), approvalIntentMigrationPath), "utf8")))
+        .rejects.toThrow(/multiple item ids/i);
+    });
+  });
+
+  it("rejects historical allocations whose approval line does not belong to the outbound approval", async () => {
+    await withHistoricalSchema(async (client) => {
+      await seedHistoricalOutbound(client, [
+        { id: "legacy-allocation-1", itemId: "legacy-item", batchId: "legacy-batch-1", quantity: "2", amount: "25.00" },
+      ]);
+      await client.query(`
+        INSERT INTO "ApprovalRequest" ("id", "weComSpNo", "applicantUserId", "applicantName", "purpose", "status", "outboundStatus", "submittedAt", "createdAt", "updatedAt")
+        VALUES ('other-approval', 'legacy-sp-no-2', 'legacy-applicant', 'Legacy Applicant', 'other', 'APPROVED', 'PENDING_OUTBOUND', '2026-08-11T00:00:00Z', '2026-08-11T00:00:00Z', '2026-08-11T00:00:00Z');
+        INSERT INTO "ApprovalLine" ("id", "approvalRequestId", "itemId", "requestedQuantity", "unit", "createdAt")
+        VALUES ('other-approval-line', 'other-approval', 'legacy-item', 2, 'box', '2026-08-11T00:00:00Z');
+        UPDATE "OutboundAllocation" SET "approvalLineId" = 'other-approval-line' WHERE "id" = 'legacy-allocation-1';
+      `);
+
+      await expect(client.query(readFileSync(resolve(process.cwd(), approvalIntentMigrationPath), "utf8")))
+        .rejects.toThrow(/without an outbound decision/i);
+    });
+  });
+});
+
+function schemaUrlFor(connectionString: string, targetSchema: string): string {
+  const url = new URL(connectionString);
+  url.searchParams.set("schema", targetSchema);
+  return url.toString();
+}
+
+async function seedHistoricalOutbound(client: PoolClient, allocations: Array<{ id: string; itemId: string; batchId: string; quantity: string; amount: string }>) {
+  await client.query(`
+    INSERT INTO "Role" ("id", "code", "name", "createdAt") VALUES ('legacy-role', 'LEGACY', 'Legacy', '2026-08-11T00:00:00Z');
+    INSERT INTO "User" ("id", "weComUserId", "name", "roleId", "isActive", "createdAt") VALUES ('legacy-applicant', 'legacy-applicant', 'Legacy Applicant', 'legacy-role', true, '2026-08-11T00:00:00Z');
+    INSERT INTO "Warehouse" ("id", "code", "name", "isActive", "isPlaceholder", "createdAt") VALUES ('legacy-warehouse', 'LEGACY-WH', 'Legacy warehouse', true, false, '2026-08-11T00:00:00Z');
+    INSERT INTO "ItemCategory" ("id", "code", "prefix", "name", "createdAt") VALUES ('legacy-category', 'LEGACY-CATEGORY', 'LG', 'Legacy category', '2026-08-11T00:00:00Z');
+    INSERT INTO "Item" ("id", "code", "name", "unit", "categoryId", "isActive", "createdAt", "updatedAt") VALUES
+      ('legacy-item', 'LG-001', 'Legacy item', 'box', 'legacy-category', true, '2026-08-11T00:00:00Z', '2026-08-11T00:00:00Z'),
+      ('legacy-item-2', 'LG-002', 'Other legacy item', 'box', 'legacy-category', true, '2026-08-11T00:00:00Z', '2026-08-11T00:00:00Z');
+    INSERT INTO "ApprovalRequest" ("id", "weComSpNo", "applicantUserId", "applicantName", "purpose", "status", "outboundStatus", "submittedAt", "createdAt", "updatedAt")
+      VALUES ('legacy-approval', 'legacy-sp-no', 'legacy-applicant', 'Legacy Applicant', 'historical issue', 'APPROVED', 'PARTIALLY_ISSUED', '2026-08-11T00:00:00Z', '2026-08-11T00:00:00Z', '2026-08-11T00:00:00Z');
+    INSERT INTO "ApprovalLine" ("id", "approvalRequestId", "itemId", "requestedQuantity", "unit", "createdAt")
+      VALUES ('legacy-approval-line', 'legacy-approval', 'legacy-item', 7, 'box', '2026-08-11T00:00:00Z');
+    INSERT INTO "ProcurementBatch" ("id", "warehouseId", "itemId", "batchNo", "quantity", "remainingQuantity", "unitCost", "purchasedAt", "createdAt") VALUES
+      ('legacy-batch-1', 'legacy-warehouse', 'legacy-item', 'LEGACY-BATCH-1', 10, 8, 12.5, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z'),
+      ('legacy-batch-2', 'legacy-warehouse', 'legacy-item', 'LEGACY-BATCH-2', 10, 7, 12.5, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z'),
+      ('legacy-batch-other', 'legacy-warehouse', 'legacy-item-2', 'LEGACY-BATCH-OTHER', 10, 10, 12.5, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z');
+    INSERT INTO "StockBalance" ("id", "warehouseId", "itemId", "batchId", "remainingQuantity", "unitCost", "updatedAt") VALUES
+      ('legacy-balance-1', 'legacy-warehouse', 'legacy-item', 'legacy-batch-1', 8, 12.5, '2026-08-11T00:00:00Z'),
+      ('legacy-balance-2', 'legacy-warehouse', 'legacy-item', 'legacy-batch-2', 7, 12.5, '2026-08-11T00:00:00Z'),
+      ('legacy-balance-other', 'legacy-warehouse', 'legacy-item-2', 'legacy-batch-other', 10, 12.5, '2026-08-11T00:00:00Z');
+    INSERT INTO "OutboundOrder" ("id", "approvalRequestId", "orderNo", "status", "actualQuantity", "amount", "reason", "issuedAt", "operatorId", "createdAt")
+      VALUES ('legacy-outbound', 'legacy-approval', 'OUT-LEGACY', 'PARTIALLY_ISSUED', 5, 62.50, 'historical shortage', '2026-08-11T01:00:00Z', 'task3-operator', '2026-08-11T01:00:00Z');
+  `);
+
+  for (const allocation of allocations) {
+    await client.query(`
+      INSERT INTO "OutboundAllocation" ("id", "outboundOrderId", "approvalLineId", "warehouseId", "itemId", "batchId", "originalQuantity", "quantity", "unitCost", "amount")
+      VALUES ($1, 'legacy-outbound', 'legacy-approval-line', 'legacy-warehouse', $2, $3, 7, $4, 12.5, $5)
+    `, [allocation.id, allocation.itemId, allocation.batchId, allocation.quantity, allocation.amount]);
+    await client.query(`
+      INSERT INTO "InventoryLedgerEntry" ("id", "warehouseId", "itemId", "batchId", "type", "quantity", "unitCost", "amount", "referenceType", "referenceId", "occurredAt", "createdAt")
+      VALUES ($1, 'legacy-warehouse', $2, $3, 'OUTBOUND', -($4::numeric), 12.5, $5, 'OUTBOUND_ORDER', 'legacy-outbound', '2026-08-11T01:00:00Z', '2026-08-11T01:00:00Z')
+    `, [`ledger-${allocation.id}`, allocation.itemId, allocation.batchId, allocation.quantity, allocation.amount]);
+  }
+}

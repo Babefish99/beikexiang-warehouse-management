@@ -49,6 +49,7 @@ describe("database schema contract", () => {
       "ProcurementBatch",
       "StockBalance",
       "OutboundOrder",
+      "OutboundDecisionLine",
       "OutboundAllocation",
       "TransferOrder",
       "TransferLine",
@@ -121,6 +122,15 @@ describe("database schema contract", () => {
 
     expect(approvalRequest).toMatch(/^\s*outboundStatus\s+String\s+@default\("NONE"\)\s*$/m);
     expect(approvalRequest).toMatch(/^\s*cancelReason\s+String\?\s*$/m);
+  });
+
+  it("separates immutable approval intent from outbound decisions", () => {
+    expect(modelBody("ApprovalRequest")).toMatch(/sourceTemplateId\s+String\?/);
+    expect(modelBody("ApprovalLine")).toMatch(/requestedItemName\s+String/);
+    expect(modelBody("ApprovalLine")).toMatch(/itemId\s+String\?/);
+    expect(modelBody("ApprovalLine")).toMatch(/legacyResolutionStatus\s+String/);
+    expect(modelBody("OutboundDecisionLine")).toMatch(/approvalLineId\s+String\s+@unique/);
+    expect(modelBody("OutboundAllocation")).toMatch(/outboundDecisionLineId\s+String/);
   });
 
   it("requires restrictive stocktake and batch lineage for confirmed records", () => {
