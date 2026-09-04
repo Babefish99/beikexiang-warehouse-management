@@ -67,7 +67,11 @@ export function MobileOutboundFlow({ userId, pending, pendingState, onReloadOpti
   const activeApprovalId = useRef<string | null>(null);
   const submitLock = useRef(false);
   const completedApprovalIds = useRef(new Set<string>());
-  const suppressedRestoreId = useRef<string | null>(null);
+  const didAttemptInitialRestore = useRef(false);
+  const latestPendingIds = useRef(new Set(pending.map((candidate) => candidate.id)));
+  const latestPendingState = useRef(pendingState);
+  latestPendingIds.current = new Set(pending.map((candidate) => candidate.id));
+  latestPendingState.current = pendingState;
 
   const beginOperation = (approvalId: string) => {
     operationEpoch.current += 1;
@@ -116,9 +120,24 @@ export function MobileOutboundFlow({ userId, pending, pendingState, onReloadOpti
     return nextErrors;
   };
 
+  const closeIfApprovalIsStale = (approvalId: string) => {
+    if (latestPendingState.current !== "loaded" || latestPendingIds.current.has(approvalId)) return false;
+    didAttemptInitialRestore.current = true;
+    invalidateOperation();
+    setStaleDrafts(readIndexedOutboundDrafts(window.sessionStorage, userId));
+    setApproval(null);
+    setDraft(null);
+    setOptions(null);
+    setErrors({});
+    setSubmitting(false);
+    setConfirming(false);
+    setMessage("待办状态已变化，当前办理已退出，草稿仍保留");
+    return true;
+  };
+
   const openDraft = async (selected: PendingApproval, next: OutboundDraft) => {
     if (operationActive.current || completedApprovalIds.current.has(selected.id)) return;
-    suppressedRestoreId.current = null;
+    didAttemptInitialRestore.current = true;
     setApproval(selected);
     persistDraft(next, selected);
     setOptions(null);
@@ -150,6 +169,7 @@ export function MobileOutboundFlow({ userId, pending, pendingState, onReloadOpti
 
   useEffect(() => {
     mounted.current = true;
+    didAttemptInitialRestore.current = false;
     const indexed = readIndexedOutboundDrafts(window.sessionStorage, userId);
     pruneOutboundDraftIndex(window.sessionStorage, userId, indexed);
     setStaleDrafts(indexed);
@@ -166,21 +186,16 @@ export function MobileOutboundFlow({ userId, pending, pendingState, onReloadOpti
     if (pendingState !== "loaded" || result) return;
     if (draft && approval && !pending.some((candidate) => candidate.id === draft.approvalId)) {
       if (submitLock.current) return;
-      invalidateOperation();
-      setStaleDrafts(readIndexedOutboundDrafts(window.sessionStorage, userId));
-      setApproval(null);
-      setDraft(null);
-      setOptions(null);
-      setErrors({});
-      setConfirming(false);
-      setMessage("待办状态已变化，当前办理已退出，草稿仍保留");
+      closeIfApprovalIsStale(draft.approvalId);
       return;
     }
     const indexed = readIndexedOutboundDrafts(window.sessionStorage, userId);
     setStaleDrafts(indexed);
     if (draft || operationActive.current) return;
+    if (didAttemptInitialRestore.current) return;
+    didAttemptInitialRestore.current = true;
     const restorable = indexed.find(({ entry }) => pending.some((candidate) => candidate.id === entry.approvalId));
-    if (!restorable || suppressedRestoreId.current === restorable.entry.approvalId) return;
+    if (!restorable) return;
     const selected = pending.find((candidate) => candidate.id === restorable.entry.approvalId);
     if (selected) void openDraft(selected, restorable.draft);
   }, [approval, draft, pending, pendingState, result, userId]);
@@ -254,23 +269,29 @@ export function MobileOutboundFlow({ userId, pending, pendingState, onReloadOpti
     setSubmitting(true);
     setLoading(true);
     setMessage(null);
+    let completed = false;
+    let failure: string | null = null;
     try {
-      const completed = await onConfirm({ approvalId, decisions: normalizeDecisions(draft.decisions, approval) });
+      const result = await onConfirm({ approvalId, decisions: normalizeDecisions(draft.decisions, approval) });
       if (!isCurrentOperation(epoch, approvalId)) return;
+      completed = true;
       completedApprovalIds.current.add(approvalId);
       clearPersistedDraft(approvalId);
-      setResult(completed);
+      setResult(result);
       setConfirming(false);
       setDraft({ ...draft, step: "complete" });
       onCompleted(approvalId);
     } catch (error) {
       if (!isCurrentOperation(epoch, approvalId)) return;
-      setConfirming(false);
-      setMessage(error instanceof Error ? error.message : "出库提交失败，草稿已保留");
+      failure = error instanceof Error ? error.message : "出库提交失败，草稿已保留";
     } finally {
-      if (isCurrentOperation(epoch, approvalId)) {
-        submitLock.current = false;
-        setSubmitting(false);
+      submitLock.current = false;
+      if (!isCurrentOperation(epoch, approvalId)) return;
+      setSubmitting(false);
+      if (!completed && closeIfApprovalIsStale(approvalId)) return;
+      if (failure) {
+        setConfirming(false);
+        setMessage(failure);
       }
       finishOperation(epoch, approvalId);
     }
@@ -278,7 +299,6 @@ export function MobileOutboundFlow({ userId, pending, pendingState, onReloadOpti
 
   const leave = () => {
     if (operationActive.current || submitLock.current) return;
-    if (draft) suppressedRestoreId.current = draft.approvalId;
     invalidateOperation();
     setApproval(null);
     setDraft(null);
@@ -293,7 +313,6 @@ export function MobileOutboundFlow({ userId, pending, pendingState, onReloadOpti
     const approvalId = draft?.approvalId;
     invalidateOperation();
     if (approvalId) clearPersistedDraft(approvalId);
-    suppressedRestoreId.current = approvalId ?? null;
     setApproval(null);
     setDraft(null);
     setOptions(null);
@@ -344,7 +363,19 @@ export function MobileOutboundFlow({ userId, pending, pendingState, onReloadOpti
         : <article className="outbound-card" key={item.id}><strong>{item.weComSpNo}</strong><span>{item.lines.length} 个审批意向 · {inventoryStatusLabel(item.status)}</span><div className="outbound-card__actions"><button className="button button--primary" type="button" disabled={loading} onClick={() => void start(item)}>办理出库</button><button className="button button--danger" type="button" disabled={loading} onClick={() => void cancel(item)}>取消待办</button></div></article>;
     })}</div></> : null}
     {message ? <div className={message === "待办已取消" ? "success-notice" : "form-error"} role={message === "待办已取消" ? "status" : "alert"}>{message}</div> : null}
-    {draft?.step === "allocate" && approval ? <><h2>分配库存</h2>{loading && !options ? <div className="notice">正在读取最新出库选项…</div> : null}{options ? <OutboundDecisionEditor approval={approval} options={options} draft={draft} errors={errors} disabled={loading} onChange={(next) => { if (operationActive.current || submitLock.current) return; persistDraft(next, approval); setErrors({}); setMessage(null); }} /> : null}<div className="outbound-flow__actions"><button className="button button--secondary" type="button" disabled={loading} onClick={leave}>返回待办</button>{options ? <button className="button button--danger" type="button" disabled={loading} onClick={discard}>放弃办理</button> : <button className="button button--primary" type="button" disabled={loading} onClick={() => void start(approval)}>重试</button>}{options ? <button className="button button--primary" type="button" disabled={loading} onClick={() => void requestReview()}>{loading ? "校验中…" : "复核出库"}</button> : null}</div></> : null}
+    {draft?.step === "allocate" && approval ? <><h2>分配库存</h2>{loading && !options ? <div className="notice">正在读取最新出库选项…</div> : null}{options ? <OutboundDecisionEditor approval={approval} options={options} draft={draft} errors={errors} disabled={loading} onChange={(next) => {
+      if (operationActive.current || submitLock.current) return;
+      persistDraft(next, approval);
+      if (!Object.keys(errors).length) {
+        setMessage(null);
+        return;
+      }
+      const reconciled = reconcileOutboundOptions(next, options);
+      const nextErrors = validateDecisionStep(approval, next.decisions, options);
+      Object.assign(nextErrors, staleErrors(reconciled));
+      setErrors(nextErrors);
+      setMessage(Object.keys(nextErrors).length ? "请修正标记项后再复核" : null);
+    }} /> : null}<div className="outbound-flow__actions"><button className="button button--secondary" type="button" disabled={loading} onClick={leave}>返回待办</button>{options ? <button className="button button--danger" type="button" disabled={loading} onClick={discard}>放弃办理</button> : <button className="button button--primary" type="button" disabled={loading} onClick={() => void start(approval)}>重试</button>}{options ? <button className="button button--primary" type="button" disabled={loading} onClick={() => void requestReview()}>{loading ? "校验中…" : "复核出库"}</button> : null}</div></> : null}
     {draft?.step === "review" && approval && options && summary ? <MobileReview approval={approval} draft={draft} options={options} /> : null}
     {draft?.step === "review" && approval && options && summary ? <div className="outbound-flow__actions"><button className="button button--secondary" type="button" disabled={loading || submitting} onClick={() => persistDraft({ ...draft, step: "allocate" }, approval)}>返回修改</button><button className="button button--primary" type="button" disabled={loading || submitting} onClick={() => void requestConfirmation()}>{loading ? "校验中…" : "确认出库"}</button></div> : null}
     <ModalDialog open={confirming} title="确认实际出库" confirmLabel={submitting ? "提交中…" : "确认提交"} busy={submitting} onConfirm={() => void confirm()} onClose={() => { if (!submitting) setConfirming(false); }}><p>审批单 {approval?.weComSpNo}</p><p>实际数量 {summary?.actualQuantity}，预计金额 {summary?.amount}</p>{message ? <div className="form-error" role="alert">{message}</div> : null}</ModalDialog>
