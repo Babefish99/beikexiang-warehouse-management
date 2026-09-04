@@ -75,9 +75,9 @@ describe("enterprise WeChat approval parser", () => {
 
   it("locks a mapped selector only when its unit and integer quantity exactly match", () => {
     const parser = new ApprovalParser((optionKey) => ({
-      "opt-powder": { id: "item-1", unit: "包" },
-      "opt-tea": { id: "item-2", unit: "盒" },
-      "opt-wine": { id: "item-3", unit: "件" },
+      "opt-powder": { id: "item-1", unit: "包", isActive: true },
+      "opt-tea": { id: "item-2", unit: "盒", isActive: true },
+      "opt-wine": { id: "item-3", unit: "件", isActive: true },
     }[optionKey]));
 
     expect(parser.parse(makeDetail())).toMatchObject({
@@ -157,8 +157,8 @@ describe("enterprise WeChat approval parser", () => {
   });
 
   it.each([
-    { fields: [{ control: "Number", title: "审批数量", value: { new_number: { value: "1.5" } } }], label: "fractional quantity" },
-    { fields: [{ control: "Text", title: "单位", value: { text: "" } }], label: "missing unit" },
+    { fields: [{ control: "Number", title: "数量", value: { new_number: { value: "1.5", unit: "包" } } }], label: "fractional quantity" },
+    { fields: [{ control: "Number", title: "数量", value: { new_number: { value: "4" } } }], label: "missing unit" },
   ])("requires reapplication for a legacy selector with $label", ({ fields }) => {
     const detail = makeDetail();
     const table = detail.contents.find((content) => content.control === "Table");
@@ -168,13 +168,13 @@ describe("enterprise WeChat approval parser", () => {
       ...fields,
     ];
 
-    const parser = new ApprovalParser(() => ({ id: "item-1", unit: "包" }));
+    const parser = new ApprovalParser(() => ({ id: "item-1", unit: "包", isActive: true }));
     expect(parser.parse(detail).lines[0]).toMatchObject({ legacyResolutionStatus: "REAPPLY_REQUIRED" });
     expect(parser.parse(detail).lines[0]?.itemId).toBeUndefined();
   });
 
   it("requires reapplication for a legacy selector whose item unit differs", () => {
-    const parser = new ApprovalParser(() => ({ id: "item-1", unit: "箱" }));
+    const parser = new ApprovalParser(() => ({ id: "item-1", unit: "箱", isActive: true }));
 
     expect(parser.parse(makeDetail()).lines[0]).toMatchObject({
       requestedItemName: "盒装粉条",
@@ -193,5 +193,83 @@ describe("enterprise WeChat approval parser", () => {
 
     const parser = new ApprovalParser(() => ({ id: "item-1" }));
     expect(() => parser.parse(detail)).toThrow("approval cannot contain more than five item rows");
+  });
+
+  it("requires reapplication when a selector has multiple selected options", () => {
+    const detail = makeDetail();
+    const table = detail.contents.find((content) => content.control === "Table");
+    if (!table || table.control !== "Table") throw new Error("fixture table missing");
+    table.value.children[0]!.list[0] = {
+      control: "Selector",
+      title: "物品名称",
+      value: { selector: { options: [
+        { key: "opt-powder", value: "盒装粉条" },
+        { key: "opt-tea", value: "茶叶" },
+      ] } },
+    };
+    const parser = new ApprovalParser(() => ({ id: "item-1", unit: "包", isActive: true }));
+
+    const line = parser.parse(detail).lines[0]!;
+    expect(line.legacyResolutionStatus).toBe("REAPPLY_REQUIRED");
+    expect(line.itemId).toBeUndefined();
+    expect(line.itemOptionKey).toBeUndefined();
+  });
+
+  it("requires reapplication when a selector maps to an inactive item", () => {
+    const parser = new ApprovalParser(() => ({ id: "item-1", unit: "包", isActive: false }));
+
+    const line = parser.parse(makeDetail()).lines[0]!;
+    expect(line.legacyResolutionStatus).toBe("REAPPLY_REQUIRED");
+    expect(line.itemId).toBeUndefined();
+    expect(line.itemOptionKey).toBeUndefined();
+  });
+
+  it("rejects an empty legacy item table", () => {
+    const detail = makeDetail();
+    const table = detail.contents.find((content) => content.control === "Table");
+    if (!table || table.control !== "Table") throw new Error("fixture table missing");
+    table.value.children = [];
+
+    expect(() => new ApprovalParser(() => undefined).parse(detail)).toThrow("approval must contain between one and five substantive item rows");
+  });
+
+  it("rejects fixed-text approvals without a substantive item", () => {
+    const detail: WeComApprovalPayload = {
+      sp_no: "202609040002",
+      sp_status: 2,
+      apply_time: 1788516000,
+      applyer: { userid: "wx-lisi", name: "李四" },
+      contents: [
+        { control: "Text", title: "用途", value: { text: "客户接待" } },
+        { control: "Text", title: "物品1 名称", value: { text: "无" } },
+      ],
+    };
+
+    expect(() => new ApprovalParser(() => undefined).parse(detail)).toThrow("approval must contain between one and five substantive item rows");
+  });
+
+  it("recognizes a configured intent template with a missing required item name", () => {
+    const detail: WeComApprovalPayload = {
+      sp_no: "202609040003",
+      template_id: "tpl-intent-v2",
+      sp_status: 2,
+      apply_time: 1788516000,
+      applyer: { userid: "wx-lisi", name: "李四" },
+      contents: [{
+        control: "Table",
+        title: "物品明细",
+        value: {
+          children: [{ list: [
+            { control: "Number", title: "审批数量", value: { new_number: { value: "2" } } },
+            { control: "Text", title: "单位", value: { text: "瓶" } },
+            { control: "Textarea", title: "补充要求", value: { text: "用于接待" } },
+          ] }],
+        },
+      }],
+    };
+
+    expect(() => new ApprovalParser(() => {
+      throw new Error("intent rows must not resolve an item");
+    }, "tpl-intent-v2").parse(detail)).toThrow("approval requested item name is required");
   });
 });

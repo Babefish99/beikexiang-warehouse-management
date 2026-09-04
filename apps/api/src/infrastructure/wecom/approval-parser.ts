@@ -65,6 +65,7 @@ interface ResolvedApprovalItem {
   code?: string;
   name?: string;
   unit?: string;
+  isActive: boolean;
 }
 
 function parseStatus(value: number | string): ParsedApprovalStatus {
@@ -103,7 +104,10 @@ function toSubmittedAt(value: number | string): string {
 }
 
 export class ApprovalParser {
-  constructor(private readonly resolveItem: (reference: string) => ResolvedApprovalItem | undefined) {}
+  constructor(
+    private readonly resolveItem: (reference: string) => ResolvedApprovalItem | undefined,
+    private readonly intentTemplateId?: string,
+  ) {}
 
   parse(detail: WeComApprovalPayload): ParsedApproval {
     const table = detail.contents.find((content): content is WeComApprovalTable => content.control === "Table");
@@ -112,12 +116,16 @@ export class ApprovalParser {
 
     const purposeField = detail.contents.find((content): content is WeComApprovalField => content.control !== "Table" && content.title === "用途");
     const purpose = purposeField?.value?.text?.trim() ?? "";
-    const isIntentTable = rows.some((row) => row.list.some((field) => field.title === "意向物品名称"));
+    const isIntentTable = (this.intentTemplateId !== undefined && detail.template_id === this.intentTemplateId)
+      || rows.some((row) => row.list.filter((field) => isIntentFieldTitle(field.title)).length >= 2);
     const lines = isIntentTable
       ? rows.map((row) => this.parseIntentLine(row))
       : rows.length > 0
         ? rows.map((row) => this.parseLegacySelectorLine(row))
         : this.parseFixedTextLines(detail.contents);
+    if (lines.length === 0 || lines.some((line) => !line.requestedItemName)) {
+      throw new Error("approval must contain between one and five substantive item rows");
+    }
     return {
       weComSpNo: detail.sp_no,
       status: parseStatus(detail.sp_status),
@@ -148,15 +156,18 @@ export class ApprovalParser {
   }
 
   private parseLegacySelectorLine(row: WeComApprovalRow): ParsedApprovalLine {
-    const selector = row.list.find((field) => field.control === "Selector")?.value?.selector?.options?.[0];
+    const selectorOptions = row.list.find((field) => field.control === "Selector")?.value?.selector?.options ?? [];
+    const selector = selectorOptions.length === 1 ? selectorOptions[0] : undefined;
     const numberField = row.list.find((field) => field.control === "Number" || field.control === "Decimal");
     const itemOptionKey = selector?.key?.trim();
     const requestedQuantity = numberOrTextValue(numberField);
     const unit = normalizeApprovalUnit(numberField?.value?.new_number?.unit ?? numberField?.value?.number?.unit ?? "");
-    const requestedItemName = selector?.value?.trim() ?? "";
+    const requestedItemName = selector
+      ? selector.value?.trim() ?? ""
+      : selectorOptions.map((option) => option.value?.trim()).filter((value): value is string => Boolean(value)).join("、");
     const parsedQuantity = tryParsePositiveIntegerQuantity(requestedQuantity);
     const item = itemOptionKey && parsedQuantity && unit ? this.resolveItem(itemOptionKey) : undefined;
-    if (item && item.unit && itemOptionKey && approvalUnitsMatch(unit, item.unit)) {
+    if (item && parsedQuantity && item.isActive && item.unit && itemOptionKey && approvalUnitsMatch(unit, item.unit)) {
       return {
         requestedItemName,
         requestedQuantity: parsedQuantity,
@@ -208,4 +219,8 @@ function tryParsePositiveIntegerQuantity(value: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function isIntentFieldTitle(title: string | undefined): boolean {
+  return title === "意向物品名称" || title === "审批数量" || title === "单位" || title === "补充要求";
 }

@@ -164,7 +164,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     secret: process.env.WE_COM_SECRET ?? "",
     redirectUri: `${config.apiBaseUrl}/auth/wecom/callback`,
   });
-  const approvalParser = new ApprovalParser((optionKey) => itemService.resolveByWeComOptionKey(optionKey));
+  const approvalParser = new ApprovalParser((optionKey) => itemService.resolveByWeComOptionKey(optionKey), config.approvalTemplateId);
   const approvalSyncService = new ApprovalSyncService({
     gateway: new HttpApprovalGateway({
       corpId: process.env.WE_COM_CORP_ID ?? "",

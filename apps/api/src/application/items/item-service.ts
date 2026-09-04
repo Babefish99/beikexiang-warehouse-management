@@ -49,15 +49,12 @@ export class InMemoryItemRepository implements ItemRepository {
 }
 
 export class ItemService {
-  private readonly approvalReferenceIndex = new Map<string, ItemDefinition>();
+  private readonly approvalReferenceIndex = new Map<string, ItemDefinition | undefined>();
 
   constructor(private readonly repository: ItemRepository) {}
 
   async loadPersistedOptionIndex(): Promise<void> {
-    this.approvalReferenceIndex.clear();
-    for (const item of await this.repository.list(true)) {
-      this.indexApprovalReferences(item);
-    }
+    await this.rebuildApprovalReferenceIndex();
   }
 
   async create(input: ItemInput): Promise<ItemDefinition> {
@@ -94,16 +91,16 @@ export class ItemService {
     assertItemDefinitionInput({ ...input, code: nextCode });
     const updated: ItemDefinition = { ...current, ...input, code: nextCode, name: input.name.trim(), unit: input.unit.trim(), categoryId: input.categoryId.trim(), specification: input.specification?.trim() || undefined, weComOptionKey: input.weComOptionKey?.trim() || undefined };
     await this.repository.save(updated);
-    this.approvalReferenceIndex.delete(current.code);
-    if (current.weComOptionKey) this.approvalReferenceIndex.delete(current.weComOptionKey);
-    this.indexApprovalReferences(updated);
+    await this.rebuildApprovalReferenceIndex();
     return updated;
   }
 
   async deactivate(itemId: string): Promise<void> {
     const item = await this.repository.get(itemId);
     if (!item) throw new Error(`item not found: ${itemId}`);
-    await this.repository.save({ ...item, isActive: false });
+    const deactivated = { ...item, isActive: false };
+    await this.repository.save(deactivated);
+    this.indexApprovalReferences(deactivated);
   }
 
   async activate(itemId: string): Promise<ItemDefinition> {
@@ -119,14 +116,30 @@ export class ItemService {
     return this.repository.list(includeInactive);
   }
 
-  resolveByWeComOptionKey(reference: string): Pick<ItemDefinition, "id" | "code" | "name" | "unit" | "weComOptionKey"> | undefined {
+  resolveByWeComOptionKey(reference: string): Pick<ItemDefinition, "id" | "code" | "name" | "unit" | "weComOptionKey" | "isActive"> | undefined {
     const item = this.approvalReferenceIndex.get(reference.trim());
     if (!item) return undefined;
-    return { id: item.id, code: item.code, name: item.name, unit: item.unit, weComOptionKey: item.weComOptionKey };
+    return { id: item.id, code: item.code, name: item.name, unit: item.unit, weComOptionKey: item.weComOptionKey, isActive: item.isActive };
   }
 
   private indexApprovalReferences(item: ItemDefinition): void {
-    this.approvalReferenceIndex.set(item.code, item);
-    if (item.weComOptionKey) this.approvalReferenceIndex.set(item.weComOptionKey, item);
+    this.indexApprovalReference(item.code, item);
+    if (item.weComOptionKey) this.indexApprovalReference(item.weComOptionKey, item);
+  }
+
+  private indexApprovalReference(reference: string, item: ItemDefinition): void {
+    const existing = this.approvalReferenceIndex.get(reference);
+    if (existing === undefined && !this.approvalReferenceIndex.has(reference)) {
+      this.approvalReferenceIndex.set(reference, item);
+    } else if (existing?.id === item.id) {
+      this.approvalReferenceIndex.set(reference, item);
+    } else if (existing?.id !== item.id) {
+      this.approvalReferenceIndex.set(reference, undefined);
+    }
+  }
+
+  private async rebuildApprovalReferenceIndex(): Promise<void> {
+    this.approvalReferenceIndex.clear();
+    for (const item of await this.repository.list(true)) this.indexApprovalReferences(item);
   }
 }
