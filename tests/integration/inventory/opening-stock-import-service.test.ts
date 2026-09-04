@@ -227,7 +227,7 @@ describe("OpeningStockImportService preview", () => {
           isActive: true,
         });
         snapshot.existingBatchKeys.push(
-          "warehouse-1\u0000item-1\u0000OPEN-20260824-WH01-BJ0001",
+          "warehouse-1\u0000item-1\u0000期初-260824",
         );
       },
       "BATCH_ALREADY_EXISTS",
@@ -385,7 +385,7 @@ describe("OpeningStockImportService preview", () => {
       isActive: true,
     });
     fakeStore.snapshot.existingBatchKeys.push(
-      "warehouse-1\u0000item-1\u0000OPEN-20260824-WH01-BJ0001",
+      "warehouse-1\u0000item-1\u0000期初-260824",
     );
 
     await expect(
