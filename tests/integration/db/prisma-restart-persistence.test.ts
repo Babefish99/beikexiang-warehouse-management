@@ -244,7 +244,7 @@ describe.skipIf(!databaseUrl)("Prisma application restart persistence", () => {
       });
       approvalId = approval.id;
 
-      const outbound = await new OutboundService(new PrismaOutboundStore(fixturePrisma)).confirm({
+      const outbound = await new OutboundService(new PrismaOutboundStore(fixturePrisma, schemaName)).confirm({
         approvalId,
         operatorId: "local-admin",
         decisions: [{

@@ -24,6 +24,7 @@ import { PrismaInventoryEntryStore } from "../../../apps/api/src/infrastructure/
 import { PrismaMovementStore } from "../../../apps/api/src/infrastructure/db/prisma-movement-store.js";
 import { PrismaOutboundStore } from "../../../apps/api/src/infrastructure/db/prisma-outbound-store.js";
 import { PrismaReportSource } from "../../../apps/api/src/infrastructure/db/prisma-report-source.js";
+import { createPersistenceAdapters } from "../../../apps/api/src/infrastructure/db/runtime.js";
 import { PrismaStocktakeStore } from "../../../apps/api/src/infrastructure/db/prisma-stocktake-store.js";
 import { seedStructuralData } from "../../../prisma/seed.js";
 
@@ -935,7 +936,7 @@ describe.skipIf(!databaseUrl)("Prisma outbound decisions after the intent migrat
     batchId: string;
     quantity: string;
   }) {
-    const store = new PrismaOutboundStore(prisma);
+    const store = new PrismaOutboundStore(prisma, outboundSchemaName);
     const approval = await store.getApproval(options.approvalId);
     if (!approval) throw new Error("test approval missing");
     const validation = new OutboundAllocator().validate({
@@ -950,6 +951,47 @@ describe.skipIf(!databaseUrl)("Prisma outbound decisions after the intent migrat
     });
     return { approval, store, validation };
   }
+
+  it("confirms through the runtime in a custom schema without a connection-level search path", async () => {
+    await createItem({ id: "task6-runtime-item", code: "T6-RUNTIME", name: "Runtime item" });
+    await createBatch({
+      id: "task6-runtime-batch",
+      itemId: "task6-runtime-item",
+      quantity: "2",
+      balances: [{ warehouseId: "warehouse-1", quantity: "2" }],
+    });
+    const approval = await createIntentApproval([{
+      id: "task6-runtime-line",
+      requestedItemName: "Runtime intent",
+      requestedQuantity: "1",
+    }]);
+    const runtime = createPersistenceAdapters({
+      driver: "prisma",
+      connectionString: schemaUrlWithoutSearchPathFor(databaseUrl as string, outboundSchemaName),
+    });
+
+    try {
+      const result = await new OutboundService(runtime.inventory.outboundStore).confirm({
+        approvalId: approval.id,
+        operatorId: "task6-operator",
+        decisions: [{
+          approvalLineId: "task6-runtime-line",
+          selectedItemId: "task6-runtime-item",
+          allocations: [{ warehouseId: "warehouse-1", batchId: "task6-runtime-batch", quantity: "1" }],
+        }],
+      });
+
+      expect(result).toMatchObject({ status: "COMPLETED", actualQuantity: "1", amount: "12.50" });
+      expect((await prisma.stockBalance.findFirstOrThrow({
+        where: { warehouseId: "warehouse-1", batchId: "task6-runtime-batch" },
+      })).remainingQuantity.toString()).toBe("1");
+      await expect(prisma.outboundDecisionLine.findUniqueOrThrow({
+        where: { approvalLineId: "task6-runtime-line" },
+      })).resolves.toMatchObject({ decidedBy: "task6-operator" });
+    } finally {
+      await runtime.disconnect();
+    }
+  });
 
   it("returns every active same-unit stocked candidate and aggregates its warehouse balances", async () => {
     await Promise.all([
@@ -971,7 +1013,7 @@ describe.skipIf(!databaseUrl)("Prisma outbound decisions after the intent migrat
     await createBatch({ id: "task6-empty-batch", itemId: "task6-empty", quantity: "0", balances: [{ warehouseId: "warehouse-1", quantity: "0" }] });
     const approval = await createIntentApproval([{ id: "task6-candidate-line", requestedItemName: "Tea supplies", requestedQuantity: "1" }]);
 
-    const store = new PrismaOutboundStore(prisma);
+    const store = new PrismaOutboundStore(prisma, outboundSchemaName);
     const options = await new OutboundService(store).listOptions(approval.id);
 
     expect(options.lines).toEqual([{
@@ -1014,7 +1056,7 @@ describe.skipIf(!databaseUrl)("Prisma outbound decisions after the intent migrat
       { id: "task6-positive-line", requestedItemName: "Split intent", requestedQuantity: "2", note: "audit me" },
       { id: "task6-zero-line", requestedItemName: "Unavailable intent", requestedQuantity: "1" },
     ]);
-    const service = new OutboundService(new PrismaOutboundStore(prisma));
+    const service = new OutboundService(new PrismaOutboundStore(prisma, outboundSchemaName));
 
     const result = await service.confirm({
       approvalId: approval.id,
@@ -1079,7 +1121,7 @@ describe.skipIf(!databaseUrl)("Prisma outbound decisions after the intent migrat
   it("closes an all-zero approval without creating allocation or ledger rows", async () => {
     const approval = await createIntentApproval([{ id: "task6-all-zero-line", requestedItemName: "No stock", requestedQuantity: "3" }]);
 
-    const result = await new OutboundService(new PrismaOutboundStore(prisma)).confirm({
+    const result = await new OutboundService(new PrismaOutboundStore(prisma, outboundSchemaName)).confirm({
       approvalId: approval.id,
       operatorId: "task6-operator",
       decisions: [{ approvalLineId: "task6-all-zero-line", allocations: [], varianceReason: "none available" }],
@@ -1149,8 +1191,8 @@ describe.skipIf(!databaseUrl)("Prisma outbound decisions after the intent migrat
         allocations: [{ warehouseId: "warehouse-1", batchId: "task6-race-batch", quantity: "1" }],
       }],
     };
-    const first = new OutboundService(new PrismaOutboundStore(prisma));
-    const second = new OutboundService(new PrismaOutboundStore(prisma));
+    const first = new OutboundService(new PrismaOutboundStore(prisma, outboundSchemaName));
+    const second = new OutboundService(new PrismaOutboundStore(prisma, outboundSchemaName));
 
     const outcomes = await Promise.allSettled([first.confirm(input), second.confirm(input)]);
 
@@ -1526,6 +1568,13 @@ function schemaUrlFor(connectionString: string, targetSchema: string): string {
   const url = new URL(connectionString);
   url.searchParams.set("schema", targetSchema);
   url.searchParams.set("options", `-c search_path=${targetSchema}`);
+  return url.toString();
+}
+
+function schemaUrlWithoutSearchPathFor(connectionString: string, targetSchema: string): string {
+  const url = new URL(connectionString);
+  url.searchParams.set("schema", targetSchema);
+  url.searchParams.delete("options");
   return url.toString();
 }
 

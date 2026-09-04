@@ -470,8 +470,13 @@ class PrismaAuditService implements AuditService {
   }
 }
 
+function databaseSchemaFromConnectionString(connectionString?: string): string {
+  if (!connectionString) return "public";
+  return new URL(connectionString).searchParams.get("schema") || "public";
+}
+
 function createPrismaClient(connectionString: string): PrismaClient {
-  const schema = new URL(connectionString).searchParams.get("schema") ?? undefined;
+  const schema = databaseSchemaFromConnectionString(connectionString);
   const adapter = new PrismaPg({ connectionString }, schema ? { schema } : undefined);
   return new PrismaClient({ adapter });
 }
@@ -546,6 +551,7 @@ export function createPersistenceAdapters(options: { driver: "memory" } | { driv
     };
   }
 
+  const databaseSchema = databaseSchemaFromConnectionString(options.connectionString);
   const prisma = options.prisma ?? createPrismaClient(options.connectionString ?? "");
   const reportSource = new PrismaReportSource(prisma);
   const periodStore = new PrismaAccountingPeriodStore(prisma);
@@ -573,7 +579,7 @@ export function createPersistenceAdapters(options: { driver: "memory" } | { driv
     inventory: {
       entryStore: new PrismaInventoryEntryStore(prisma),
       openingStockImportStore: new PrismaOpeningStockImportStore(prisma),
-      outboundStore: new PrismaOutboundStore(prisma),
+      outboundStore: new PrismaOutboundStore(prisma, databaseSchema),
       movementStore: new PrismaMovementStore(prisma),
       stocktakeStore: new PrismaStocktakeStore(prisma),
       periodStore,

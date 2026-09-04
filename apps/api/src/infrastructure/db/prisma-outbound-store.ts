@@ -44,6 +44,22 @@ function uniqueSorted(values: string[]): string[] {
   return [...new Set(values)].sort();
 }
 
+function validateDatabaseSchema(databaseSchema: string): string {
+  if (!databaseSchema || databaseSchema.includes("\0")) {
+    throw new Error("database schema must be a non-empty PostgreSQL identifier");
+  }
+  return databaseSchema;
+}
+
+async function setTransactionSearchPath(
+  transaction: InventoryTransactionClient,
+  databaseSchema: string,
+): Promise<void> {
+  await transaction.$queryRaw(Prisma.sql`
+    SELECT set_config('search_path', quote_ident(${databaseSchema}), true)
+  `);
+}
+
 async function lockRowsForConfirmation(
   transaction: InventoryTransactionClient,
   approvalId: string,
@@ -103,7 +119,14 @@ async function lockRowsForConfirmation(
 }
 
 export class PrismaOutboundStore implements OutboundStore {
-  constructor(private readonly prisma: PrismaClient) {}
+  private readonly databaseSchema: string;
+
+  constructor(
+    private readonly prisma: PrismaClient,
+    databaseSchema = "public",
+  ) {
+    this.databaseSchema = validateDatabaseSchema(databaseSchema);
+  }
 
   async getApproval(approvalId: string): Promise<PendingApproval | undefined> {
     const approval = await this.prisma.approvalRequest.findUnique({
@@ -185,6 +208,7 @@ export class PrismaOutboundStore implements OutboundStore {
     })));
 
     return runInventoryTransaction(this.prisma, async (transaction) => {
+      await setTransactionSearchPath(transaction, this.databaseSchema);
       await assertPrismaPeriodOpen(transaction, occurredAt);
       await lockRowsForConfirmation(transaction, approval.id, selectedItemIds, allocationReferences);
 
