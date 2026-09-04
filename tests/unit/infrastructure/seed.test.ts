@@ -3,6 +3,54 @@ import { describe, expect, it, vi } from "vitest";
 import { getStructuralSeedData, seedStructuralData } from "../../../prisma/seed.ts";
 
 describe("structural database seed", () => {
+  it("preserves operator-managed warehouse settings when structural data is reseeded", async () => {
+    const warehouses = new Map([
+      [
+        "WH-01",
+        {
+          id: "legacy-warehouse-1",
+          code: "WH-01",
+          name: "集团二楼仓库",
+          isPlaceholder: false,
+          isActive: false,
+        },
+      ],
+    ]);
+    const warehouseUpsert = vi.fn(async ({
+      where,
+      update,
+      create,
+    }: {
+      where: { code: string };
+      update: Partial<{ id: string; code: string; name: string; isPlaceholder: boolean; isActive: boolean }>;
+      create: { id: string; code: string; name: string; isPlaceholder: boolean; isActive: boolean };
+    }) => {
+      const existing = warehouses.get(where.code);
+      warehouses.set(where.code, existing ? { ...existing, ...update } : create);
+    });
+
+    await seedStructuralData({
+      role: { upsert: vi.fn().mockResolvedValue({}) },
+      warehouse: { upsert: warehouseUpsert },
+      itemCategory: { upsert: vi.fn().mockResolvedValue({}) },
+    });
+
+    expect(warehouses.get("WH-01")).toEqual({
+      id: "warehouse-1",
+      code: "WH-01",
+      name: "集团二楼仓库",
+      isPlaceholder: false,
+      isActive: false,
+    });
+    expect(warehouses.get("WH-02")).toEqual({
+      id: "warehouse-2",
+      code: "WH-02",
+      name: "待配置仓库二",
+      isPlaceholder: true,
+      isActive: true,
+    });
+  });
+
   it("matches structural rows by unique code while normalizing their stable ids", async () => {
     const roleUpsert = vi.fn().mockResolvedValue({});
     const warehouseUpsert = vi.fn().mockResolvedValue({});

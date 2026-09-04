@@ -30,7 +30,7 @@ export function getStructuralSeedData(): StructuralSeedData {
 
 export async function seedStructuralData(client: {
   role: { upsert(args: { where: { code: string }; update: { id: string; code: string; name: string }; create: { id: string; code: string; name: string } }): Promise<unknown> };
-  warehouse: { upsert(args: { where: { code: string }; update: { id: string; code: string; name: string; isPlaceholder: boolean; isActive: boolean }; create: { id: string; code: string; name: string; isPlaceholder: boolean; isActive: boolean } }): Promise<unknown> };
+  warehouse: { upsert(args: { where: { code: string }; update: { id: string; code: string }; create: { id: string; code: string; name: string; isPlaceholder: boolean; isActive: boolean } }): Promise<unknown> };
   itemCategory: { upsert(args: { where: { code: string }; update: { id: string; code: string; name: string; prefix: string }; create: { id: string; code: string; name: string; prefix: string } }): Promise<unknown> };
 }): Promise<void> {
   const seedData = getStructuralSeedData();
@@ -38,7 +38,11 @@ export async function seedStructuralData(client: {
     await client.role.upsert({ where: { code: role.code }, update: role, create: role });
   }
   for (const warehouse of seedData.warehouses) {
-    await client.warehouse.upsert({ where: { code: warehouse.code }, update: warehouse, create: warehouse });
+    await client.warehouse.upsert({
+      where: { code: warehouse.code },
+      update: { id: warehouse.id, code: warehouse.code },
+      create: warehouse,
+    });
   }
   for (const category of seedData.categories) {
     await client.itemCategory.upsert({ where: { code: category.code }, update: category, create: category });

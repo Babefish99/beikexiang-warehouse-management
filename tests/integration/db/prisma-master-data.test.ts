@@ -56,6 +56,38 @@ describe.skipIf(!databaseUrl)("Prisma master-data and identity persistence", () 
     ]);
   });
 
+  it("preserves operator-managed warehouse settings when structural data is reseeded", async () => {
+    try {
+      await prisma.warehouse.update({
+        where: { code: "WH-01" },
+        data: {
+          name: "集团二楼仓库",
+          isPlaceholder: false,
+          isActive: false,
+        },
+      });
+
+      await seedStructuralData(prisma);
+
+      await expect(prisma.warehouse.findUnique({ where: { code: "WH-01" } })).resolves.toMatchObject({
+        id: "warehouse-1",
+        code: "WH-01",
+        name: "集团二楼仓库",
+        isPlaceholder: false,
+        isActive: false,
+      });
+    } finally {
+      await prisma.warehouse.update({
+        where: { code: "WH-01" },
+        data: {
+          name: "待配置仓库一",
+          isPlaceholder: true,
+          isActive: true,
+        },
+      });
+    }
+  });
+
   it("persists master-data updates and audit identities across adapter restart", async () => {
     const adapters = createPersistenceAdapters({ driver: "prisma", prisma });
     await adapters.identityService.ensureUser({
