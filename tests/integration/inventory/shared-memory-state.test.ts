@@ -237,6 +237,33 @@ describe("shared inventory memory state", () => {
     }
   });
 
+  it("keeps a configured legacy selector template on the selector parser path", async () => {
+    vi.stubEnv("WE_COM_APPROVAL_TEMPLATE_ID", "tpl-selector-v1");
+    mockApprovalDetail({ ...approvalDetail(), template_id: "tpl-selector-v1" });
+    const app = buildServer();
+
+    try {
+      const cookie = await createAdminSessionCookie(app);
+      await createItem(app, cookie, {
+        code: "TEA-0001",
+        name: "Tea leaves",
+        unit: "box",
+        categoryId: "cat-tea",
+        weComOptionKey: "opt-tea",
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/admin/approvals/202607230021/resync",
+        headers: { cookie },
+      });
+
+      expect(response.statusCode, response.body).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("shows outbound allocations in return options immediately after confirmation", async () => {
     mockApprovalDetail(approvalDetail());
     const app = buildServer();
