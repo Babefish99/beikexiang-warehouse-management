@@ -33,7 +33,7 @@ describe("enterprise WeChat OAuth routes", () => {
     vi.unstubAllGlobals();
   });
 
-  it("binds the callback to the browser state and secures the HTTPS session cookie", async () => {
+  it("binds the cross-site callback to the browser state and secures the HTTPS session cookie", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "token-1" }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ UserId: "wx-1" }), { status: 200 }));
@@ -48,6 +48,7 @@ describe("enterprise WeChat OAuth routes", () => {
       expect(authorize.statusCode).toBe(200);
       expect(state).toBeTruthy();
       expect(pendingCookie).toContain("wecom_oauth_state=");
+      expect(pendingCookie).toContain("SameSite=None");
       expect(pendingCookie).toContain("Secure");
 
       const callback = await app.inject({
@@ -61,6 +62,39 @@ describe("enterprise WeChat OAuth routes", () => {
       expect(callback.headers.location).toBe("https://warehouse-web.example.com/admin/reports");
       expect(sessionCookie).toContain("warehouse_session=");
       expect(sessionCookie).toContain("Secure");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("keeps the OAuth state cookie browser-compatible on local HTTP", async () => {
+    vi.stubEnv("API_BASE_URL", "http://localhost:3001");
+    vi.stubEnv("WEB_BASE_URL", "http://localhost:5173");
+    const app = buildServer();
+
+    try {
+      const authorize = await app.inject({ method: "GET", url: "/auth/wecom/authorize?returnTo=%2F" });
+      const pendingCookie = firstSetCookie(authorize);
+
+      expect(authorize.statusCode).toBe(200);
+      expect(pendingCookie).toContain("SameSite=Lax");
+      expect(pendingCookie).not.toContain("Secure");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("recognizes an HTTPS scheme regardless of configuration casing", async () => {
+    vi.stubEnv("API_BASE_URL", "HTTPS://warehouse-api.example.com");
+    const app = buildServer();
+
+    try {
+      const authorize = await app.inject({ method: "GET", url: "/auth/wecom/authorize?returnTo=%2F" });
+      const pendingCookie = firstSetCookie(authorize);
+
+      expect(authorize.statusCode).toBe(200);
+      expect(pendingCookie).toContain("SameSite=None");
+      expect(pendingCookie).toContain("Secure");
     } finally {
       await app.close();
     }

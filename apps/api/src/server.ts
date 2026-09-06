@@ -66,7 +66,7 @@ function readCookie(header: string | undefined, name: string): string | null {
   return value ? decodeURIComponent(value.slice(name.length + 1)) : null;
 }
 
-function serializeCookie(name: string, value: string, options: { httpOnly: boolean; sameSite: "lax"; secure: boolean; path: string; maxAge: number }): string {
+function serializeCookie(name: string, value: string, options: { httpOnly: boolean; sameSite: "lax" | "none"; secure: boolean; path: string; maxAge: number }): string {
   const attributes = [
     `${name}=${encodeURIComponent(value)}`,
     ...(options.httpOnly ? ["HttpOnly"] : []),
@@ -95,6 +95,7 @@ export function createApprovalParser(
 
 export function buildServer(options: BuildServerOptions = {}) {
   const config = readServerConfig(process.env);
+  const secureCookies = new URL(config.apiBaseUrl).protocol === "https:";
   const app = Fastify({ logger: true });
   const persistence = config.persistenceDriver === "prisma"
     ? createPersistenceAdapters({ driver: "prisma", connectionString: config.databaseUrl })
@@ -259,10 +260,9 @@ export function buildServer(options: BuildServerOptions = {}) {
       const authorizeUrl = oauthClient.getAuthorizeUrl(request.query.returnTo ?? "/");
       const state = new URL(authorizeUrl).searchParams.get("state");
       if (!state) throw new Error("enterprise WeChat OAuth state is missing");
-      const secureCookies = config.apiBaseUrl.startsWith("https://");
       reply.header("set-cookie", serializeCookie(WECOM_OAUTH_STATE_COOKIE, state, {
         httpOnly: true,
-        sameSite: "lax",
+        sameSite: secureCookies ? "none" : "lax",
         secure: secureCookies,
         path: "/auth/wecom/callback",
         maxAge: WECOM_OAUTH_STATE_TTL_SECONDS,
@@ -291,12 +291,11 @@ export function buildServer(options: BuildServerOptions = {}) {
     };
     await identityService.ensureUser(user);
     const token = sessionService.createSession(user);
-    const secureCookies = config.apiBaseUrl.startsWith("https://");
     reply.header("set-cookie", [
       serializeCookie(SESSION_COOKIE, token, sessionService.cookieOptions(secureCookies)),
       serializeCookie(WECOM_OAUTH_STATE_COOKIE, "", {
         httpOnly: true,
-        sameSite: "lax",
+        sameSite: secureCookies ? "none" : "lax",
         secure: secureCookies,
         path: "/auth/wecom/callback",
         maxAge: 0,
