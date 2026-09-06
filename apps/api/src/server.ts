@@ -95,6 +95,7 @@ export function createApprovalParser(
 
 export function buildServer(options: BuildServerOptions = {}) {
   const config = readServerConfig(process.env);
+  const secureCookies = new URL(config.apiBaseUrl).protocol === "https:";
   const app = Fastify({ logger: true });
   const persistence = config.persistenceDriver === "prisma"
     ? createPersistenceAdapters({ driver: "prisma", connectionString: config.databaseUrl })
@@ -255,11 +256,20 @@ export function buildServer(options: BuildServerOptions = {}) {
     }
   });
   app.get<{ Querystring: { returnTo?: string } }>("/auth/wecom/authorize", async (request, reply) => {
+    // Page-load metadata must not start the expiry clock or replace another tab's pending state.
+    const returnTo = encodeURIComponent(request.query.returnTo ?? "/");
+    reply.header("cache-control", "no-store");
+    return {
+      authorizeUrl: `${config.apiBaseUrl}/auth/wecom/start?returnTo=${returnTo}`,
+      ...(config.localAuthEnabled ? { localAuthUrl: `${config.apiBaseUrl}/auth/local?returnTo=${returnTo}` } : {}),
+    };
+  });
+  app.get<{ Querystring: { returnTo?: string } }>("/auth/wecom/start", async (request, reply) => {
+    reply.header("cache-control", "no-store");
     try {
       const authorizeUrl = oauthClient.getAuthorizeUrl(request.query.returnTo ?? "/");
       const state = new URL(authorizeUrl).searchParams.get("state");
       if (!state) throw new Error("enterprise WeChat OAuth state is missing");
-      const secureCookies = config.apiBaseUrl.startsWith("https://");
       reply.header("set-cookie", serializeCookie(WECOM_OAUTH_STATE_COOKIE, state, {
         httpOnly: true,
         sameSite: "lax",
@@ -267,10 +277,7 @@ export function buildServer(options: BuildServerOptions = {}) {
         path: "/auth/wecom/callback",
         maxAge: WECOM_OAUTH_STATE_TTL_SECONDS,
       }));
-      return {
-        authorizeUrl,
-        ...(config.localAuthEnabled ? { localAuthUrl: `${config.apiBaseUrl}/auth/local?returnTo=${encodeURIComponent(request.query.returnTo ?? "/")}` } : {}),
-      };
+      return reply.redirect(authorizeUrl);
     } catch (error) {
       if (error instanceof Error && error.message === "enterprise WeChat OAuth is not configured") {
         return reply.code(503).send({ error: "wecom_not_configured", message: "Enterprise WeChat OAuth is not configured" });
@@ -291,7 +298,6 @@ export function buildServer(options: BuildServerOptions = {}) {
     };
     await identityService.ensureUser(user);
     const token = sessionService.createSession(user);
-    const secureCookies = config.apiBaseUrl.startsWith("https://");
     reply.header("set-cookie", [
       serializeCookie(SESSION_COOKIE, token, sessionService.cookieOptions(secureCookies)),
       serializeCookie(WECOM_OAUTH_STATE_COOKIE, "", {

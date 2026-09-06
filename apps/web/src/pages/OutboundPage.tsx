@@ -80,7 +80,7 @@ export function OutboundPage({ userId }: { userId: string }) {
   const reloadOptions = useCallback(async (approvalId: string): Promise<OutboundOptions> => {
     const response = await fetch(`${apiBaseUrl}/admin/outbound/${encodeURIComponent(approvalId)}/options`, { credentials: "include" });
     if (response.status === 401) {
-      window.location.assign(`${apiBaseUrl}/auth/wecom/authorize?returnTo=${encodeURIComponent("/admin/outbound")}`);
+      window.location.assign(`${apiBaseUrl}/auth/wecom/start?returnTo=${encodeURIComponent("/admin/outbound")}`);
       throw new Error("登录已失效，草稿已保留，请重新登录");
     }
     if (!response.ok) throw new Error(await readError(response));
@@ -90,7 +90,7 @@ export function OutboundPage({ userId }: { userId: string }) {
   const confirm = useCallback(async (input: { approvalId: string; decisions: NormalizedDecision[] }): Promise<OutboundResult> => {
     const response = await fetch(`${apiBaseUrl}/admin/outbound/confirm`, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
     if (response.status === 401) {
-      window.location.assign(`${apiBaseUrl}/auth/wecom/authorize?returnTo=${encodeURIComponent("/admin/outbound")}`);
+      window.location.assign(`${apiBaseUrl}/auth/wecom/start?returnTo=${encodeURIComponent("/admin/outbound")}`);
       throw new Error("登录已失效，草稿已保留，请重新登录");
     }
     if (!response.ok) throw new Error(await readError(response));
@@ -103,7 +103,7 @@ export function OutboundPage({ userId }: { userId: string }) {
   const cancel = useCallback(async (approvalId: string, reason: string) => {
     const response = await fetch(`${apiBaseUrl}/admin/outbound/${encodeURIComponent(approvalId)}/cancel`, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ reason }) });
     if (response.status === 401) {
-      window.location.assign(`${apiBaseUrl}/auth/wecom/authorize?returnTo=${encodeURIComponent("/admin/outbound")}`);
+      window.location.assign(`${apiBaseUrl}/auth/wecom/start?returnTo=${encodeURIComponent("/admin/outbound")}`);
       throw new Error("登录已失效，草稿已保留，请重新登录");
     }
     if (!response.ok) throw new Error(await readError(response));

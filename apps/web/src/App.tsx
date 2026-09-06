@@ -52,7 +52,7 @@ export default function App() {
   const pathname = window.location.pathname;
   const isMobileViewport = useMobileViewport();
   const [user, setUser] = useState<WebUser | null>(null);
-  const [authorizeUrl, setAuthorizeUrl] = useState(`${apiBaseUrl}/auth/wecom/authorize`);
+  const [authorizeUrl, setAuthorizeUrl] = useState(`${apiBaseUrl}/auth/wecom/start?returnTo=${encodeURIComponent(pathname)}`);
   const [localAuthUrl, setLocalAuthUrl] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [cards, setCards] = useState<DashboardCard[]>(loadingCards);

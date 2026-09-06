@@ -16,7 +16,7 @@ export default defineConfig({
     },
   ],
   webServer: [
-    { command: `corepack pnpm --filter @warehouse/api dev`, url: `${apiBaseUrl}/health`, reuseExistingServer: true, env: { API_PORT: apiPort, API_BASE_URL: apiBaseUrl, WEB_BASE_URL: webBaseUrl } },
+    { command: `corepack pnpm --filter @warehouse/api dev`, url: `${apiBaseUrl}/health`, reuseExistingServer: true, env: { API_PORT: apiPort, API_BASE_URL: apiBaseUrl, WEB_BASE_URL: webBaseUrl, WE_COM_CORP_ID: "e2e-test-corp", WE_COM_AGENT_ID: "e2e-test-agent" } },
     { command: `corepack pnpm --filter @warehouse/web exec vite --host 0.0.0.0 --port ${webPort}`, url: webBaseUrl, reuseExistingServer: true, env: { VITE_API_BASE_URL: apiBaseUrl } },
   ],
   use: {
