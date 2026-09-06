@@ -33,7 +33,7 @@ describe("enterprise WeChat OAuth routes", () => {
     vi.unstubAllGlobals();
   });
 
-  it("binds the cross-site callback to the browser state and secures the HTTPS session cookie", async () => {
+  it("binds the callback to state issued when login starts and secures the HTTPS session cookie", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "token-1" }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ UserId: "wx-1" }), { status: 200 }));
@@ -41,15 +41,23 @@ describe("enterprise WeChat OAuth routes", () => {
     const app = buildServer();
 
     try {
-      const authorize = await app.inject({ method: "GET", url: "/auth/wecom/authorize?returnTo=%2Fadmin%2Freports" });
+      const metadata = await app.inject({ method: "GET", url: "/auth/wecom/authorize?returnTo=%2Fadmin%2Freports" });
+      expect(metadata.statusCode).toBe(200);
+      expect(metadata.headers["set-cookie"]).toBeUndefined();
+      const entry = new URL(metadata.json().authorizeUrl);
+      expect(entry.origin).toBe("https://warehouse-api.example.com");
+      expect(entry.pathname).toBe("/auth/wecom/start");
+      const authorize = await app.inject({ method: "GET", url: `${entry.pathname}${entry.search}` });
       const pendingCookie = firstSetCookie(authorize);
-      const state = new URL(authorize.json().authorizeUrl).searchParams.get("state");
+      const state = new URL(authorize.headers.location ?? "").searchParams.get("state");
 
-      expect(authorize.statusCode).toBe(200);
+      expect(authorize.statusCode).toBe(302);
       expect(state).toBeTruthy();
       expect(pendingCookie).toContain("wecom_oauth_state=");
-      expect(pendingCookie).toContain("SameSite=None");
+      expect(pendingCookie).toContain("SameSite=Lax");
+      expect(pendingCookie).toContain("Max-Age=600");
       expect(pendingCookie).toContain("Secure");
+      expect(authorize.headers["cache-control"]).toBe("no-store");
 
       const callback = await app.inject({
         method: "GET",
@@ -73,10 +81,10 @@ describe("enterprise WeChat OAuth routes", () => {
     const app = buildServer();
 
     try {
-      const authorize = await app.inject({ method: "GET", url: "/auth/wecom/authorize?returnTo=%2F" });
+      const authorize = await app.inject({ method: "GET", url: "/auth/wecom/start?returnTo=%2F" });
       const pendingCookie = firstSetCookie(authorize);
 
-      expect(authorize.statusCode).toBe(200);
+      expect(authorize.statusCode).toBe(302);
       expect(pendingCookie).toContain("SameSite=Lax");
       expect(pendingCookie).not.toContain("Secure");
     } finally {
@@ -89,11 +97,11 @@ describe("enterprise WeChat OAuth routes", () => {
     const app = buildServer();
 
     try {
-      const authorize = await app.inject({ method: "GET", url: "/auth/wecom/authorize?returnTo=%2F" });
+      const authorize = await app.inject({ method: "GET", url: "/auth/wecom/start?returnTo=%2F" });
       const pendingCookie = firstSetCookie(authorize);
 
-      expect(authorize.statusCode).toBe(200);
-      expect(pendingCookie).toContain("SameSite=None");
+      expect(authorize.statusCode).toBe(302);
+      expect(pendingCookie).toContain("SameSite=Lax");
       expect(pendingCookie).toContain("Secure");
     } finally {
       await app.close();
@@ -109,9 +117,9 @@ describe("enterprise WeChat OAuth routes", () => {
     const app = buildServer();
 
     try {
-      const authorize = await app.inject({ method: "GET", url: "/auth/wecom/authorize?returnTo=%2F" });
+      const authorize = await app.inject({ method: "GET", url: "/auth/wecom/start?returnTo=%2F" });
       const pendingCookie = firstSetCookie(authorize);
-      const state = new URL(authorize.json().authorizeUrl).searchParams.get("state");
+      const state = new URL(authorize.headers.location ?? "").searchParams.get("state");
       const callback = await app.inject({
         method: "GET",
         url: `/auth/wecom/callback?code=code-1&state=${encodeURIComponent(state ?? "")}`,
@@ -140,9 +148,9 @@ describe("enterprise WeChat OAuth routes", () => {
     const app = buildServer();
 
     try {
-      const authorize = await app.inject({ method: "GET", url: "/auth/wecom/authorize?returnTo=%2F" });
+      const authorize = await app.inject({ method: "GET", url: "/auth/wecom/start?returnTo=%2F" });
       const pendingCookie = firstSetCookie(authorize);
-      const state = new URL(authorize.json().authorizeUrl).searchParams.get("state");
+      const state = new URL(authorize.headers.location ?? "").searchParams.get("state");
       const callback = await app.inject({
         method: "GET",
         url: `/auth/wecom/callback?code=code-1&state=${encodeURIComponent(state ?? "")}`,
@@ -169,8 +177,8 @@ describe("enterprise WeChat OAuth routes", () => {
     const app = buildServer();
 
     try {
-      const authorize = await app.inject({ method: "GET", url: "/auth/wecom/authorize?returnTo=%2F" });
-      const state = new URL(authorize.json().authorizeUrl).searchParams.get("state");
+      const authorize = await app.inject({ method: "GET", url: "/auth/wecom/start?returnTo=%2F" });
+      const state = new URL(authorize.headers.location ?? "").searchParams.get("state");
       const callback = await app.inject({
         method: "GET",
         url: `/auth/wecom/callback?code=attacker-code&state=${encodeURIComponent(state ?? "")}`,
@@ -179,6 +187,58 @@ describe("enterprise WeChat OAuth routes", () => {
       expect(callback.statusCode).toBe(400);
       expect(callback.json()).toEqual({ error: "invalid_oauth_state" });
       expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("does not replace an in-flight login cookie when another tab loads login metadata", async () => {
+    const app = buildServer();
+    try {
+      const start = await app.inject({ method: "GET", url: "/auth/wecom/start?returnTo=%2Fadmin%2Foutbound" });
+      const pendingCookie = cookiePair(firstSetCookie(start), "wecom_oauth_state");
+      const metadata = await app.inject({ method: "GET", url: "/auth/wecom/authorize?returnTo=%2F", headers: { cookie: pendingCookie } });
+      expect(metadata.statusCode).toBe(200);
+      expect(metadata.headers["set-cookie"]).toBeUndefined();
+      expect(metadata.headers["cache-control"]).toBe("no-store");
+      expect(new URL(metadata.json().authorizeUrl).searchParams.has("state")).toBe(false);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("issues a new state on every login start and rejects the superseded state", async () => {
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    const app = buildServer();
+    try {
+      const first = await app.inject({ method: "GET", url: "/auth/wecom/start" });
+      const second = await app.inject({ method: "GET", url: "/auth/wecom/start" });
+      const oldState = new URL(first.headers.location ?? "").searchParams.get("state");
+      const newState = new URL(second.headers.location ?? "").searchParams.get("state");
+      expect(oldState).toBeTruthy();
+      expect(newState).not.toBe(oldState);
+      const callback = await app.inject({
+        method: "GET", url: `/auth/wecom/callback?code=stale-code&state=${encodeURIComponent(oldState ?? "")}`,
+        headers: { cookie: cookiePair(firstSetCookie(second), "wecom_oauth_state") },
+      });
+      expect(callback.statusCode).toBe(400);
+      expect(callback.json()).toEqual({ error: "invalid_oauth_state" });
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("does not redirect or issue state when WeCom is not configured", async () => {
+    vi.stubEnv("WE_COM_CORP_ID", "");
+    const app = buildServer();
+    try {
+      const start = await app.inject({ method: "GET", url: "/auth/wecom/start" });
+      expect(start.statusCode).toBe(503);
+      expect(start.json()).toMatchObject({ error: "wecom_not_configured" });
+      expect(start.headers["set-cookie"]).toBeUndefined();
+      expect(start.headers.location).toBeUndefined();
     } finally {
       await app.close();
     }

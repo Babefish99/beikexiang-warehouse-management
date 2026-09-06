@@ -66,7 +66,7 @@ function readCookie(header: string | undefined, name: string): string | null {
   return value ? decodeURIComponent(value.slice(name.length + 1)) : null;
 }
 
-function serializeCookie(name: string, value: string, options: { httpOnly: boolean; sameSite: "lax" | "none"; secure: boolean; path: string; maxAge: number }): string {
+function serializeCookie(name: string, value: string, options: { httpOnly: boolean; sameSite: "lax"; secure: boolean; path: string; maxAge: number }): string {
   const attributes = [
     `${name}=${encodeURIComponent(value)}`,
     ...(options.httpOnly ? ["HttpOnly"] : []),
@@ -256,21 +256,28 @@ export function buildServer(options: BuildServerOptions = {}) {
     }
   });
   app.get<{ Querystring: { returnTo?: string } }>("/auth/wecom/authorize", async (request, reply) => {
+    // Page-load metadata must not start the expiry clock or replace another tab's pending state.
+    const returnTo = encodeURIComponent(request.query.returnTo ?? "/");
+    reply.header("cache-control", "no-store");
+    return {
+      authorizeUrl: `${config.apiBaseUrl}/auth/wecom/start?returnTo=${returnTo}`,
+      ...(config.localAuthEnabled ? { localAuthUrl: `${config.apiBaseUrl}/auth/local?returnTo=${returnTo}` } : {}),
+    };
+  });
+  app.get<{ Querystring: { returnTo?: string } }>("/auth/wecom/start", async (request, reply) => {
+    reply.header("cache-control", "no-store");
     try {
       const authorizeUrl = oauthClient.getAuthorizeUrl(request.query.returnTo ?? "/");
       const state = new URL(authorizeUrl).searchParams.get("state");
       if (!state) throw new Error("enterprise WeChat OAuth state is missing");
       reply.header("set-cookie", serializeCookie(WECOM_OAUTH_STATE_COOKIE, state, {
         httpOnly: true,
-        sameSite: secureCookies ? "none" : "lax",
+        sameSite: "lax",
         secure: secureCookies,
         path: "/auth/wecom/callback",
         maxAge: WECOM_OAUTH_STATE_TTL_SECONDS,
       }));
-      return {
-        authorizeUrl,
-        ...(config.localAuthEnabled ? { localAuthUrl: `${config.apiBaseUrl}/auth/local?returnTo=${encodeURIComponent(request.query.returnTo ?? "/")}` } : {}),
-      };
+      return reply.redirect(authorizeUrl);
     } catch (error) {
       if (error instanceof Error && error.message === "enterprise WeChat OAuth is not configured") {
         return reply.code(503).send({ error: "wecom_not_configured", message: "Enterprise WeChat OAuth is not configured" });
@@ -295,7 +302,7 @@ export function buildServer(options: BuildServerOptions = {}) {
       serializeCookie(SESSION_COOKIE, token, sessionService.cookieOptions(secureCookies)),
       serializeCookie(WECOM_OAUTH_STATE_COOKIE, "", {
         httpOnly: true,
-        sameSite: secureCookies ? "none" : "lax",
+        sameSite: "lax",
         secure: secureCookies,
         path: "/auth/wecom/callback",
         maxAge: 0,

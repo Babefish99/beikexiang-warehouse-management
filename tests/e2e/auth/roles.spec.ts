@@ -17,6 +17,27 @@ test.describe("authentication boundaries", () => {
     await expect(page.getByRole("link", { name: "使用企业微信登录" })).toBeVisible();
   });
 
+  test("login starts with fresh browser state even after cookies from an idle login page expire", async ({ page, context }) => {
+    await page.route("https://open.work.weixin.qq.com/wwopen/sso/qrConnect?*", (route) => route.fulfill({
+      status: 200, contentType: "text/html", body: "<p>扫码登录测试</p>",
+    }));
+    await page.goto("/admin/outbound");
+    const login = page.getByRole("link", { name: "使用企业微信登录" });
+    await expect(login).toBeVisible();
+    // Emulate the browser dropping cookies during a long idle period, without a ten-minute sleep.
+    await context.clearCookies();
+    await login.click();
+    await expect(page).toHaveURL(/^https:\/\/open\.work\.weixin\.qq\.com\/wwopen\/sso\/qrConnect\?/);
+    const state = new URL(page.url()).searchParams.get("state");
+    const cookie = (await context.cookies(apiUrl("/auth/wecom/callback"))).find((entry) => entry.name === "wecom_oauth_state");
+    expect(state).toBeTruthy();
+    expect(cookie?.value).toBe(state);
+    expect(cookie?.httpOnly).toBe(true);
+    expect(cookie?.sameSite).toBe("Lax");
+    expect(cookie?.expires).toBeGreaterThan(Date.now() / 1000 + 500);
+    expect(JSON.parse(Buffer.from(state ?? "", "base64url").toString("utf8")).returnTo).toBe("/admin/outbound");
+  });
+
   test("local development login reaches the admin dashboard", async ({ page }) => {
     await page.goto(apiUrl("/auth/local?returnTo=%2F"));
     await expect(page.getByRole("heading", { name: "库存总览" })).toBeVisible();

@@ -164,7 +164,7 @@ describe("local auth routes", () => {
       const local = await app.inject({ method: "GET", url: "/auth/local", remoteAddress: "127.0.0.1" });
 
       expect(metadata.statusCode).toBe(200);
-      expect(metadata.json()).toHaveProperty("authorizeUrl", expect.stringContaining("https://open.work.weixin.qq.com/wwopen/sso/qrConnect?"));
+      expect(metadata.json()).toHaveProperty("authorizeUrl", "http://localhost:3001/auth/wecom/start?returnTo=%2F");
       expect(metadata.json()).not.toHaveProperty("localAuthUrl");
       expect(local.statusCode).toBe(404);
       expect(local.headers["set-cookie"]).toBeUndefined();
