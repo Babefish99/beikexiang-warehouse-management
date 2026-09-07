@@ -533,7 +533,7 @@ export function createPersistenceAdapters(options: { driver: "memory" } | { driv
           entryStore,
           periodStore,
         ),
-        outboundStore: new InMemoryOutboundStore(state, () => items.list(true)),
+        outboundStore: new InMemoryOutboundStore(state, () => items.list(true), () => warehouses.list(true)),
         movementStore: new InMemoryMovementStore(state),
         stocktakeStore: new InMemoryStocktakeStore(state),
         periodStore,

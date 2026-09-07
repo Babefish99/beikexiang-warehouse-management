@@ -1,4 +1,7 @@
 import { Plus, Trash2 } from "lucide-react";
+import { useState } from "react";
+
+import { searchCandidateItems, type CandidateItem } from "./outbound-workflow";
 
 import type {
   AllocationRow,
@@ -27,7 +30,12 @@ function actualQuantity(decision: DecisionDraft): number {
     : decision.allocations.reduce((total, allocation) => total + (/^[1-9]\d*$/.test(allocation.quantity) ? Number(allocation.quantity) : 0), 0);
 }
 
+function itemLabel(item: CandidateItem): string {
+  return `${item.code} ${item.name}${item.specification ? ` / ${item.specification}` : ""} / ${item.unit} / 可用 ${item.availableQuantity}`;
+}
+
 export function OutboundDecisionEditor({ approval, options, draft, errors, onChange, disabled = false }: OutboundDecisionEditorProps) {
+  const [searches, setSearches] = useState<Record<string, string>>({});
   const updateDecision = (lineId: string, update: (decision: DecisionDraft) => DecisionDraft) => {
     if (disabled) return;
     onChange({ ...draft, decisions: draft.decisions.map((decision) => decision.approvalLineId === lineId ? update(decision) : decision) });
@@ -38,6 +46,8 @@ export function OutboundDecisionEditor({ approval, options, draft, errors, onCha
     if (!decision) return null;
     const candidateItems = options.lines.find((candidate) => candidate.approvalLineId === line.id)?.items ?? [];
     const selectedItem = candidateItems.find((candidate) => candidate.id === decision.selectedItemId);
+    const search = searches[line.id] ?? "";
+    const visibleItems = searchCandidateItems(candidateItems, search);
     const isLocked = line.legacyResolutionStatus === "EXACT_LOCKED";
     const actual = actualQuantity(decision);
     const isShort = actual < Number(line.requestedQuantity);
@@ -64,17 +74,25 @@ export function OutboundDecisionEditor({ approval, options, draft, errors, onCha
         {line.note ? <span>备注：{line.note}</span> : null}
       </div>
       {!decision.zeroIssue ? <>
-        {isLocked ? <div className="outbound-locked-item"><span>标准物品（旧审批锁定）</span><strong>{selectedItem ? `${selectedItem.code} ${selectedItem.name} / ${selectedItem.unit}` : line.itemId}</strong></div> : <label>
+        {isLocked ? <div className="outbound-locked-item"><span>标准物品（旧审批锁定）</span><strong>{selectedItem ? `${selectedItem.code} ${selectedItem.name} / ${selectedItem.unit}` : line.itemId}</strong></div> : <>
+          <div className="outbound-item-search">
+            <label><span>搜索标准物品</span><input type="search" disabled={disabled} placeholder="输入名称、编码或规格" value={search} onChange={(event) => setSearches((current) => ({ ...current, [line.id]: event.target.value }))} /></label>
+            <button type="button" className="button button--secondary button--small" disabled={disabled || !search} onClick={() => setSearches((current) => ({ ...current, [line.id]: "" }))}>清空搜索</button>
+          </div>
+          <label>
           <span>标准物品</span>
           <select disabled={disabled} aria-invalid={Boolean(lineError)} value={decision.selectedItemId} onChange={(event) => changeItem(event.target.value)}>
             <option value="">选择标准物品</option>
             {decision.selectedItemId && !selectedItem ? <option value={decision.selectedItemId}>已失效：{decision.selectedItemId}</option> : null}
-            {candidateItems.map((item) => <option value={item.id} key={item.id}>{item.code} {item.name} / {item.unit} / 可用 {item.availableQuantity}</option>)}
+            {selectedItem && !visibleItems.some((item) => item.id === selectedItem.id) ? <option value={selectedItem.id}>{itemLabel(selectedItem)}（已选）</option> : null}
+            {visibleItems.map((item) => <option value={item.id} key={item.id}>{itemLabel(item)}</option>)}
           </select>
-        </label>}
+          </label>
+          {visibleItems.length === 0 ? <small className="outbound-item-search-status" role="status">{search.trim() ? "没有匹配的标准物品，请修改或清空搜索。" : "当前没有同单位且有库存的标准物品。"}</small> : null}
+        </>}
         {decision.allocations.map((allocation, index) => {
           const selectedBatches = options.batches.filter((batch) => batch.itemId === decision.selectedItemId);
-          const warehouses = [...new Set(selectedBatches.map((batch) => batch.warehouseId))];
+          const warehouses = new Map(selectedBatches.map((batch) => [batch.warehouseId, batch.warehouseName || "仓库名称未提供"]));
           const batches = selectedBatches.filter((batch) => !allocation.warehouseId || batch.warehouseId === allocation.warehouseId);
           const allocationError = errors[allocation.id];
           const updateAllocation = (patch: Partial<AllocationRow>) => updateDecision(line.id, (current) => ({
@@ -82,8 +100,8 @@ export function OutboundDecisionEditor({ approval, options, draft, errors, onCha
             allocations: current.allocations.map((candidate) => candidate.id === allocation.id ? { ...candidate, ...patch } : candidate),
           }));
           return <div className="outbound-decision-allocation" data-testid="outbound-allocation-row" key={allocation.id}>
-            <label><span>实际仓库</span><select disabled={disabled || !decision.selectedItemId} aria-invalid={Boolean(allocationError)} value={allocation.warehouseId} onChange={(event) => updateAllocation({ warehouseId: event.target.value, batchId: "" })}><option value="">选择仓库</option>{allocation.warehouseId && !warehouses.includes(allocation.warehouseId) ? <option value={allocation.warehouseId}>已失效：{allocation.warehouseId}</option> : null}{warehouses.map((warehouse) => <option value={warehouse} key={warehouse}>{warehouse}</option>)}</select></label>
-            <label><span>采购批次</span><select disabled={disabled || !decision.selectedItemId || !allocation.warehouseId} aria-invalid={Boolean(allocationError)} value={allocation.batchId} onChange={(event) => updateAllocation({ batchId: event.target.value })}><option value="">选择批次</option>{allocation.batchId && !batches.some((batch) => batch.batchId === allocation.batchId) ? <option value={allocation.batchId}>已失效：{allocation.batchId}</option> : null}{batches.map((batch) => <option value={batch.batchId} key={`${batch.warehouseId}:${batch.batchId}`}>{batch.batchId} / 可用 {batch.remainingQuantity} / 单价 {batch.unitCost}</option>)}</select></label>
+            <label><span>实际仓库</span><select disabled={disabled || !decision.selectedItemId} aria-invalid={Boolean(allocationError)} value={allocation.warehouseId} onChange={(event) => updateAllocation({ warehouseId: event.target.value, batchId: "" })}><option value="">选择仓库</option>{allocation.warehouseId && !warehouses.has(allocation.warehouseId) ? <option value={allocation.warehouseId}>已失效：{allocation.warehouseId}</option> : null}{[...warehouses].map(([id, name]) => <option value={id} key={id}>{name}</option>)}</select></label>
+            <label><span>采购批次</span><select disabled={disabled || !decision.selectedItemId || !allocation.warehouseId} aria-invalid={Boolean(allocationError)} value={allocation.batchId} onChange={(event) => updateAllocation({ batchId: event.target.value })}><option value="">选择批次</option>{allocation.batchId && !batches.some((batch) => batch.batchId === allocation.batchId) ? <option value={allocation.batchId}>已失效：{allocation.batchId}</option> : null}{batches.map((batch) => <option value={batch.batchId} key={`${batch.warehouseId}:${batch.batchId}`}>{batch.batchNo || "批次号未提供"} / 可用 {batch.remainingQuantity} / 单价 {batch.unitCost}</option>)}</select></label>
             <label><span>实际数量</span><input disabled={disabled} type="number" inputMode="numeric" min="1" step="1" aria-invalid={Boolean(allocationError)} value={allocation.quantity} onChange={(event) => updateAllocation({ quantity: event.target.value })} /></label>
             <button disabled={disabled} className="button button--secondary button--small" type="button" aria-label={`删除第 ${index + 1} 条分配`} onClick={() => updateDecision(line.id, (current) => ({ ...current, allocations: current.allocations.filter((candidate) => candidate.id !== allocation.id) }))}><Trash2 size={15} /></button>
             {allocationError ? <small className="field-error">{allocationError}</small> : null}

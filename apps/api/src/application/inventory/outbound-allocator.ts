@@ -26,6 +26,7 @@ export interface SelectableOutboundItem {
   id: string;
   code: string;
   name: string;
+  specification?: string;
   unit: string;
   isActive: boolean;
 }

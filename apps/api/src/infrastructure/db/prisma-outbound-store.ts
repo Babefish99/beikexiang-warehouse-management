@@ -155,11 +155,12 @@ export class PrismaOutboundStore implements OutboundStore {
       .filter((stock) => stock._sum.remainingQuantity?.gt(0))
       .map((stock) => stock.itemId);
     if (itemIds.length === 0) return [];
-    return this.prisma.item.findMany({
+    const items = await this.prisma.item.findMany({
       where: { id: { in: itemIds }, isActive: true },
-      select: { id: true, code: true, name: true, unit: true, isActive: true },
+      select: { id: true, code: true, name: true, specification: true, unit: true, isActive: true },
       orderBy: [{ code: "asc" }, { id: "asc" }],
     });
+    return items.map(({ specification, ...item }) => ({ ...item, ...(specification ? { specification } : {}) }));
   }
 
   async listBatches(itemIds: string[]) {
@@ -167,12 +168,17 @@ export class PrismaOutboundStore implements OutboundStore {
     if (selectedItemIds.length === 0) return [];
     const balances = await this.prisma.stockBalance.findMany({
       where: { itemId: { in: selectedItemIds }, remainingQuantity: { gt: "0" } },
-      include: { batch: { select: { id: true, itemId: true, unitCost: true } } },
+      include: {
+        warehouse: { select: { name: true } },
+        batch: { select: { id: true, batchNo: true, itemId: true, unitCost: true } },
+      },
       orderBy: [{ warehouseId: "asc" }, { batchId: "asc" }],
     });
     return balances.map((balance) => ({
       id: balance.batch.id,
       warehouseId: balance.warehouseId,
+      warehouseName: balance.warehouse.name,
+      batchNo: balance.batch.batchNo,
       itemId: balance.batch.itemId,
       remainingQuantity: balance.remainingQuantity.toString(),
       unitCost: balance.batch.unitCost.toString(),

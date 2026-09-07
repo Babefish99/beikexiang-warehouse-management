@@ -44,9 +44,16 @@ export interface OutboundOrderResult {
 export interface OutboundBatchOption {
   batchId: string;
   warehouseId: string;
+  warehouseName?: string;
+  batchNo?: string;
   itemId: string;
   remainingQuantity: string;
   unitCost: string;
+}
+
+export interface OutboundStockBatch extends AllocationBatch {
+  warehouseName?: string;
+  batchNo?: string;
 }
 
 export interface OutboundItemOption extends SelectableOutboundItem {
@@ -69,7 +76,7 @@ export interface OutboundStore {
   getApproval(approvalId: string): Promise<PendingApproval | undefined>;
   listPending(): Promise<PendingApproval[]>;
   listCandidateItems(): Promise<SelectableOutboundItem[]>;
-  listBatches(itemIds: string[]): Promise<AllocationBatch[]>;
+  listBatches(itemIds: string[]): Promise<OutboundStockBatch[]>;
   commitOutbound(approval: PendingApproval, validation: AllocationValidationResult, operatorId: string): Promise<OutboundOrderResult>;
   cancelApproval(approvalId: string, reason: string): Promise<void>;
 }
@@ -84,6 +91,7 @@ export class InMemoryOutboundStore implements OutboundStore {
   constructor(
     state: InventoryMemoryState = createInventoryMemoryState(),
     private readonly candidateItemLoader?: CandidateItemLoader,
+    private readonly warehouseLoader?: () => Promise<ReadonlyArray<{ id: string; name: string }>>,
   ) {
     this.state = state;
   }
@@ -115,7 +123,7 @@ export class InMemoryOutboundStore implements OutboundStore {
     this.seededItems.set(item.id, structuredClone(item));
   }
 
-  seedBatch(batch: AllocationBatch): void {
+  seedBatch(batch: AllocationBatch & { batchNo?: string }): void {
     const storedBalance: InventoryBalanceState = {
       warehouseId: batch.warehouseId,
       itemId: batch.itemId,
@@ -129,7 +137,7 @@ export class InMemoryOutboundStore implements OutboundStore {
         id: batch.id,
         warehouseId: batch.warehouseId,
         itemId: batch.itemId,
-        batchNo: batch.id,
+        batchNo: batch.batchNo ?? "",
         quantity: batch.remainingQuantity,
         remainingQuantity: batch.remainingQuantity,
         unitCost: batch.unitCost,
@@ -177,17 +185,24 @@ export class InMemoryOutboundStore implements OutboundStore {
     return [...items.values()];
   }
 
-  async listBatches(itemIds: string[]): Promise<AllocationBatch[]> {
+  async listBatches(itemIds: string[]): Promise<OutboundStockBatch[]> {
     const selectedIds = new Set(itemIds);
+    const warehouseNames = new Map((await this.warehouseLoader?.() ?? []).map((warehouse) => [warehouse.id, warehouse.name]));
     return [...this.state.balances.values()]
       .filter((batch) => selectedIds.has(batch.itemId))
-      .map((batch) => ({
-        id: batch.batchId,
-        warehouseId: batch.warehouseId,
-        itemId: batch.itemId,
-        remainingQuantity: batch.remainingQuantity,
-        unitCost: batch.unitCost,
-      }));
+      .map((batch) => {
+        const warehouseName = warehouseNames.get(batch.warehouseId);
+        const batchNo = this.state.batches.get(batch.batchId)?.batchNo;
+        return {
+          id: batch.batchId,
+          warehouseId: batch.warehouseId,
+          ...(warehouseName ? { warehouseName } : {}),
+          ...(batchNo ? { batchNo } : {}),
+          itemId: batch.itemId,
+          remainingQuantity: batch.remainingQuantity,
+          unitCost: batch.unitCost,
+        };
+      });
   }
 
   async commitOutbound(
@@ -382,6 +397,7 @@ export class OutboundService {
           id: item.id,
           code: item.code,
           name: item.name,
+          ...(item.specification ? { specification: item.specification } : {}),
           unit: item.unit,
           isActive: item.isActive,
           availableQuantity: availableByItem.get(item.id)!.toString(),

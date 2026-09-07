@@ -858,6 +858,7 @@ describe.skipIf(!databaseUrl)("Prisma outbound decisions after the intent migrat
 
   async function createBatch(options: {
     id: string;
+    batchNo?: string;
     itemId: string;
     originWarehouseId?: string;
     quantity: string;
@@ -870,7 +871,7 @@ describe.skipIf(!databaseUrl)("Prisma outbound decisions after the intent migrat
         id: options.id,
         warehouseId: options.originWarehouseId ?? options.balances[0]!.warehouseId,
         itemId: options.itemId,
-        batchNo: options.id,
+        batchNo: options.batchNo ?? options.id,
         quantity: options.quantity,
         remainingQuantity: options.quantity,
         unitCost,
@@ -996,6 +997,8 @@ describe.skipIf(!databaseUrl)("Prisma outbound decisions after the intent migrat
 
   it("returns every active same-unit stocked candidate and aggregates its warehouse balances", async () => {
     await Promise.all([
+      prisma.warehouse.update({ where: { id: "warehouse-1" }, data: { name: "总部仓库" } }),
+      prisma.warehouse.update({ where: { id: "warehouse-2" }, data: { name: "接收仓库" } }),
       createItem({ id: "task6-tea", code: "T6-TEA", name: "Tea supplies" }),
       createItem({ id: "task6-paper", code: "T6-PAPER", name: "Unrelated paper" }),
       createItem({ id: "task6-inactive", code: "T6-INACTIVE", name: "Inactive stock", isActive: false }),
@@ -1004,11 +1007,12 @@ describe.skipIf(!databaseUrl)("Prisma outbound decisions after the intent migrat
     ]);
     await createBatch({
       id: "task6-shared-candidate-batch",
+      batchNo: "20260907-001",
       itemId: "task6-tea",
       quantity: "5",
       balances: [{ warehouseId: "warehouse-1", quantity: "2" }, { warehouseId: "warehouse-2", quantity: "3" }],
     });
-    await createBatch({ id: "task6-paper-batch", itemId: "task6-paper", quantity: "4", balances: [{ warehouseId: "warehouse-2", quantity: "4" }] });
+    await createBatch({ id: "task6-paper-batch", batchNo: "20260907-002", itemId: "task6-paper", quantity: "4", balances: [{ warehouseId: "warehouse-2", quantity: "4" }] });
     await createBatch({ id: "task6-inactive-batch", itemId: "task6-inactive", quantity: "4", balances: [{ warehouseId: "warehouse-1", quantity: "4" }] });
     await createBatch({ id: "task6-case-batch", itemId: "task6-case", quantity: "4", balances: [{ warehouseId: "warehouse-1", quantity: "4" }] });
     await createBatch({ id: "task6-empty-batch", itemId: "task6-empty", quantity: "0", balances: [{ warehouseId: "warehouse-1", quantity: "0" }] });
@@ -1025,13 +1029,13 @@ describe.skipIf(!databaseUrl)("Prisma outbound decisions after the intent migrat
       ],
     }]);
     expect(options.batches).toEqual([
-      { batchId: "task6-shared-candidate-batch", warehouseId: "warehouse-1", itemId: "task6-tea", remainingQuantity: "2", unitCost: "12.5" },
-      { batchId: "task6-paper-batch", warehouseId: "warehouse-2", itemId: "task6-paper", remainingQuantity: "4", unitCost: "12.5" },
-      { batchId: "task6-shared-candidate-batch", warehouseId: "warehouse-2", itemId: "task6-tea", remainingQuantity: "3", unitCost: "12.5" },
+      { batchId: "task6-shared-candidate-batch", batchNo: "20260907-001", warehouseId: "warehouse-1", warehouseName: "总部仓库", itemId: "task6-tea", remainingQuantity: "2", unitCost: "12.5" },
+      { batchId: "task6-paper-batch", batchNo: "20260907-002", warehouseId: "warehouse-2", warehouseName: "接收仓库", itemId: "task6-paper", remainingQuantity: "4", unitCost: "12.5" },
+      { batchId: "task6-shared-candidate-batch", batchNo: "20260907-001", warehouseId: "warehouse-2", warehouseName: "接收仓库", itemId: "task6-tea", remainingQuantity: "3", unitCost: "12.5" },
     ]);
     await expect(store.listBatches(["task6-tea"])).resolves.toEqual([
-      { id: "task6-shared-candidate-batch", warehouseId: "warehouse-1", itemId: "task6-tea", remainingQuantity: "2", unitCost: "12.5" },
-      { id: "task6-shared-candidate-batch", warehouseId: "warehouse-2", itemId: "task6-tea", remainingQuantity: "3", unitCost: "12.5" },
+      { id: "task6-shared-candidate-batch", batchNo: "20260907-001", warehouseId: "warehouse-1", warehouseName: "总部仓库", itemId: "task6-tea", remainingQuantity: "2", unitCost: "12.5" },
+      { id: "task6-shared-candidate-batch", batchNo: "20260907-001", warehouseId: "warehouse-2", warehouseName: "接收仓库", itemId: "task6-tea", remainingQuantity: "3", unitCost: "12.5" },
     ]);
   });
 

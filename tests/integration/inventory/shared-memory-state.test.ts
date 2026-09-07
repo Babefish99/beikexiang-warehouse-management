@@ -251,7 +251,7 @@ describe("shared inventory memory state", () => {
           }],
         }],
         batches: [
-          { batchId, warehouseId: "warehouse-1", itemId: item.id, remainingQuantity: "8", unitCost: "20" },
+          { batchId, batchNo: "20260824-001", warehouseId: "warehouse-1", warehouseName: "待配置仓库一", itemId: item.id, remainingQuantity: "8", unitCost: "20" },
         ],
       });
     } finally {

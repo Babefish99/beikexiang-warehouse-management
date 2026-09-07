@@ -33,12 +33,12 @@ const initialOptions = {
     approvalLineId: "line-wine",
     items: [
       { id: "item-maotai", code: "BJ0002", name: "飞天茅台", unit: "瓶", isActive: true, availableQuantity: "3" },
-      { id: "item-wine", code: "BJ0003", name: "陈年白酒", unit: "瓶", isActive: true, availableQuantity: "6" },
+      { id: "item-wine", code: "BJ0003", name: "陈年白酒", specification: "52℃ 500ml", unit: "瓶", isActive: true, availableQuantity: "6" },
     ],
   }],
   batches: [
-    { batchId: "期初-260827", warehouseId: "一号仓", itemId: "item-maotai", remainingQuantity: "3", unitCost: "100" },
-    { batchId: "期初-260828", warehouseId: "二号仓", itemId: "item-wine", remainingQuantity: "6", unitCost: "80" },
+    { batchId: "batch-a", batchNo: "期初-260827", warehouseId: "warehouse-1", warehouseName: "一号仓", itemId: "item-maotai", remainingQuantity: "3", unitCost: "100" },
+    { batchId: "batch-b", batchNo: "期初-260828", warehouseId: "warehouse-2", warehouseName: "二号仓", itemId: "item-wine", remainingQuantity: "6", unitCost: "80" },
   ],
 };
 
@@ -83,7 +83,7 @@ test("desktop outbound resolves each immutable intent to a standard item and pos
   await expect(line).toContainText("审批数量：2 瓶");
   await expect(line).toContainText("集团客户晚宴");
 
-  const item = line.getByLabel("标准物品");
+  const item = line.getByRole("combobox", { name: "标准物品", exact: true });
   const warehouse = line.getByLabel("实际仓库");
   const batch = line.getByLabel("采购批次");
   await expect(item).toHaveValue("");
@@ -93,8 +93,10 @@ test("desktop outbound resolves each immutable intent to a standard item and pos
   await expect(batch).toBeDisabled();
 
   await item.selectOption("item-maotai");
-  await warehouse.selectOption("一号仓");
-  await batch.selectOption("期初-260827");
+  await expect(warehouse.locator('option[value="warehouse-1"]')).toHaveText("一号仓");
+  await warehouse.selectOption("warehouse-1");
+  await expect(batch.locator('option[value="batch-a"]')).toHaveText("期初-260827 / 可用 3 / 单价 100");
+  await batch.selectOption("batch-a");
   const quantity = line.getByLabel("实际数量");
   await expect(quantity).toHaveAttribute("min", "1");
   await expect(quantity).toHaveAttribute("step", "1");
@@ -107,13 +109,13 @@ test("desktop outbound resolves each immutable intent to a standard item and pos
   await item.selectOption("item-wine");
   await expect(line.getByTestId("outbound-allocation-row")).toHaveCount(0);
   await line.getByRole("button", { name: "本项不出库" }).click();
-  await expect(line.getByLabel("标准物品")).toHaveCount(0);
+  await expect(line.getByRole("combobox", { name: "标准物品", exact: true })).toHaveCount(0);
   await expect(line.getByTestId("outbound-allocation-row")).toHaveCount(0);
   await expect(line.getByLabel("少出 / 零出原因")).toHaveAttribute("required", "");
   await line.getByRole("button", { name: "恢复本项出库" }).click();
-  await line.getByLabel("标准物品").selectOption("item-maotai");
-  await line.getByLabel("实际仓库").selectOption("一号仓");
-  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("warehouse-1");
+  await line.getByLabel("采购批次").selectOption("batch-a");
   await line.getByLabel("实际数量").fill("1");
   await expect(line.getByLabel("少出 / 零出原因")).toBeVisible();
   await line.getByLabel("少出 / 零出原因").fill("库存不足");
@@ -133,7 +135,7 @@ test("desktop outbound resolves each immutable intent to a standard item and pos
     decisions: [{
       approvalLineId: "line-wine",
       selectedItemId: "item-maotai",
-      allocations: [{ warehouseId: "一号仓", batchId: "期初-260827", quantity: "1" }],
+      allocations: [{ warehouseId: "warehouse-1", batchId: "batch-a", quantity: "1" }],
       varianceReason: "库存不足",
     }],
   });
@@ -156,14 +158,14 @@ test("desktop outbound keeps the draft and blocks review when refreshed options 
   await loginAs(page, "/admin/outbound", "ADMIN");
   await page.getByRole("button", { name: "办理出库" }).click();
   const line = page.getByTestId("outbound-decision-line-line-wine");
-  await line.getByLabel("标准物品").selectOption("item-maotai");
-  await line.getByLabel("实际仓库").selectOption("一号仓");
-  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("warehouse-1");
+  await line.getByLabel("采购批次").selectOption("batch-a");
   await line.getByLabel("实际数量").fill("2");
   await page.getByRole("button", { name: "复核出库" }).click();
 
   await expect(page.getByRole("alert")).toContainText("所选标准物品已失效");
-  await expect(line.getByLabel("标准物品")).toHaveValue("item-maotai");
+  await expect(line.getByRole("combobox", { name: "标准物品", exact: true })).toHaveValue("item-maotai");
   await expect(line.getByLabel("实际数量")).toHaveValue("2");
   expect(confirmationRequests).toBe(0);
 });
@@ -185,16 +187,16 @@ test("desktop final submission reloads options and returns stale reconciled inpu
   await loginAs(page, "/admin/outbound", "ADMIN");
   await page.getByRole("button", { name: "办理出库" }).click();
   const line = page.getByTestId("outbound-decision-line-line-wine");
-  await line.getByLabel("标准物品").selectOption("item-maotai");
-  await line.getByLabel("实际仓库").selectOption("一号仓");
-  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("warehouse-1");
+  await line.getByLabel("采购批次").selectOption("batch-a");
   await line.getByLabel("实际数量").fill("2");
   await page.getByRole("button", { name: "复核出库" }).click();
   await page.getByRole("button", { name: "确认并提交" }).click();
 
   await expect(page.getByRole("alert")).toContainText("所选标准物品已失效");
   await expect(page.getByRole("button", { name: "复核出库" })).toBeVisible();
-  await expect(line.getByLabel("标准物品")).toHaveValue("item-maotai");
+  await expect(line.getByRole("combobox", { name: "标准物品", exact: true })).toHaveValue("item-maotai");
   await expect(line.getByLabel("实际数量")).toHaveValue("2");
   expect(optionReads).toBe(3);
   expect(confirmPosts).toBe(0);
@@ -218,9 +220,9 @@ test("desktop final options reload failure preserves the draft and does not post
   await loginAs(page, "/admin/outbound", "ADMIN");
   await page.getByRole("button", { name: "办理出库" }).click();
   const line = page.getByTestId("outbound-decision-line-line-wine");
-  await line.getByLabel("标准物品").selectOption("item-maotai");
-  await line.getByLabel("实际仓库").selectOption("一号仓");
-  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("warehouse-1");
+  await line.getByLabel("采购批次").selectOption("batch-a");
   await line.getByLabel("实际数量").fill("2");
   await page.getByRole("button", { name: "复核出库" }).click();
   await page.getByRole("button", { name: "确认并提交" }).click();
@@ -254,9 +256,9 @@ test("desktop final reload ignores double submit and does not post after unmount
   await loginAs(page, "/admin/outbound", "ADMIN");
   await page.getByRole("button", { name: "办理出库" }).click();
   const line = page.getByTestId("outbound-decision-line-line-wine");
-  await line.getByLabel("标准物品").selectOption("item-maotai");
-  await line.getByLabel("实际仓库").selectOption("一号仓");
-  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("warehouse-1");
+  await line.getByLabel("采购批次").selectOption("batch-a");
   await line.getByLabel("实际数量").fill("2");
   await page.getByRole("button", { name: "复核出库" }).click();
   await page.getByRole("button", { name: "确认并提交" }).evaluate((button) => {
@@ -301,9 +303,9 @@ test("desktop final reload does not post after its approval leaves a multi-row p
   const firstApprovalRow = page.getByRole("row").filter({ hasText: intentApproval.weComSpNo });
   await firstApprovalRow.getByRole("button", { name: "办理出库" }).click();
   const line = page.getByTestId("outbound-decision-line-line-wine");
-  await line.getByLabel("标准物品").selectOption("item-maotai");
-  await line.getByLabel("实际仓库").selectOption("一号仓");
-  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("warehouse-1");
+  await line.getByLabel("采购批次").selectOption("batch-a");
   await line.getByLabel("实际数量").fill("2");
   await page.getByRole("button", { name: "复核出库" }).click();
   await page.getByRole("button", { name: "确认并提交" }).click();
@@ -328,9 +330,9 @@ test("desktop outbound preserves the draft after a server rejection", async ({ p
   await loginAs(page, "/admin/outbound", "ADMIN");
   await page.getByRole("button", { name: "办理出库" }).click();
   const line = page.getByTestId("outbound-decision-line-line-wine");
-  await line.getByLabel("标准物品").selectOption("item-maotai");
-  await line.getByLabel("实际仓库").selectOption("一号仓");
-  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("warehouse-1");
+  await line.getByLabel("采购批次").selectOption("batch-a");
   await line.getByLabel("实际数量").fill("1");
   await line.getByLabel("少出 / 零出原因").fill("库存不足");
   await page.getByRole("button", { name: "复核出库" }).click();
@@ -338,7 +340,7 @@ test("desktop outbound preserves the draft after a server rejection", async ({ p
 
   await expect(page.getByRole("alert")).toHaveText("batch balance cannot become negative");
   await page.getByRole("button", { name: "返回修改" }).click();
-  await expect(line.getByLabel("标准物品")).toHaveValue("item-maotai");
+  await expect(line.getByRole("combobox", { name: "标准物品", exact: true })).toHaveValue("item-maotai");
   await expect(line.getByLabel("实际数量")).toHaveValue("1");
   await expect(line.getByLabel("少出 / 零出原因")).toHaveValue("库存不足");
 });
@@ -410,9 +412,9 @@ test("desktop keeps the latest review result when an older options request finis
   await twoOpenRequests;
   latestOpenResponse.release();
   const line = page.getByTestId("outbound-decision-line-line-wine");
-  await line.getByLabel("标准物品").selectOption("item-maotai");
-  await line.getByLabel("实际仓库").selectOption("一号仓");
-  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("warehouse-1");
+  await line.getByLabel("采购批次").selectOption("batch-a");
   await line.getByLabel("实际数量").fill("2");
   await page.getByRole("button", { name: "复核出库" }).click();
   const toggle = page.getByRole("button", { name: "收起" });
@@ -423,7 +425,7 @@ test("desktop keeps the latest review result when an older options request finis
   await page.waitForTimeout(50);
 
   expect(optionReads).toBe(3);
-  await expect(line.getByLabel("标准物品").locator('option[value="item-maotai"]')).toHaveText("已失效：item-maotai");
+  await expect(line.getByRole("combobox", { name: "标准物品", exact: true }).locator('option[value="item-maotai"]')).toHaveText("已失效：item-maotai");
   await expect(line.getByLabel("实际数量")).toHaveValue("2");
 });
 
@@ -444,9 +446,9 @@ test("desktop reopening a reviewed draft reconciles stale options and exits revi
   await loginAs(page, "/admin/outbound", "ADMIN");
   await page.getByRole("button", { name: "办理出库" }).click();
   const line = page.getByTestId("outbound-decision-line-line-wine");
-  await line.getByLabel("标准物品").selectOption("item-maotai");
-  await line.getByLabel("实际仓库").selectOption("一号仓");
-  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("warehouse-1");
+  await line.getByLabel("采购批次").selectOption("batch-a");
   await line.getByLabel("实际数量").fill("2");
   await page.getByRole("button", { name: "复核出库" }).click();
   await expect(page.getByRole("button", { name: "确认并提交" })).toBeVisible();
@@ -472,9 +474,9 @@ test("desktop reopening a valid reviewed draft still requires a new review", asy
   await loginAs(page, "/admin/outbound", "ADMIN");
   await page.getByRole("button", { name: "办理出库" }).click();
   const line = page.getByTestId("outbound-decision-line-line-wine");
-  await line.getByLabel("标准物品").selectOption("item-maotai");
-  await line.getByLabel("实际仓库").selectOption("一号仓");
-  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("warehouse-1");
+  await line.getByLabel("采购批次").selectOption("batch-a");
   await line.getByLabel("实际数量").fill("2");
   await page.getByRole("button", { name: "复核出库" }).click();
   await page.getByRole("button", { name: "收起" }).click();
@@ -502,9 +504,9 @@ test("desktop confirmation becomes terminal even when pending still returns the 
   await loginAs(page, "/admin/outbound", "ADMIN");
   await page.getByRole("button", { name: "办理出库" }).click();
   const line = page.getByTestId("outbound-decision-line-line-wine");
-  await line.getByLabel("标准物品").selectOption("item-maotai");
-  await line.getByLabel("实际仓库").selectOption("一号仓");
-  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("warehouse-1");
+  await line.getByLabel("采购批次").selectOption("batch-a");
   await line.getByLabel("实际数量").fill("2");
   await page.getByRole("button", { name: "复核出库" }).click();
   await page.getByRole("button", { name: "确认并提交" }).evaluate((button) => {
@@ -539,9 +541,9 @@ test("mobile locks the active editor while the final options reload is pending",
   await loginAs(page, "/admin/outbound", "ADMIN");
   await page.getByRole("button", { name: "办理出库" }).click();
   const line = page.getByTestId("outbound-decision-line-line-wine");
-  await line.getByLabel("标准物品").selectOption("item-maotai");
-  await line.getByLabel("实际仓库").selectOption("一号仓");
-  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("warehouse-1");
+  await line.getByLabel("采购批次").selectOption("batch-a");
   await line.getByLabel("实际数量").fill("2");
   await page.getByRole("button", { name: "复核出库" }).click();
   await expect(page.getByRole("heading", { name: "复核出库" })).toBeVisible();
@@ -571,11 +573,11 @@ test("mobile offers retry and return after the first options request fails", asy
   await loginAs(page, "/admin/outbound", "ADMIN");
   await page.getByRole("button", { name: "办理出库" }).click();
   await expect(page.getByRole("alert")).toHaveText("temporary failure");
-  await expect(page.getByLabel("标准物品")).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "标准物品", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "重试" })).toBeVisible();
   await expect(page.getByRole("button", { name: "返回待办" })).toBeVisible();
   await page.getByRole("button", { name: "重试" }).click();
-  await expect(page.getByLabel("标准物品")).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "标准物品", exact: true })).toBeVisible();
   expect(optionReads).toBe(2);
 });
 
@@ -602,9 +604,9 @@ test("mobile does not post an old decision after SPA navigation invalidates a pe
   await loginAs(page, "/admin/outbound", "ADMIN");
   await page.getByRole("button", { name: "办理出库" }).click();
   const line = page.getByTestId("outbound-decision-line-line-wine");
-  await line.getByLabel("标准物品").selectOption("item-maotai");
-  await line.getByLabel("实际仓库").selectOption("一号仓");
-  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("warehouse-1");
+  await line.getByLabel("采购批次").selectOption("batch-a");
   await line.getByLabel("实际数量").fill("2");
   await page.getByRole("button", { name: "复核出库" }).click();
   await expect(page.getByRole("heading", { name: "复核出库" })).toBeVisible();
@@ -629,9 +631,9 @@ test("a reason hidden by full issuance is omitted from the decisions payload", a
   await loginAs(page, "/admin/outbound", "ADMIN");
   await page.getByRole("button", { name: "办理出库" }).click();
   const line = page.getByTestId("outbound-decision-line-line-wine");
-  await line.getByLabel("标准物品").selectOption("item-maotai");
-  await line.getByLabel("实际仓库").selectOption("一号仓");
-  await line.getByLabel("采购批次").selectOption("期初-260827");
+  await line.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("warehouse-1");
+  await line.getByLabel("采购批次").selectOption("batch-a");
   await line.getByLabel("实际数量").fill("1");
   await line.getByLabel("少出 / 零出原因").fill("曾经少出");
   await line.getByLabel("实际数量").fill("2");
@@ -644,7 +646,7 @@ test("a reason hidden by full issuance is omitted from the decisions payload", a
     decisions: [{
       approvalLineId: "line-wine",
       selectedItemId: "item-maotai",
-      allocations: [{ warehouseId: "一号仓", batchId: "期初-260827", quantity: "2" }],
+      allocations: [{ warehouseId: "warehouse-1", batchId: "batch-a", quantity: "2" }],
     }],
   });
 });
@@ -688,20 +690,20 @@ test("desktop item change can be cancelled and the standard-item control precede
   await loginAs(page, "/admin/outbound", "ADMIN");
   await page.getByRole("button", { name: "办理出库" }).click();
   const line = page.getByTestId("outbound-decision-line-line-wine");
-  const item = line.getByLabel("标准物品");
+  const item = line.getByRole("combobox", { name: "标准物品", exact: true });
   const warehouse = line.getByLabel("实际仓库");
   const batch = line.getByLabel("采购批次");
   expect(await item.evaluate((node, other) => Boolean(node.compareDocumentPosition(other as Node) & Node.DOCUMENT_POSITION_FOLLOWING), await warehouse.elementHandle())).toBe(true);
   expect(await item.evaluate((node, other) => Boolean(node.compareDocumentPosition(other as Node) & Node.DOCUMENT_POSITION_FOLLOWING), await batch.elementHandle())).toBe(true);
   await item.selectOption("item-maotai");
-  await warehouse.selectOption("一号仓");
-  await batch.selectOption("期初-260827");
+  await warehouse.selectOption("warehouse-1");
+  await batch.selectOption("batch-a");
   await line.getByLabel("实际数量").fill("1");
   page.once("dialog", (dialog) => dialog.dismiss());
   await item.selectOption("item-wine");
   await expect(item).toHaveValue("item-maotai");
-  await expect(warehouse).toHaveValue("一号仓");
-  await expect(batch).toHaveValue("期初-260827");
+  await expect(warehouse).toHaveValue("warehouse-1");
+  await expect(batch).toHaveValue("batch-a");
 });
 
 test("exact legacy approvals show a locked standard item instead of an editable selector", async ({ page }) => {
@@ -722,5 +724,59 @@ test("exact legacy approvals show a locked standard item instead of an editable 
   const line = page.getByTestId("outbound-decision-line-line-locked");
   await expect(line).toContainText("标准物品（旧审批锁定）");
   await expect(line).toContainText("BJ0002 飞天茅台 / 瓶");
-  await expect(line.getByLabel("标准物品")).toHaveCount(0);
+  await expect(line.getByRole("combobox", { name: "标准物品", exact: true })).toHaveCount(0);
+  await expect(line.getByRole("searchbox", { name: "搜索标准物品" })).toHaveCount(0);
+});
+
+test("desktop standard-item search filters name code and specification without discarding the current allocation", async ({ page }) => {
+  await mockPending(page);
+  await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => route.fulfill({ json: initialOptions }));
+  await loginAs(page, "/admin/outbound", "ADMIN");
+  await page.getByRole("button", { name: "办理出库" }).click();
+  const line = page.getByTestId("outbound-decision-line-line-wine");
+  const search = line.getByRole("searchbox", { name: "搜索标准物品" });
+  const item = line.getByRole("combobox", { name: "标准物品", exact: true });
+  await expect(search).toHaveValue("");
+  await search.fill("陈年");
+  await expect(item.locator('option[value="item-maotai"]')).toHaveCount(0);
+  await expect(item.locator('option[value="item-wine"]')).toContainText("陈年白酒");
+  await search.fill("ｂｊ０００３ ５００ＭＬ");
+  await expect(item.locator('option[value="item-wine"]')).toContainText("52℃ 500ml");
+  await expect(item.locator('option[value="item-maotai"]')).toHaveCount(0);
+  await line.getByRole("button", { name: "清空搜索" }).click();
+  await item.selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("warehouse-1");
+  await line.getByLabel("采购批次").selectOption("batch-a");
+  await line.getByLabel("实际数量").fill("1");
+  await search.fill("不存在的标准物品");
+  await expect(line.getByRole("status")).toContainText("没有匹配的标准物品");
+  await expect(item).toHaveValue("item-maotai");
+  await expect(item.locator('option[value="item-wine"]')).toHaveCount(0);
+  await expect(line.getByLabel("实际仓库")).toHaveValue("warehouse-1");
+  await expect(line.getByLabel("采购批次")).toHaveValue("batch-a");
+  await expect(line.getByLabel("实际数量")).toHaveValue("1");
+  await line.getByRole("button", { name: "清空搜索" }).click();
+  await expect(search).toHaveValue("");
+  await expect(item.locator("option")).toHaveCount(3);
+  await expect(line).toContainText("审批数量：2 瓶");
+});
+
+test("desktop review uses the current warehouse label when the same batch exists in two warehouses", async ({ page }) => {
+  await mockPending(page);
+  const sharedOptions = {
+    ...initialOptions,
+    batches: [initialOptions.batches[0], { ...initialOptions.batches[0], warehouseId: "warehouse-2", warehouseName: "调拨接收仓" }],
+  };
+  await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => route.fulfill({ json: sharedOptions }));
+  await loginAs(page, "/admin/outbound", "ADMIN");
+  await page.getByRole("button", { name: "办理出库" }).click();
+  const line = page.getByTestId("outbound-decision-line-line-wine");
+  await line.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-maotai");
+  await line.getByLabel("实际仓库").selectOption("warehouse-2");
+  await line.getByLabel("采购批次").selectOption("batch-a");
+  await line.getByLabel("实际数量").fill("2");
+  await page.getByRole("button", { name: "复核出库" }).click();
+  const review = page.getByTestId("outbound-review-line-line-wine");
+  await expect(review).toContainText("分配：调拨接收仓 / 期初-260827 / 2");
+  await expect(review).not.toContainText("分配：一号仓");
 });
