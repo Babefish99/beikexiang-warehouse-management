@@ -15,9 +15,12 @@ interface LocalizedText {
   lang?: string;
 }
 
-type RawApprovalContent =
-  | Omit<WeComApprovalField, "title"> & { title?: string | LocalizedText[] }
-  | Omit<WeComApprovalTable, "title"> & { title?: string | LocalizedText[] };
+type RawApprovalField = Omit<WeComApprovalField, "title"> & { title?: string | LocalizedText[] };
+type RawApprovalTable = Omit<WeComApprovalTable, "title" | "value"> & {
+  title?: string | LocalizedText[];
+  value: { children: Array<{ list: RawApprovalField[] }> };
+};
+type RawApprovalContent = RawApprovalField | RawApprovalTable;
 
 interface RawApprovalInfo {
   sp_no: string;
@@ -36,8 +39,25 @@ function localizedTitle(title?: string | LocalizedText[]): string | undefined {
     || title?.find((entry) => entry.text?.trim())?.text?.trim();
 }
 
+function isRawTable(content: RawApprovalContent): content is RawApprovalTable {
+  return content.control === "Table";
+}
+
 function normalizeContent(content: RawApprovalContent): WeComApprovalField | WeComApprovalTable {
-  return { ...content, title: localizedTitle(content.title) } as WeComApprovalField | WeComApprovalTable;
+  if (isRawTable(content)) {
+    return {
+      ...content,
+      title: localizedTitle(content.title),
+      value: {
+        ...content.value,
+        children: content.value.children.map((row) => ({
+          ...row,
+          list: row.list.map((field) => ({ ...field, title: localizedTitle(field.title) })),
+        })),
+      },
+    };
+  }
+  return { ...content, title: localizedTitle(content.title) };
 }
 
 function normalizeDetail(info: RawApprovalInfo): WeComApprovalPayload {

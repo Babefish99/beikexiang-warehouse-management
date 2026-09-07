@@ -149,8 +149,15 @@ export class ApprovalParser {
 
   private parseIntentLine(row: WeComApprovalRow): ParsedApprovalLine {
     const requestedItemName = textValue(row.list.find((field) => field.title === "意向物品名称"));
-    const requestedQuantity = parsePositiveIntegerQuantity(numberOrTextValue(row.list.find((field) => field.title === "审批数量")));
-    const unit = normalizeApprovalUnit(textValue(row.list.find((field) => field.title === "单位")));
+    const combinedFields = row.list.filter((field) => field.title === "审批数量及单位");
+    const combinedField = combinedFields[0];
+    if (combinedFields.length > 1 || (combinedField && row.list.some((field) => field.title === "审批数量" || field.title === "单位"))) {
+      throw new Error("ambiguous approval quantity and unit fields");
+    }
+    const combined = combinedField ? textValue(combinedField).match(/^([0-9]+)\s*(\p{L}+)$/u) : null;
+    if (combinedField && !combined) throw new Error("approval quantity and unit must be a positive integer followed by a text unit");
+    const requestedQuantity = parsePositiveIntegerQuantity(combined?.[1] ?? numberOrTextValue(row.list.find((field) => field.title === "审批数量")));
+    const unit = normalizeApprovalUnit(combined?.[2] ?? textValue(row.list.find((field) => field.title === "单位")));
     const note = textValue(row.list.find((field) => field.title === "补充要求"));
     if (!requestedItemName) throw new Error("approval requested item name is required");
     if (!unit) throw new Error("approval unit is required");

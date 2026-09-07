@@ -40,6 +40,62 @@ const makeDetail = (status = 2): WeComApprovalPayload => ({
   ],
 });
 
+function makeCombinedDetail(quantityAndUnit = "2瓶"): WeComApprovalPayload {
+  return {
+    sp_no: "202609070001", template_id: "tpl-intent-v2", sp_status: 2,
+    apply_time: 1788760800, applyer: { userid: "test-applicant", name: "测试申请人" },
+    contents: [
+      { control: "Textarea", title: "用途", value: { text: "新流程验收，请勿实际出库" } },
+      { control: "Table", title: "物品明细", value: { children: [
+        { list: [
+          { control: "Text", title: "意向物品名称", value: { text: "白酒" } },
+          { control: "Text", title: "审批数量及单位", value: { text: quantityAndUnit } },
+          { control: "Text", title: "补充要求", value: { text: "" } },
+        ] },
+        { list: [
+          { control: "Text", title: "意向物品名称", value: { text: "茶叶" } },
+          { control: "Text", title: "审批数量及单位", value: { text: "1盒" } },
+          { control: "Text", title: "补充要求", value: { text: "保留原文备注" } },
+        ] },
+      ] } },
+    ],
+  };
+}
+
+describe("combined approval quantity and unit", () => {
+  it("preserves two intent lines while splitting combined quantities without binding items", () => {
+    const parser = new ApprovalParser(() => { throw new Error("intent must not bind an item"); }, "tpl-intent-v2");
+
+    expect(parser.parse(makeCombinedDetail()).lines).toEqual([
+      { requestedItemName: "白酒", requestedQuantity: "2", unit: "瓶", legacyResolutionStatus: "NOT_APPLICABLE" },
+      { requestedItemName: "茶叶", requestedQuantity: "1", unit: "盒", note: "保留原文备注", legacyResolutionStatus: "NOT_APPLICABLE" },
+    ]);
+  });
+
+  it.each([" 2 瓶 ", "2\u3000瓶"])("allows spacing between quantity and unit: %s", (value) => {
+    expect(new ApprovalParser(() => undefined, "tpl-intent-v2").parse(makeCombinedDetail(value)).lines[0])
+      .toMatchObject({ requestedQuantity: "2", unit: "瓶" });
+  });
+
+  it.each(["", "2", "瓶", "两瓶", "0瓶", "01瓶", "-2瓶", "+2瓶", "2.5瓶", "2.0瓶", "1e3瓶", "1/2瓶", "2瓶1盒", "2瓶/盒", "100000000000000瓶"])
+    ("rejects missing, fractional, or ambiguous combined input: %s", (value) => {
+      expect(() => new ApprovalParser(() => undefined, "tpl-intent-v2").parse(makeCombinedDetail(value))).toThrow();
+    });
+
+  it.each([
+    { control: "Text", title: "审批数量及单位", value: { text: "3瓶" } },
+    { control: "Number", title: "审批数量", value: { new_number: { value: "3" } } },
+    { control: "Text", title: "单位", value: { text: "盒" } },
+  ])("rejects conflicting $title instead of choosing one approved fact", (extraField) => {
+    const detail = makeCombinedDetail();
+    const table = detail.contents.find((field) => field.control === "Table");
+    if (!table || table.control !== "Table") throw new Error("fixture table missing");
+    table.value.children[0]!.list.push(extraField);
+
+    expect(() => new ApprovalParser(() => undefined, "tpl-intent-v2").parse(detail)).toThrow("ambiguous approval quantity and unit fields");
+  });
+});
+
 describe("enterprise WeChat approval parser", () => {
   it("preserves fixed-text legacy facts without guessing a standard item", () => {
     const detail: WeComApprovalPayload = {
