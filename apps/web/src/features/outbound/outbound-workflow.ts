@@ -13,8 +13,8 @@ export type ApprovalLine = {
   legacyResolutionStatus?: "NOT_APPLICABLE" | "EXACT_LOCKED" | "REAPPLY_REQUIRED";
 };
 export type PendingApproval = { id: string; weComSpNo: string; status: string; lines: readonly ApprovalLine[] };
-export type CandidateItem = { id: string; code: string; name: string; unit: string; isActive: boolean; availableQuantity: string };
-export type BatchOption = { batchId: string; warehouseId: string; itemId: string; remainingQuantity: string; unitCost: string };
+export type CandidateItem = { id: string; code: string; name: string; specification?: string; unit: string; isActive: boolean; availableQuantity: string };
+export type BatchOption = { batchId: string; batchNo?: string; warehouseId: string; warehouseName?: string; itemId: string; remainingQuantity: string; unitCost: string };
 export type OutboundOptions = { approvalId: string; lines: readonly { approvalLineId: string; items: readonly CandidateItem[] }[]; batches: readonly BatchOption[] };
 export type AllocationRow = { id: string; warehouseId: string; batchId: string; quantity: string };
 export type DecisionDraft = { approvalLineId: string; selectedItemId: string; zeroIssue: boolean; varianceReason: string; allocations: AllocationRow[] };
@@ -254,20 +254,12 @@ function normalizedSearchValue(value: string): string {
   return value.normalize("NFKC").trim().toLocaleLowerCase();
 }
 
-function candidateRank(item: CandidateItem, search: string): number {
-  const requested = normalizedSearchValue(search);
-  if (!requested) return 3;
-  const name = normalizedSearchValue(item.name);
-  const code = normalizedSearchValue(item.code);
-  if (name === requested) return 0;
-  if (name.includes(requested) || requested.includes(name)) return 1;
-  const terms = requested.split(/\s+/).filter(Boolean);
-  return code.includes(requested) || requested.includes(code) || terms.some((term) => code.includes(term) || name.includes(term)) ? 2 : 3;
-}
-
 export function searchCandidateItems<T extends CandidateItem>(items: readonly T[], search: string): T[] {
-  return [...items].sort((left, right) => candidateRank(left, search) - candidateRank(right, search)
-    || (left.code === right.code ? left.id.localeCompare(right.id) : left.code.localeCompare(right.code)));
+  const terms = normalizedSearchValue(search).split(/\s+/).filter(Boolean);
+  return items.filter((item) => {
+    const fields = [item.name, item.code, item.specification ?? ""].map(normalizedSearchValue);
+    return terms.every((term) => fields.some((field) => field.includes(term)));
+  });
 }
 
 export function normalizeDecisions(decisions: readonly DecisionDraft[], approval?: PendingApproval): NormalizedDecision[] {

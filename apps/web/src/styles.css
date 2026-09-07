@@ -290,6 +290,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .inbound-summary dd { margin: 0; font-weight: 650; text-align: right; }
 .outbound-desktop-editor { padding: 8px 0; }
 .outbound-decision-editor { display: grid; gap: 14px; }
+.outbound-item-search { grid-column: 1 / -1; display: flex; align-items: end; gap: 10px; }
+.outbound-item-search label { flex: 1; min-width: 0; }
+.outbound-item-search input { width: 100%; min-width: 0; padding: 9px 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--navy); font: inherit; font-size: 14px; }
+.outbound-item-search input:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
+.outbound-item-search-status { grid-column: 1 / -1; color: var(--muted); }
 .outbound-decision-line { min-width: 0; margin: 0; padding: 16px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
 .outbound-decision-line legend { padding: 0 6px; color: var(--navy); font-size: 14px; font-weight: 750; }
 .outbound-intent { grid-column: 1 / -1; padding: 12px 14px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 16px; border-radius: 8px; background: #f8fafc; }
@@ -362,6 +367,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .outbound-panel { padding: 14px; overflow: visible; }
   .outbound-flow .button, .outbound-flow input, .outbound-flow select, .outbound-flow textarea { min-height: 44px; }
   .outbound-flow input, .outbound-flow select, .outbound-flow textarea { width: 100%; min-width: 0; box-sizing: border-box; }
+  .outbound-item-search input { font-size: 16px; }
   .outbound-flow textarea { min-height: 88px; }
   .outbound-allocation-row { grid-template-columns: minmax(0, 1fr); }
   .outbound-decision-line { grid-template-columns: minmax(0, 1fr); }

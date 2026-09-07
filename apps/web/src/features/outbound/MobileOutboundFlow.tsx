@@ -390,7 +390,10 @@ function MobileReview({ approval, draft, options }: { approval: PendingApproval;
     return <article className="outbound-mobile-review__line" data-testid={`outbound-review-line-${line.approvalLineId}`} key={line.approvalLineId}>
       <strong>申请：{line.requestedItemName} {line.requestedQuantity} {line.unit}</strong>
       <span>标准物品：{decision.zeroIssue ? "本项不出库" : `${item?.code ?? decision.selectedItemId} ${item?.name ?? ""}`}</span>
-      {decision.allocations.map((allocation) => <span key={allocation.id}>分配：{allocation.warehouseId} / {allocation.batchId} / {allocation.quantity} {line.unit}</span>)}
+      {decision.allocations.map((allocation) => {
+        const batch = options.batches.find((candidate) => candidate.warehouseId === allocation.warehouseId && candidate.batchId === allocation.batchId);
+        return <span key={allocation.id}>分配：{batch?.warehouseName || "仓库名称未提供"} / {batch?.batchNo || "批次号未提供"} / {allocation.quantity} {line.unit}</span>;
+      })}
       <span>实际 {line.actualQuantity} / 审批 {line.requestedQuantity} {line.unit}</span>
       {line.difference !== "0" ? <span>差额 {line.difference}；原因：{decision.varianceReason}</span> : null}
     </article>;

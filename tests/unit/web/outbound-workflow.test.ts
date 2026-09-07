@@ -139,15 +139,19 @@ describe("outbound decision workflow", () => {
     expect(reconcileOutboundOptions(current, options).staleAllocationIds).toEqual(["first", "second"]);
   });
 
-  it("uses the server candidate ranking semantics for local candidate search", () => {
+  it("filters the supplied candidates by normalized name, code and specification while preserving their order", () => {
     const candidates = [
       { id: "loose", code: "W-3", name: "茅台酒", unit: "瓶", isActive: true, availableQuantity: "1" },
       { id: "code", code: "FEITIAN-9", name: "白酒", unit: "瓶", isActive: true, availableQuantity: "1" },
       { id: "exact", code: "W-1", name: "飞天茅台", unit: "瓶", isActive: true, availableQuantity: "1" },
-      { id: "other", code: "Z-1", name: "红酒", unit: "瓶", isActive: true, availableQuantity: "1" },
+      { id: "other", code: "BJ0008", name: "五粮液", specification: "52℃ 500ml", unit: "瓶", isActive: true, availableQuantity: "1" },
     ] as const;
-    expect(searchCandidateItems(candidates, " 飞天茅台 ").map((item) => item.id)).toEqual(["exact", "code", "loose", "other"]);
-    expect(searchCandidateItems(candidates, "").map((item) => item.id)).toEqual(["code", "exact", "loose", "other"]);
+    expect(searchCandidateItems(candidates, " 飞天茅台 ").map((item) => item.id)).toEqual(["exact"]);
+    expect(searchCandidateItems(candidates, "茅台").map((item) => item.id)).toEqual(["loose", "exact"]);
+    expect(searchCandidateItems(candidates, "ｂｊ０００８ ５００ＭＬ").map((item) => item.id)).toEqual(["other"]);
+    expect(searchCandidateItems(candidates, "五粮 52℃").map((item) => item.id)).toEqual(["other"]);
+    expect(searchCandidateItems(candidates, "不存在")).toEqual([]);
+    expect(searchCandidateItems(candidates, "   ").map((item) => item.id)).toEqual(["loose", "code", "exact", "other"]);
   });
 
   it("rounds each allocation amount before summing and retains immutable approval display data", () => {

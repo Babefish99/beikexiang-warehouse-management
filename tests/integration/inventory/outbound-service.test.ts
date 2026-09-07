@@ -88,6 +88,25 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("outbound service", () => {
+  it("returns business labels for the current stock warehouse and the original procurement batch", async () => {
+    const store = new InMemoryOutboundStore(undefined, undefined, async () => [
+      { id: "warehouse-1", name: "总部仓库" },
+      { id: "warehouse-2", name: "接收仓库" },
+    ]);
+    seedIntentApproval(store);
+    store.seedItem({ id: "item-wine", code: "BJ0008", name: "五粮液", specification: "52℃ 500ml", unit: "瓶", isActive: true });
+    store.seedBatch({ id: "batch-uuid", batchNo: "20260907-001", warehouseId: "warehouse-1", itemId: "item-wine", remainingQuantity: "1", unitCost: "650" });
+    store.seedBatch({ id: "batch-uuid", batchNo: "20260907-001", warehouseId: "warehouse-2", itemId: "item-wine", remainingQuantity: "2", unitCost: "650" });
+
+    const options = await new OutboundService(store).listOptions("intent-approval");
+
+    expect(options.lines[0]?.items[0]).toMatchObject({ specification: "52℃ 500ml", availableQuantity: "3" });
+    expect(options.batches).toEqual([
+      { batchId: "batch-uuid", batchNo: "20260907-001", warehouseId: "warehouse-1", warehouseName: "总部仓库", itemId: "item-wine", remainingQuantity: "1", unitCost: "650" },
+      { batchId: "batch-uuid", batchNo: "20260907-001", warehouseId: "warehouse-2", warehouseName: "接收仓库", itemId: "item-wine", remainingQuantity: "2", unitCost: "650" },
+    ]);
+  });
+
   it("lists only positive-stock candidates for an intent line and keeps its source facts immutable", async () => {
     const store = new InMemoryOutboundStore();
     seedIntentApproval(store);
