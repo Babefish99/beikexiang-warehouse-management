@@ -50,15 +50,20 @@ test.describe("desktop route preservation above the mobile breakpoint", () => {
             contentType: "application/json",
             body: routeCase.path === "/admin/transfers"
               ? '{"balances":[]}'
-              : routeCase.path === "/admin/opening-stock"
-                ? '{"availability":"AVAILABLE"}'
-                : "[]",
+              : routeCase.path === "/admin/returns"
+                ? '{"allocations":[]}'
+                : routeCase.path === "/admin/opening-stock"
+                  ? '{"availability":"AVAILABLE"}'
+                  : "[]",
           });
         });
       }
 
       await loginAs(page, routeCase.path, "ADMIN");
 
+      if (routeCase.path === "/admin/returns") {
+        await expect(page.locator("form .notice strong")).toHaveText("请选择原出库分配");
+      }
       await expect(page.getByRole("heading", { name: routeCase.title })).toBeVisible();
       await expect(page.getByRole("heading", { name: "请在电脑端处理" })).toHaveCount(0);
     });
