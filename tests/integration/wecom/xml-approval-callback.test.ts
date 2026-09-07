@@ -127,6 +127,12 @@ describe("real-format encrypted XML approval callback", () => {
   it.each([
     `<xml><SpNo>${spNo}</SpNo><SpNo>202609070002</SpNo></xml>`,
     `<xml><SpNo>${spNo}</SpNo><SpNo></xml>`,
+    `<xml><SpNo>${spNo}</SpNo><SpNo/></xml>`,
+    `<xml><SpNo>${spNo}</SpNo><SpNo >duplicate</SpNo ></xml>`,
+    `<xml><!-- <SpNo>${spNo}</SpNo> --></xml>`,
+    `<xml><![CDATA[<SpNo>${spNo}</SpNo>]]></xml>`,
+    `<xml><SpNo>${spNo}</SpNo>`,
+    `<xml><ApprovalInfo><SpNo>${spNo}</SpNo></xml>`,
     `<xml><SpNo><![CDATA[not-an-approval]]></SpNo></xml>`,
     '<!DOCTYPE xml [<!ENTITY sp SYSTEM "file:///etc/passwd">]><xml><SpNo>&sp;</SpNo></xml>',
   ])("rejects ambiguous or unsafe decrypted approval numbers: %s", async (message) => {
@@ -136,10 +142,19 @@ describe("real-format encrypted XML approval callback", () => {
     expect(store.attempts()).toEqual([]);
   });
 
-  it("rejects duplicate encrypted fields rather than choosing one", async () => {
+  it.each(["<Encrypt>duplicate</Encrypt>", "<Encrypt/>", "<Encrypt >duplicate</Encrypt >"])("rejects duplicate encrypted fields rather than choosing one: %s", async (duplicate) => {
     const { app, store } = harness();
     const request = callbackRequest(`<xml><SpNo>${spNo}</SpNo></xml>`);
-    request.payload = request.payload.replace("</xml>", "<Encrypt>duplicate</Encrypt></xml>");
+    request.payload = request.payload.replace("</xml>", `${duplicate}</xml>`);
+
+    expect((await app.inject(request)).statusCode).toBe(400);
+    expect(store.attempts()).toEqual([]);
+  });
+
+  it("does not extract encryption from XML comments", async () => {
+    const { app, store } = harness();
+    const request = callbackRequest(`<xml><SpNo>${spNo}</SpNo></xml>`);
+    request.payload = `<xml><!-- ${request.payload} --></xml>`;
 
     expect((await app.inject(request)).statusCode).toBe(400);
     expect(store.attempts()).toEqual([]);

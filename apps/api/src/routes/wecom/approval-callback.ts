@@ -25,21 +25,37 @@ function bodyText(body: unknown): string {
 }
 
 function xmlScalar(xml: string, field: "Encrypt" | "SpNo"): string | undefined {
-  // Only read these scalar protocol fields; never resolve XML entities or DTDs.
-  if (/<!DOCTYPE|<!ENTITY/i.test(xml)) return undefined;
-  const opening = `<${field}>`;
-  const closing = `</${field}>`;
-  const start = xml.indexOf(opening);
-  const end = xml.indexOf(closing);
-  if (start < 0 || end < start + opening.length
-    || xml.indexOf(opening, start + opening.length) !== -1
-    || xml.indexOf(closing, end + closing.length) !== -1) return undefined;
-  const value = xml.slice(start + opening.length, end).trim();
-  if (value.startsWith("<![CDATA[") && value.endsWith("]]>")) {
-    const content = value.slice(9, -3);
-    return content.includes("]]>") ? undefined : content.trim();
+  // Read only the attribute-free WeCom protocol subset, not arbitrary XML.
+  // A bounded stack validates structure; declarations, comments and entities fail closed.
+  const stack: string[] = [];
+  let cursor = 0;
+  let roots = 0;
+  let fields = 0;
+  let value = "";
+  const tokens = /<!\[CDATA\[[\s\S]*?\]\]>|<\/?[A-Za-z_][\w:.-]*\s*\/?>|[^<]+/g;
+  for (const token of xml.matchAll(tokens)) {
+    if (token.index !== cursor) return undefined;
+    const text = token[0];
+    cursor += text.length;
+    if (text.startsWith("<![CDATA[") || !text.startsWith("<")) {
+      const cdata = text.startsWith("<![CDATA[");
+      const content = cdata ? text.slice(9, -3) : text;
+      if ((!stack.length && (cdata || content.trim())) || (!cdata && /&|\]\]>/.test(content))) return undefined;
+      if (stack.at(-1) === field) value += content;
+      continue;
+    }
+    const closing = text.startsWith("</");
+    const name = text.slice(closing ? 2 : 1).replace(/\s*\/?>$/, "");
+    if (closing) {
+      if (text.endsWith("/>") || stack.pop() !== name) return undefined;
+    } else {
+      if (stack.includes(field) || stack.length >= 64) return undefined;
+      if (!stack.length && (++roots !== 1 || name !== "xml")) return undefined;
+      if (name === field && ++fields !== 1) return undefined;
+      if (!text.endsWith("/>")) stack.push(name);
+    }
   }
-  return /[<&]/.test(value) ? undefined : value;
+  return cursor === xml.length && roots === 1 && stack.length === 0 && fields === 1 ? value.trim() : undefined;
 }
 
 function encryptedBody(body: unknown): string | undefined {
