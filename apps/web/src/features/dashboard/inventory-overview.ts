@@ -4,10 +4,10 @@ export type DashboardInventoryStatus = "all" | "normal" | "low" | "out";
 export type DashboardInventoryItem = {
   id: string;
   name: string;
-  specification: string;
+  specification?: string;
   unit: string;
   categoryId: string;
-  minimumStock: string | null;
+  minimumStock?: string | null;
   stockQuantity: string;
   isActive: boolean;
 };
@@ -56,9 +56,8 @@ export function filterDashboardInventoryItems(
     .filter((item) => filter.status === "all" || getDashboardInventoryStatus(item) === filter.status)
     .filter((item) => !query || `${item.name} ${item.specification}`.toLocaleLowerCase("zh-CN").includes(query))
     .sort((left, right) => {
-      const statusPriority = { out: 0, low: 1, normal: 2 } as const;
-      const statusDifference = statusPriority[getDashboardInventoryStatus(left)] - statusPriority[getDashboardInventoryStatus(right)];
-      return statusDifference || left.name.localeCompare(right.name, "zh-CN");
+      const quantityDifference = Number(right.stockQuantity) - Number(left.stockQuantity);
+      return quantityDifference || left.name.localeCompare(right.name, "zh-CN");
     });
 }
 

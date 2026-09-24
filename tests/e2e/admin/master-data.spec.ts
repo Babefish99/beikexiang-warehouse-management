@@ -24,7 +24,7 @@ test.describe("master data administration", () => {
 
   test("uses consistent item action labels and reactivates an inactive item", async ({ page }) => {
     let items = [
-      { id: "item-1", code: "TEA-0001", name: "Tea leaves", specification: "Iron Goddess", unit: "box", categoryId: "cat-tea", stockQuantity: "4.5", isActive: false },
+      { id: "item-1", code: "TEA-0001", name: "Tea leaves", specification: "Iron Goddess", unit: "box", categoryId: "cat-tea", isActive: false },
     ];
 
     await page.route(apiUrl("/admin/items?includeInactive=true"), async (route) => {
@@ -33,6 +33,13 @@ test.describe("master data administration", () => {
     await page.route(apiUrl("/admin/items/item-1/activate"), async (route) => {
       items = items.map((item) => ({ ...item, isActive: true }));
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(items[0]) });
+    });
+    await page.route(apiUrl("/admin/reports/inventory-search?query=TEA-0001&warehouseId=all"), async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{ itemId: "item-1", code: "TEA-0001", totalQuantity: "4.5" }]),
+      });
     });
 
     await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Fitems"));

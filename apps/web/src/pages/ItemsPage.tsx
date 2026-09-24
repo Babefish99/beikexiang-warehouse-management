@@ -1,20 +1,9 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw, Search } from "lucide-react";
 import { PageHeader } from "../components/PageHeader";
+import { loadItemsWithStock, type StockedItemRow } from "../features/inventory/item-stock-loader";
 
-type ItemRow = {
-  id: string;
-  code: string;
-  name: string;
-  specification?: string;
-  aliases?: string[];
-  unit: string;
-  categoryId: string;
-  weComOptionKey?: string;
-  minimumStock?: string;
-  stockQuantity: string;
-  isActive: boolean;
-};
+type ItemRow = StockedItemRow;
 
 type ItemFormState = {
   code: string;
@@ -102,12 +91,9 @@ export function ItemsPage({ warehouseId }: { warehouseId: string }) {
     const requestVersion = itemsRequestVersion.current;
     setLoading(true);
     try {
-      const query = new URLSearchParams({ includeInactive: "true" });
-      if (warehouseId !== "all") query.set("warehouseId", warehouseId);
-      const response = await fetch(`${apiBaseUrl}/admin/items?${query.toString()}`, { credentials: "include" });
-      if (!response.ok) throw new Error(await readError(response));
+      const loadedItems = await loadItemsWithStock({ apiBaseUrl, includeInactive: true, warehouseId });
       if (itemsRequestVersion.current !== requestVersion) return;
-      setItems(await response.json() as ItemRow[]);
+      setItems(loadedItems);
       setError(null);
     } catch (loadError) {
       if (itemsRequestVersion.current !== requestVersion) return;

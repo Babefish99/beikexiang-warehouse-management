@@ -34,6 +34,22 @@ describe("dashboard inventory overview", () => {
     expect(filterDashboardInventoryItems(items, { category: "all", status: "all", query: "357g" }).map((item) => item.id)).toEqual(["tea"]);
   });
 
+  it("sorts the full list and category results by current stock descending", () => {
+    expect(filterDashboardInventoryItems(items, { category: "all", status: "all", query: "" }).map((item) => item.id)).toEqual([
+      "baijiu",
+      "noodles",
+      "other",
+      "tea",
+    ]);
+    expect(filterDashboardInventoryItems([
+      ...items,
+      { ...items[0], id: "baijiu-low", name: "低库存酒", stockQuantity: "3" },
+    ], { category: "alcohol", status: "all", query: "" }).map((item) => item.id)).toEqual([
+      "baijiu",
+      "baijiu-low",
+    ]);
+  });
+
   it("summarises monthly inbound and outbound quantities by item", () => {
     expect(summariseDashboardMovements(
       [{ itemId: "tea", quantity: "12" }, { itemId: "tea", quantity: "3" }],

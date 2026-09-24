@@ -17,12 +17,12 @@ import { ReportsPage } from "./pages/ReportsPage";
 import { InventoryQueryPage } from "./pages/InventoryQueryPage";
 import { DashboardPage, type DashboardCard } from "./pages/DashboardPage";
 import { summariseDashboardMovements, type DashboardInventoryItem, type DashboardMovements } from "./features/dashboard/inventory-overview";
+import { loadItemsWithStock } from "./features/inventory/item-stock-loader";
 import { DesktopOnlyCapabilityNotice, getDesktopOnlyCapability } from "./features/mobile/desktop-only-capabilities";
 import { useMobileViewport } from "./features/mobile/use-mobile-viewport";
 
 type WebUser = { id: string; weComUserId: string; name: string; role: "APPLICANT" | "ADMIN" | "FINANCE" };
 type AuthMetadata = { authorizeUrl: string; localAuthUrl?: string };
-type ItemRow = DashboardInventoryItem;
 type PendingApproval = { id: string };
 type TransactionRow = { itemId: string; quantity: string; amount: string };
 
@@ -132,8 +132,8 @@ export default function App() {
         const allOutboundRequest = selectedWarehouseId === "all"
           ? Promise.resolve<Response | null>(null)
           : fetch(`${apiBaseUrl}/admin/reports/transactions?period=${currentPeriod}&type=outbound&warehouseId=all`, { credentials: "include" });
-        const [itemsResponse, pendingResponse, inboundResponse, outboundResponse, allInboundResponse, allOutboundResponse, notifications] = await Promise.all([
-          fetch(`${apiBaseUrl}/admin/items?includeInactive=true`, { credentials: "include" }),
+        const [items, pendingResponse, inboundResponse, outboundResponse, allInboundResponse, allOutboundResponse, notifications] = await Promise.all([
+          loadItemsWithStock({ apiBaseUrl, includeInactive: true, warehouseId: "all" }),
           fetch(`${apiBaseUrl}/admin/outbound/pending`, { credentials: "include" }),
           fetch(`${apiBaseUrl}/admin/reports/transactions?period=${currentPeriod}&type=inbound&warehouseId=${encodedWarehouseId}`, { credentials: "include" }),
           fetch(`${apiBaseUrl}/admin/reports/transactions?period=${currentPeriod}&type=outbound&warehouseId=${encodedWarehouseId}`, { credentials: "include" }),
@@ -141,8 +141,7 @@ export default function App() {
           allOutboundRequest,
           loadInventoryNotifications(notificationIdentityKey(user.id, "ADMIN")),
         ]);
-        if (!itemsResponse.ok || !pendingResponse.ok || !inboundResponse.ok || !outboundResponse.ok || (allInboundResponse && !allInboundResponse.ok) || (allOutboundResponse && !allOutboundResponse.ok)) throw new Error("dashboard query failed");
-        const items = await itemsResponse.json() as ItemRow[];
+        if (!pendingResponse.ok || !inboundResponse.ok || !outboundResponse.ok || (allInboundResponse && !allInboundResponse.ok) || (allOutboundResponse && !allOutboundResponse.ok)) throw new Error("dashboard query failed");
         const pending = await pendingResponse.json() as PendingApproval[];
         const inboundRows = await inboundResponse.json() as TransactionRow[];
         const outboundRows = await outboundResponse.json() as TransactionRow[];
