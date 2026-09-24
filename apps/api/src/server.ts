@@ -346,7 +346,7 @@ export function buildServer(options: BuildServerOptions = {}) {
   registerApprovalCallbackRoute(app, { verifier: signatureVerifier, syncService: approvalSyncService });
   registerApprovalResyncRoute(app, { syncService: approvalSyncService });
   registerApprovalSyncFailureRoutes(app, { queryService: approvalSyncQueryService });
-  registerItemRoutes(app, { itemService });
+  registerItemRoutes(app, { itemService, listBalances: () => readSource.listBalances() });
   registerWarehouseRoutes(app, { warehouseService });
   registerInboundRoutes(app, { inboundService });
   registerOpeningStockRoutes(app);

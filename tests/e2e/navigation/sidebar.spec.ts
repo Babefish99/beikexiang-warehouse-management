@@ -99,7 +99,7 @@ test("980px compact sidebar exposes accessible navigation controls and reaches t
 
 test("sidebar navigation opens the corresponding admin pages", async ({ page }) => {
   await loginAs(page, "/", "ADMIN");
-  await expect(page.getByRole("heading", { name: "库存总览" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "库存总览", exact: true })).toBeVisible();
 
   const destinations = [
     { label: "库存台账", path: "/admin/items", heading: "标准物品库" },
@@ -109,7 +109,7 @@ test("sidebar navigation opens the corresponding admin pages", async ({ page }) 
   ];
 
   for (const destination of destinations) {
-    await page.getByRole("link", { name: destination.label }).click();
+    await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: destination.label, exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`${destination.path}$`));
     await expect(page.getByRole("heading", { name: destination.heading })).toBeVisible();
   }
@@ -332,32 +332,32 @@ test("compact desktop keeps the topbar and dashboard readable without horizontal
 
   const narrow = await page.evaluate(() => {
     const metricStrip = document.querySelector<HTMLElement>(".metric-strip");
-    const dashboard = document.querySelector<HTMLElement>(".dashboard-grid");
+    const dashboard = document.querySelector<HTMLElement>(".dashboard-inventory");
     const topbar = document.querySelector<HTMLElement>(".topbar");
     if (!metricStrip || !dashboard || !topbar) throw new Error("dashboard layout is missing");
     return {
       overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
       topbarHeight: Math.round(topbar.getBoundingClientRect().height),
       metricColumns: getComputedStyle(metricStrip).gridTemplateColumns.split(" ").length,
-      dashboardColumns: getComputedStyle(dashboard).gridTemplateColumns.split(" ").length,
+      dashboardVisible: dashboard.getBoundingClientRect().height > 0,
     };
   });
 
-  expect(narrow).toEqual({ overflow: false, topbarHeight: 74, metricColumns: 2, dashboardColumns: 1 });
+  expect(narrow).toEqual({ overflow: false, topbarHeight: 74, metricColumns: 2, dashboardVisible: true });
 
   await page.setViewportSize({ width: 1180, height: 900 });
   const wide = await page.evaluate(() => {
     const metricStrip = document.querySelector<HTMLElement>(".metric-strip");
-    const dashboard = document.querySelector<HTMLElement>(".dashboard-grid");
+    const dashboard = document.querySelector<HTMLElement>(".dashboard-inventory");
     if (!metricStrip || !dashboard) throw new Error("dashboard layout is missing");
     return {
       overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
       metricColumns: getComputedStyle(metricStrip).gridTemplateColumns.split(" ").length,
-      dashboardColumns: getComputedStyle(dashboard).gridTemplateColumns.split(" ").length,
+      dashboardVisible: dashboard.getBoundingClientRect().height > 0,
     };
   });
 
-  expect(wide).toEqual({ overflow: false, metricColumns: 4, dashboardColumns: 1 });
+  expect(wide).toEqual({ overflow: false, metricColumns: 4, dashboardVisible: true });
 });
 
 test("desktop and mobile navigation remain on their existing boundaries", async ({ page }) => {

@@ -111,7 +111,7 @@ test("global workspace search opens the inventory query page from a search resul
   });
 
   await loginAs(page, "/", "ADMIN");
-  await expect(page.getByRole("heading", { name: "库存总览" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "库存总览", exact: true })).toBeVisible();
 
   await page.getByLabel("全局搜索").fill("Tea");
   const result = page.getByRole("button", { name: /TEA-001/ });
@@ -191,7 +191,7 @@ test("changing the selected warehouse clears stale search results and shows the 
   });
 
   await loginAs(page, "/", "ADMIN");
-  await expect(page.getByRole("heading", { name: "库存总览" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "库存总览", exact: true })).toBeVisible();
 
   await page.getByLabel("全局搜索").fill("Tea");
   await expect(page.getByRole("button", { name: /OLD-001/ })).toBeVisible();
@@ -301,7 +301,7 @@ test("notification center shows the live task count without local read state", a
   });
 
   await loginAs(page, "/", "ADMIN");
-  await expect(page.getByRole("heading", { name: "库存总览" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "库存总览", exact: true })).toBeVisible();
   await expect(page.locator(".sidebar__footer strong")).toHaveCSS("font-size", "14px");
   await expect(page.locator(".sidebar__footer small")).toHaveCSS("font-size", "12px");
   await expect(page.getByText("Inventory Center", { exact: true })).toHaveCount(0);

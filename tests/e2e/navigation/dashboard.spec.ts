@@ -1,7 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { apiUrl, apiUrlPattern, loginAs, webBaseUrl } from "../mobile/mobile-test-helpers";
 
-test("dashboard quick actions open the corresponding operation pages", async ({ page }) => {
+test("dashboard shows a unified inventory overview with category filters", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
   await page.clock.setFixedTime(new Date("2026-08-15T12:00:00.000Z"));
 
   const dashboardItemsWarehouseIds: Array<string | null> = [];
@@ -30,12 +31,49 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
         {
           id: "item-1",
           code: "TEA-001",
-          name: "Tea Leaf",
-          specification: "500g",
-          unit: "bag",
-          categoryId: "cat-tea",
+          name: "普洱茶饼",
+          specification: "357g/饼",
+          unit: "饼",
+          categoryId: "category-cy",
           weComOptionKey: "tea_leaf",
           minimumStock: "5",
+          stockQuantity: "0",
+          isActive: true,
+        },
+        {
+          id: "item-2",
+          code: "BJ0003",
+          name: "茅台30年",
+          specification: "500ml/瓶",
+          unit: "瓶",
+          categoryId: "category-bj",
+          weComOptionKey: "maotai_30",
+          minimumStock: "6",
+          stockQuantity: "12",
+          isActive: true,
+        },
+        {
+          id: "item-3",
+          code: "WP0008",
+          name: "盒装粉条",
+          specification: "500g/盒",
+          unit: "盒",
+          categoryId: "category-wp",
+          weComOptionKey: "noodles",
+          minimumStock: "3",
+          stockQuantity: "2",
+          isActive: true,
+        },
+        {
+          id: "item-4",
+          code: "WP0011",
+          name: "香烟",
+          specification: "条",
+          unit: "条",
+          categoryId: "category-wp",
+          weComOptionKey: "cigarette",
+          minimumStock: null,
+          stockQuantity: "8",
           isActive: true,
         },
       ]),
@@ -66,8 +104,8 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify([warehouseId === "warehouse-2"
-          ? { quantity: "21", amount: "210.00" }
-          : { quantity: "12", amount: "120.00" }]),
+          ? { itemId: "item-2", quantity: "21", amount: "210.00" }
+          : { itemId: "item-1", quantity: "12", amount: "120.00" }]),
       });
       return;
     }
@@ -76,8 +114,8 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify([warehouseId === "warehouse-2"
-          ? { quantity: "8", amount: "80.00" }
-          : { quantity: "3", amount: "30.00" }]),
+          ? { itemId: "item-2", quantity: "8", amount: "80.00" }
+          : { itemId: "item-1", quantity: "3", amount: "30.00" }]),
       });
       return;
     }
@@ -107,7 +145,6 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
   await expect(page.locator(".metric--inbound")).toHaveCount(1);
   await expect(page.locator(".metric--outbound")).toHaveCount(1);
   await expect(page.locator(".metric__icon svg")).toHaveCount(4);
-  await expect(page.locator(".quick-actions a svg")).toHaveCount(3);
   const metricIconLayout = await page.locator(".metric__icon").evaluateAll((icons) => icons.map((icon) => {
     const iconRect = icon.getBoundingClientRect();
     const svg = icon.querySelector("svg");
@@ -120,8 +157,6 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
     };
   }));
   expect(metricIconLayout.every(({ display, horizontalGap, verticalGap, svgSize }) => display === "grid" && horizontalGap > 0 && verticalGap > 0 && svgSize >= 24)).toBe(true);
-  const quickActionIconSizes = await page.locator(".quick-actions a svg").evaluateAll((icons) => icons.map((icon) => icon.getBoundingClientRect().width));
-  expect(quickActionIconSizes.every((size) => size >= 26)).toBe(true);
   const metricOrder = await page.locator(".metric").evaluateAll((metrics) => metrics.map((metric) =>
     Array.from(metric.querySelectorAll(".metric__label, .metric__value")).map((node) => node.className),
   ));
@@ -133,7 +168,32 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
   ]);
   await expect(page.locator(".topbar-selector")).toBeVisible();
   await expect(page.locator(".workspace-user-button")).toBeVisible();
-  await expect(page.locator(".system-status__item")).toHaveCount(3);
+  const inventoryOverview = page.locator(".dashboard-inventory");
+  await expect(inventoryOverview.getByRole("heading", { name: "全部库存总览" })).toBeVisible();
+  await expect(inventoryOverview.getByRole("columnheader")).toHaveText(["物品", "当前库存", "状态", "近期变动"]);
+  await expect(inventoryOverview.getByRole("columnheader", { name: "最低库存" })).toHaveCount(0);
+  await expect(inventoryOverview.getByText("TEA-001", { exact: true })).toHaveCount(0);
+  await expect(inventoryOverview.getByText("普洱茶饼", { exact: true })).toBeVisible();
+  await expect(inventoryOverview.getByText("0", { exact: true })).toBeVisible();
+  await expect(inventoryOverview.getByText("本月入库 +12 · 出库 -3", { exact: true })).toBeVisible();
+
+  const categorySelector = inventoryOverview.getByRole("button", { name: "筛选品类：全部品类" });
+  await categorySelector.click();
+  const categoryMenu = inventoryOverview.getByRole("menu", { name: "品类筛选" });
+  await expect(categoryMenu).toHaveClass(/workspace-popover--menu/);
+  await categoryMenu.getByRole("menuitemradio", { name: /酒水/ }).click();
+  await expect(inventoryOverview.getByText("茅台30年", { exact: true })).toBeVisible();
+  await expect(inventoryOverview.getByText("普洱茶饼", { exact: true })).toHaveCount(0);
+  await inventoryOverview.getByRole("button", { name: "筛选品类：酒水" }).click();
+  await inventoryOverview.getByRole("menu", { name: "品类筛选" }).getByRole("menuitemradio", { name: /粉条/ }).click();
+  await expect(inventoryOverview.getByText("盒装粉条", { exact: true })).toBeVisible();
+  await expect(inventoryOverview.getByText("香烟", { exact: true })).toHaveCount(0);
+  await inventoryOverview.getByRole("button", { name: "筛选品类：粉条" }).click();
+  await inventoryOverview.getByRole("menu", { name: "品类筛选" }).getByRole("menuitemradio", { name: /全部品类/ }).click();
+  await inventoryOverview.getByLabel("搜索库存物品").fill("357g");
+  await expect(inventoryOverview.getByText("普洱茶饼", { exact: true })).toBeVisible();
+  await expect(inventoryOverview.getByText("茅台30年", { exact: true })).toHaveCount(0);
+  await inventoryOverview.getByLabel("搜索库存物品").fill("");
   await expect.poll(() => dashboardItemsWarehouseIds.length).toBeGreaterThan(0);
   await expect.poll(() => dashboardPendingWarehouseIds.length).toBeGreaterThan(0);
   await expect.poll(() => dashboardInboundWarehouseIds.length).toBeGreaterThan(0);
@@ -142,20 +202,6 @@ test("dashboard quick actions open the corresponding operation pages", async ({ 
   expect(dashboardPendingWarehouseIds.every((warehouseId) => warehouseId === null)).toBe(true);
   expect(dashboardInboundWarehouseIds.every((warehouseId) => warehouseId === "all")).toBe(true);
   expect(dashboardOutboundWarehouseIds.every((warehouseId) => warehouseId === "all")).toBe(true);
-
-  const destinations = [
-    { path: "/admin/inbound", selector: '.quick-actions a[href="/admin/inbound"]' },
-    { path: "/admin/outbound", selector: '.quick-actions a[href="/admin/outbound"]' },
-    { path: "/admin/opening-stock", selector: '.quick-actions a[href="/admin/opening-stock"]' },
-  ];
-
-  for (const destination of destinations) {
-    await page.locator(destination.selector).click();
-    await expect(page).toHaveURL(new RegExp(`${destination.path}$`));
-    await expect(page.locator(".page-header h1")).toBeVisible();
-    await loginAs(page, "/", "ADMIN");
-    await expect(page.locator(".page-header h1")).toBeVisible();
-  }
 
   dashboardItemsWarehouseIds.length = 0;
   dashboardPendingWarehouseIds.length = 0;

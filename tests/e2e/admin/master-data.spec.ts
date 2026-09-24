@@ -24,7 +24,7 @@ test.describe("master data administration", () => {
 
   test("uses consistent item action labels and reactivates an inactive item", async ({ page }) => {
     let items = [
-      { id: "item-1", code: "TEA-0001", name: "Tea leaves", specification: "Iron Goddess", unit: "box", categoryId: "cat-tea", isActive: false },
+      { id: "item-1", code: "TEA-0001", name: "Tea leaves", specification: "Iron Goddess", unit: "box", categoryId: "cat-tea", stockQuantity: "4.5", isActive: false },
     ];
 
     await page.route(apiUrl("/admin/items?includeInactive=true"), async (route) => {
@@ -38,6 +38,8 @@ test.describe("master data administration", () => {
     await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Fitems"));
 
     const row = page.locator("tbody tr").first();
+    await expect(page.getByRole("columnheader", { name: "数量", exact: true })).toBeVisible();
+    await expect(row.getByText("4.5", { exact: true })).toBeVisible();
     await expect(row.getByRole("button", { name: "编辑", exact: true })).toBeVisible();
     await expect(row.getByRole("button", { name: "启用", exact: true })).toBeVisible();
     await expect(row.getByRole("button", { name: "停用", exact: true })).toHaveCount(0);
@@ -47,6 +49,41 @@ test.describe("master data administration", () => {
     const success = page.locator('.success-notice[role="status"]');
     await expect(success).toHaveText("物品已启用");
     await expect(success).toHaveCSS("font-size", "13px");
+  });
+
+  test("item quantities follow the workspace warehouse selection", async ({ page }) => {
+    await page.route(apiUrl("/admin/reports/warehouses"), async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{ id: "warehouse-1", code: "WH-01", name: "Main warehouse", isActive: true }]),
+      });
+    });
+    await page.route(/\/admin\/items\?includeInactive=true(?:&warehouseId=warehouse-1)?$/, async (route) => {
+      const warehouseId = new URL(route.request().url()).searchParams.get("warehouseId");
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{
+          id: "item-1",
+          code: "TEA-0001",
+          name: "Tea leaves",
+          specification: "Iron Goddess",
+          unit: "box",
+          categoryId: "cat-tea",
+          stockQuantity: warehouseId === "warehouse-1" ? "2" : "8",
+          isActive: true,
+        }]),
+      });
+    });
+
+    await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Fitems"));
+    const row = page.locator("tbody tr").first();
+    await expect(row.getByText("8", { exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: "全部仓库" }).click();
+    await page.getByRole("menuitemradio", { name: /WH-01 · Main warehouse/ }).click();
+    await expect(row.getByText("2", { exact: true })).toBeVisible();
   });
 
   test("item page opens the edit modal and preserves edit input when the API rejects an immutable code change", async ({ page }) => {

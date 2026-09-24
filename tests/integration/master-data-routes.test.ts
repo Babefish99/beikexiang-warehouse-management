@@ -7,10 +7,11 @@ import { registerItemRoutes } from "../../apps/api/src/routes/admin/items.js";
 import { registerWarehouseRoutes } from "../../apps/api/src/routes/admin/warehouses.js";
 
 describe("master data admin routes", () => {
-  it("creates and searches standard items without returning stock balances", async () => {
+  it("lists standard items with current stock quantities for all or one warehouse", async () => {
     const app = Fastify();
     const itemService = new ItemService(new InMemoryItemRepository());
-    registerItemRoutes(app, { itemService });
+    const balances: Array<{ warehouseId: string; itemId: string; remainingQuantity: string }> = [];
+    registerItemRoutes(app, { itemService, listBalances: async () => balances });
 
     const created = await app.inject({
       method: "POST",
@@ -26,17 +27,35 @@ describe("master data admin routes", () => {
     });
     expect(created.statusCode).toBe(201);
     expect(created.json()).not.toHaveProperty("stockQuantity");
+    const itemId = created.json<{ id: string }>().id;
+    balances.push(
+      { warehouseId: "warehouse-1", itemId, remainingQuantity: "2.5" },
+      { warehouseId: "warehouse-2", itemId, remainingQuantity: "3" },
+    );
+    await app.inject({
+      method: "POST",
+      url: "/admin/items",
+      payload: { code: "COFFEE-0001", name: "Coffee", unit: "bag", categoryId: "cat-drink" },
+    });
 
     const list = await app.inject({ method: "GET", url: "/admin/items?search=tea" });
     expect(list.statusCode).toBe(200);
-    expect(list.json()).toMatchObject([{ name: "Tea leaves", weComOptionKey: "opt-tea" }]);
+    expect(list.json()).toMatchObject([{ name: "Tea leaves", weComOptionKey: "opt-tea", stockQuantity: "5.5" }]);
+
+    const warehouseList = await app.inject({ method: "GET", url: "/admin/items?search=tea&warehouseId=warehouse-1" });
+    expect(warehouseList.statusCode).toBe(200);
+    expect(warehouseList.json()).toMatchObject([{ name: "Tea leaves", stockQuantity: "2.5" }]);
+
+    const unstockedItemList = await app.inject({ method: "GET", url: "/admin/items?search=coffee" });
+    expect(unstockedItemList.statusCode).toBe(200);
+    expect(unstockedItemList.json()).toMatchObject([{ name: "Coffee", stockQuantity: "0" }]);
   });
 
   it("updates and deactivates items while keeping the code immutable after ledger activity", async () => {
     const app = Fastify();
     const repository = new InMemoryItemRepository();
     const itemService = new ItemService(repository);
-    registerItemRoutes(app, { itemService });
+    registerItemRoutes(app, { itemService, listBalances: async () => [] });
 
     const created = await app.inject({
       method: "POST",

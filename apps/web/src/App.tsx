@@ -16,14 +16,15 @@ import { PeriodClosePage } from "./pages/PeriodClosePage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { InventoryQueryPage } from "./pages/InventoryQueryPage";
 import { DashboardPage, type DashboardCard } from "./pages/DashboardPage";
+import { summariseDashboardMovements, type DashboardInventoryItem, type DashboardMovements } from "./features/dashboard/inventory-overview";
 import { DesktopOnlyCapabilityNotice, getDesktopOnlyCapability } from "./features/mobile/desktop-only-capabilities";
 import { useMobileViewport } from "./features/mobile/use-mobile-viewport";
 
 type WebUser = { id: string; weComUserId: string; name: string; role: "APPLICANT" | "ADMIN" | "FINANCE" };
 type AuthMetadata = { authorizeUrl: string; localAuthUrl?: string };
-type ItemRow = { isActive: boolean };
+type ItemRow = DashboardInventoryItem;
 type PendingApproval = { id: string };
-type TransactionRow = { quantity: string; amount: string };
+type TransactionRow = { itemId: string; quantity: string; amount: string };
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
 const currentPeriod = new Date().toISOString().slice(0, 7);
@@ -57,6 +58,8 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [cards, setCards] = useState<DashboardCard[]>(loadingCards);
   const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [dashboardItems, setDashboardItems] = useState<DashboardInventoryItem[]>([]);
+  const [dashboardMovements, setDashboardMovements] = useState<DashboardMovements>({});
   const [warehouses, setWarehouses] = useState<WarehouseOption[]>([]);
   const [selectedWarehouseId, setSelectedWarehouseId] = useState("all");
 
@@ -123,19 +126,33 @@ export default function App() {
       setDashboardLoading(true);
       const encodedWarehouseId = encodeURIComponent(selectedWarehouseId);
       try {
-        const [itemsResponse, pendingResponse, inboundResponse, outboundResponse, notifications] = await Promise.all([
+        const allInboundRequest = selectedWarehouseId === "all"
+          ? Promise.resolve<Response | null>(null)
+          : fetch(`${apiBaseUrl}/admin/reports/transactions?period=${currentPeriod}&type=inbound&warehouseId=all`, { credentials: "include" });
+        const allOutboundRequest = selectedWarehouseId === "all"
+          ? Promise.resolve<Response | null>(null)
+          : fetch(`${apiBaseUrl}/admin/reports/transactions?period=${currentPeriod}&type=outbound&warehouseId=all`, { credentials: "include" });
+        const [itemsResponse, pendingResponse, inboundResponse, outboundResponse, allInboundResponse, allOutboundResponse, notifications] = await Promise.all([
           fetch(`${apiBaseUrl}/admin/items?includeInactive=true`, { credentials: "include" }),
           fetch(`${apiBaseUrl}/admin/outbound/pending`, { credentials: "include" }),
           fetch(`${apiBaseUrl}/admin/reports/transactions?period=${currentPeriod}&type=inbound&warehouseId=${encodedWarehouseId}`, { credentials: "include" }),
           fetch(`${apiBaseUrl}/admin/reports/transactions?period=${currentPeriod}&type=outbound&warehouseId=${encodedWarehouseId}`, { credentials: "include" }),
+          allInboundRequest,
+          allOutboundRequest,
           loadInventoryNotifications(notificationIdentityKey(user.id, "ADMIN")),
         ]);
-        if (!itemsResponse.ok || !pendingResponse.ok || !inboundResponse.ok || !outboundResponse.ok) throw new Error("dashboard query failed");
+        if (!itemsResponse.ok || !pendingResponse.ok || !inboundResponse.ok || !outboundResponse.ok || (allInboundResponse && !allInboundResponse.ok) || (allOutboundResponse && !allOutboundResponse.ok)) throw new Error("dashboard query failed");
         const items = await itemsResponse.json() as ItemRow[];
         const pending = await pendingResponse.json() as PendingApproval[];
-        const inbound = summariseTransactions(await inboundResponse.json() as TransactionRow[]);
-        const outbound = summariseTransactions(await outboundResponse.json() as TransactionRow[]);
+        const inboundRows = await inboundResponse.json() as TransactionRow[];
+        const outboundRows = await outboundResponse.json() as TransactionRow[];
+        const allInboundRows = allInboundResponse ? await allInboundResponse.json() as TransactionRow[] : inboundRows;
+        const allOutboundRows = allOutboundResponse ? await allOutboundResponse.json() as TransactionRow[] : outboundRows;
+        const inbound = summariseTransactions(inboundRows);
+        const outbound = summariseTransactions(outboundRows);
         if (!active) return;
+        setDashboardItems(items);
+        setDashboardMovements(summariseDashboardMovements(allInboundRows, allOutboundRows));
         setCards([
           { label: "库存品类", value: `${items.filter((item) => item.isActive).length}`, hint: "标准物品库", tone: "inventory" },
           { label: "待出库审批", value: `${pending.length}`, hint: "企业微信已通过", tone: "approval" },
@@ -147,6 +164,8 @@ export default function App() {
         ]);
       } catch {
         if (!active) return;
+        setDashboardItems([]);
+        setDashboardMovements({});
         setCards([
           { label: "库存品类", value: "加载失败", hint: "标准物品库", tone: "inventory" },
           { label: "待出库审批", value: "加载失败", hint: "企业微信已通过", tone: "approval" },
@@ -226,7 +245,7 @@ export default function App() {
     );
   }
 
-  if (pathname === "/admin/items") return renderAdminLayout(workspaceUser, <ItemsPage />);
+  if (pathname === "/admin/items") return renderAdminLayout(workspaceUser, <ItemsPage warehouseId={selectedWarehouseId} />);
   if (pathname === "/admin/warehouses") return renderAdminLayout(workspaceUser, <WarehousesPage />);
   if (pathname === "/admin/inbound") return renderAdminLayout(workspaceUser, <InboundPage userId={user.id} />);
   if (pathname === "/admin/opening-stock") return renderAdminLayout(workspaceUser, <OpeningStockPage />);
@@ -237,5 +256,5 @@ export default function App() {
   if (pathname === "/admin/period-close") return renderAdminLayout(workspaceUser, <PeriodClosePage />);
   if (pathname === "/admin/reports") return renderAdminLayout(workspaceUser, <ReportsPage warehouseId={selectedWarehouseId} />);
 
-  return renderAdminLayout(workspaceUser, <DashboardPage cards={cards} loading={dashboardLoading} notificationIdentityKey={workspaceUser.notificationIdentityKey} role="ADMIN" warehouses={warehouses} selectedWarehouseId={selectedWarehouseId} onSelectWarehouse={onSelectWarehouse} />);
+  return renderAdminLayout(workspaceUser, <DashboardPage cards={cards} loading={dashboardLoading} notificationIdentityKey={workspaceUser.notificationIdentityKey} role="ADMIN" warehouses={warehouses} selectedWarehouseId={selectedWarehouseId} onSelectWarehouse={onSelectWarehouse} inventoryItems={dashboardItems} movements={dashboardMovements} />);
 }

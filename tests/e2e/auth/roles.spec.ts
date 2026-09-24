@@ -40,13 +40,13 @@ test.describe("authentication boundaries", () => {
 
   test("local development login reaches the admin dashboard", async ({ page }) => {
     await page.goto(apiUrl("/auth/local?returnTo=%2F"));
-    await expect(page.getByRole("heading", { name: "库存总览" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "库存总览", exact: true })).toBeVisible();
   });
 
   test("finance local login only reaches the report center", async ({ page }) => {
     await page.goto(apiUrl("/auth/local?role=FINANCE&returnTo=%2Fadmin%2Freports"));
     await expect(page.getByRole("heading", { name: "报表中心" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "库存总览" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "库存总览", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "导出 Excel 兼容报表" })).toBeVisible();
   });
 
@@ -54,6 +54,6 @@ test.describe("authentication boundaries", () => {
     await page.goto(apiUrl("/auth/local?role=APPLICANT&returnTo=%2Fadmin%2Fitems"));
     await expect(page.getByRole("heading", { name: "暂无后台权限" })).toBeVisible();
     await expect(page.getByText("当前企业微信账号只能发起和查看领用申请。")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "库存总览" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "库存总览", exact: true })).toHaveCount(0);
   });
 });

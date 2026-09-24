@@ -12,6 +12,7 @@ type ItemRow = {
   categoryId: string;
   weComOptionKey?: string;
   minimumStock?: string;
+  stockQuantity: string;
   isActive: boolean;
 };
 
@@ -80,7 +81,7 @@ function toPayload(form: ItemFormState) {
   };
 }
 
-export function ItemsPage() {
+export function ItemsPage({ warehouseId }: { warehouseId: string }) {
   const [items, setItems] = useState<ItemRow[]>([]);
   const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get("search")?.trim() ?? "");
   const [loading, setLoading] = useState(true);
@@ -91,27 +92,34 @@ export function ItemsPage() {
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<ItemFormState>(emptyForm);
   const [submitting, setSubmitting] = useState(false);
+  const itemsRequestVersion = useRef(0);
   const activeDialogRef = useRef<HTMLElement | null>(null);
   const modalOpenerRef = useRef<HTMLElement | null>(null);
   const modalOpen = createModalOpen || Boolean(editingItemId);
 
   const loadItems = async () => {
+    itemsRequestVersion.current += 1;
+    const requestVersion = itemsRequestVersion.current;
     setLoading(true);
     try {
-      const response = await fetch(`${apiBaseUrl}/admin/items?includeInactive=true`, { credentials: "include" });
+      const query = new URLSearchParams({ includeInactive: "true" });
+      if (warehouseId !== "all") query.set("warehouseId", warehouseId);
+      const response = await fetch(`${apiBaseUrl}/admin/items?${query.toString()}`, { credentials: "include" });
       if (!response.ok) throw new Error(await readError(response));
+      if (itemsRequestVersion.current !== requestVersion) return;
       setItems(await response.json() as ItemRow[]);
       setError(null);
     } catch (loadError) {
+      if (itemsRequestVersion.current !== requestVersion) return;
       setError(loadError instanceof Error ? loadError.message : "物品列表加载失败");
     } finally {
-      setLoading(false);
+      if (itemsRequestVersion.current === requestVersion) setLoading(false);
     }
   };
 
   useEffect(() => {
     void loadItems();
-  }, []);
+  }, [warehouseId]);
 
   useEffect(() => {
     if (!modalOpen) {
@@ -361,6 +369,7 @@ export function ItemsPage() {
                   <th>规格</th>
                   <th>推荐别名</th>
                   <th>单位</th>
+                  <th className="master-data-quantity">数量</th>
                   <th>状态</th>
                   <th>操作</th>
                 </tr>
@@ -373,6 +382,7 @@ export function ItemsPage() {
                     <td>{item.specification || "—"}</td>
                     <td>{item.aliases?.join("、") || "—"}</td>
                     <td>{item.unit}</td>
+                    <td className="master-data-quantity">{item.stockQuantity}</td>
                     <td><span className={`status-pill ${item.isActive ? "status-pill--active" : ""}`}>{item.isActive ? "启用" : "停用"}</span></td>
                     <td>
                       <div className="table-actions">
