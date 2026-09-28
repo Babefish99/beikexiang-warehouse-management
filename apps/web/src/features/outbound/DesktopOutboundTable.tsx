@@ -117,7 +117,7 @@ export function DesktopOutboundTable({ pending, onReloadOptions, onConfirm }: {
       if (!isCurrentOptionsRequest(approval.id, epoch)) return;
       setEditors((previous) => {
         const previousEditor = previous[approval.id] ?? editor;
-        const reconciled = reconcileOutboundOptions(previousEditor.draft, options);
+        const reconciled = reconcileOutboundOptions(previousEditor.draft, options, approval);
         const errors: Record<string, string> = {};
         for (const lineId of reconciled.staleSelectedItemLineIds) errors[`line:${lineId}`] = "所选标准物品已失效，请重新选择";
         for (const allocationId of reconciled.staleAllocationIds) errors[allocationId] = "库存已变化，请重新选择";
@@ -140,7 +140,7 @@ export function DesktopOutboundTable({ pending, onReloadOptions, onConfirm }: {
     try {
       const latest = await onReloadOptions(approval.id);
       if (!isCurrentOptionsRequest(approval.id, epoch)) return;
-      const reconciled = reconcileOutboundOptions(editor.draft, latest);
+      const reconciled = reconcileOutboundOptions(editor.draft, latest, approval);
       const errors = validateDecisionStep(approval, reconciled.draft.decisions, latest);
       for (const lineId of reconciled.staleSelectedItemLineIds) errors[`line:${lineId}`] = "所选标准物品已失效，请重新选择";
       for (const allocationId of reconciled.staleAllocationIds) errors[allocationId] = "库存已变化，请重新选择";
@@ -169,7 +169,7 @@ export function DesktopOutboundTable({ pending, onReloadOptions, onConfirm }: {
     try {
       const latest = await onReloadOptions(approval.id);
       if (!isCurrentOptionsRequest(approval.id, epoch)) return;
-      const reconciled = reconcileOutboundOptions(editor.draft, latest);
+      const reconciled = reconcileOutboundOptions(editor.draft, latest, approval);
       const errors = validateDecisionStep(approval, reconciled.draft.decisions, latest);
       for (const lineId of reconciled.staleSelectedItemLineIds) errors[`line:${lineId}`] = "所选标准物品已失效，请重新选择";
       for (const allocationId of reconciled.staleAllocationIds) errors[allocationId] = "库存已变化，请重新选择";

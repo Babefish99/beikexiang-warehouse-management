@@ -65,6 +65,7 @@ export function OutboundDecisionEditor({ approval, options, draft, errors, onCha
 
     const changeActualQuantity = (quantity: string) => updateDecision(line.id, (current) => ({
       ...current,
+      quantityManuallyEdited: true,
       allocations: [{ id: current.allocations[0]?.id ?? crypto.randomUUID(), warehouseId: "", batchId: "", quantity }],
     }));
 

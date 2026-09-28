@@ -672,6 +672,7 @@ test("desktop fills the first candidate directly and keeps it editable while hid
   const item = line.getByRole("combobox", { name: "标准物品", exact: true });
   const quantity = line.getByLabel("实际数量");
   await expect(item).toHaveValue("item-maotai");
+  await expect(quantity).toHaveValue("2");
   await expect(line.getByText("候选提示")).toHaveCount(0);
   await expect(line.getByText("仓库与批次由系统自动匹配")).toHaveCount(0);
   await expect(line.locator(".outbound-selection-row")).toContainText("标准物品");

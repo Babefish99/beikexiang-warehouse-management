@@ -139,6 +139,32 @@ describe("outbound decision workflow", () => {
     expect(reconcileOutboundOptions(dismissed, recommendedOptions).draft.decisions[0]?.selectedItemId).toBe("");
   });
 
+  it("prefills the approved quantity without silently reducing it when the recommended item has insufficient stock", () => {
+    const scarceOptions = { ...options, lines: [{ ...options.lines[0], items: [
+      { ...options.lines[0]!.items[0]!, availableQuantity: "1" },
+    ] }] };
+    const blank = draft({ decisions: [{ ...draft().decisions[0]!, selectedItemId: "", allocations: [{ id: "q", warehouseId: "", batchId: "", quantity: "" }] }] });
+
+    const reconciled = reconcileOutboundOptions(blank, scarceOptions, approval);
+    expect(reconciled.draft.decisions[0]).toMatchObject({
+      selectedItemId: "item-maotai",
+      allocations: [{ quantity: "2" }],
+    });
+    expect(validateDecisionStep(approval, reconciled.draft.decisions, scarceOptions)).toMatchObject({
+      "quantity:line-wine": "实际数量不能超过当前可用库存",
+    });
+  });
+
+  it("does not restore the approved quantity after the administrator manually clears it", () => {
+    const manuallyCleared = draft({ decisions: [{
+      ...draft().decisions[0]!,
+      quantityManuallyEdited: true,
+      allocations: [{ id: "q", warehouseId: "", batchId: "", quantity: "" }],
+    }] });
+
+    expect(reconcileOutboundOptions(manuallyCleared, options, approval).draft).toEqual(manuallyCleared);
+  });
+
   it("does not expose or reconcile hidden batch allocations", () => {
     const current = draft({ decisions: [{ ...draft().decisions[0]!, allocations: [
       { id: "first", warehouseId: "wh-1", batchId: "b1", quantity: "3" },

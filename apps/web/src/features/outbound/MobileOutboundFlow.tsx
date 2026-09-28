@@ -148,7 +148,7 @@ export function MobileOutboundFlow({ userId, pending, pendingState, onReloadOpti
     try {
       const latest = await onReloadOptions(selected.id);
       if (!isCurrentOperation(epoch, selected.id)) return;
-      const reconciled = reconcileOutboundOptions(next, latest);
+      const reconciled = reconcileOutboundOptions(next, latest, selected);
       const nextErrors = staleErrors(reconciled);
       const hasStaleSelection = Object.keys(nextErrors).length > 0;
       const nextDraft = {
@@ -215,7 +215,7 @@ export function MobileOutboundFlow({ userId, pending, pendingState, onReloadOpti
     try {
       const latest = await onReloadOptions(approvalId);
       if (!isCurrentOperation(epoch, approvalId)) return;
-      const reconciled = reconcileOutboundOptions(draft, latest);
+      const reconciled = reconcileOutboundOptions(draft, latest, approval);
       const nextErrors = validateDecisionStep(approval, reconciled.draft.decisions, latest);
       Object.assign(nextErrors, staleErrors(reconciled));
       const nextDraft = { ...reconciled.draft, step: Object.keys(nextErrors).length ? "allocate" as const : "review" as const };
@@ -241,7 +241,7 @@ export function MobileOutboundFlow({ userId, pending, pendingState, onReloadOpti
     try {
       const latest = await onReloadOptions(approvalId);
       if (!isCurrentOperation(epoch, approvalId)) return;
-      const reconciled = reconcileOutboundOptions(draft, latest);
+      const reconciled = reconcileOutboundOptions(draft, latest, approval);
       const nextErrors = validateDecisionStep(approval, reconciled.draft.decisions, latest);
       Object.assign(nextErrors, staleErrors(reconciled));
       setOptions(latest);

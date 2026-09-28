@@ -101,6 +101,8 @@ test("mobile item search stays within one intent and preserves selected stock th
   const water = page.getByTestId("outbound-decision-line-line-water");
   const item = wine.getByRole("combobox", { name: "标准物品", exact: true });
   const search = wine.getByRole("searchbox", { name: "搜索标准物品" });
+  await expect(wine.getByLabel("实际数量")).toHaveValue("3");
+  await expect(water.getByLabel("实际数量")).toHaveValue("2");
   await item.selectOption("item-maotai");
   await wine.getByLabel("实际数量").fill("1");
   await search.fill("YL0001");

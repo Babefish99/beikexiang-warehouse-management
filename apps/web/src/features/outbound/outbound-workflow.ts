@@ -17,7 +17,7 @@ export type CandidateItem = { id: string; code: string; name: string; specificat
 export type BatchOption = { batchId: string; batchNo?: string; purchasedAt?: string; warehouseId: string; warehouseName?: string; itemId: string; remainingQuantity: string; unitCost: string };
 export type OutboundOptions = { approvalId: string; lines: readonly { approvalLineId: string; recommendedItemId?: string; items: readonly CandidateItem[] }[]; batches: readonly BatchOption[] };
 export type AllocationRow = { id: string; warehouseId: string; batchId: string; quantity: string };
-export type DecisionDraft = { approvalLineId: string; selectedItemId: string; zeroIssue: boolean; varianceReason: string; recommendationDismissed?: boolean; allocations: AllocationRow[] };
+export type DecisionDraft = { approvalLineId: string; selectedItemId: string; zeroIssue: boolean; varianceReason: string; recommendationDismissed?: boolean; quantityManuallyEdited?: boolean; allocations: AllocationRow[] };
 export type OutboundDraft = { approvalId: string; step: OutboundStep; decisions: DecisionDraft[] };
 export type OutboundSummary = {
   requestedQuantity: string;
@@ -69,6 +69,7 @@ function isDecisionDraft(value: unknown): value is DecisionDraft {
     && typeof decision.zeroIssue === "boolean"
     && typeof decision.varianceReason === "string"
     && (decision.recommendationDismissed === undefined || typeof decision.recommendationDismissed === "boolean")
+    && (decision.quantityManuallyEdited === undefined || typeof decision.quantityManuallyEdited === "boolean")
     && Array.isArray(decision.allocations)
     && decision.allocations.every(isAllocationRow);
 }
@@ -223,7 +224,7 @@ export function changeDecisionItem(decision: DecisionDraft, selectedItemId: stri
   return decision.selectedItemId === selectedItemId ? decision : { ...decision, selectedItemId, zeroIssue: false, recommendationDismissed: !selectedItemId };
 }
 
-export function reconcileOutboundOptions(draft: OutboundDraft, options: OutboundOptions): ReconciledOutboundDraft {
+export function reconcileOutboundOptions(draft: OutboundDraft, options: OutboundOptions, approval?: PendingApproval): ReconciledOutboundDraft {
   const staleSelectedItemLineIds: string[] = [];
   const staleAllocationIds: string[] = [];
   const decisions = draft.decisions.map((decision) => {
@@ -232,8 +233,19 @@ export function reconcileOutboundOptions(draft: OutboundDraft, options: Outbound
     const candidates = lineOptions?.items ?? [];
     if (decision.selectedItemId && !candidates.some((candidate) => candidate.id === decision.selectedItemId)) staleSelectedItemLineIds.push(decision.approvalLineId);
     const suggestedItemId = lineOptions?.recommendedItemId ?? candidates[0]?.id;
-    if (!decision.selectedItemId && !decision.recommendationDismissed && suggestedItemId) {
-      return { ...decision, selectedItemId: suggestedItemId };
+    const selectedItemId = decision.selectedItemId || (!decision.recommendationDismissed ? suggestedItemId : undefined);
+    const approvalLine = approval?.lines.find((line) => line.id === decision.approvalLineId);
+    const requestedQuantity = approvalLine ? parsePositiveInteger(approvalLine.requestedQuantity)?.toString() : undefined;
+    const quantityRow = decision.allocations[0];
+    if (selectedItemId && requestedQuantity && quantityRow && !quantityRow.quantity.trim() && !decision.quantityManuallyEdited) {
+      return {
+        ...decision,
+        selectedItemId,
+        allocations: [{ ...quantityRow, quantity: requestedQuantity }],
+      };
+    }
+    if (!decision.selectedItemId && selectedItemId) {
+      return { ...decision, selectedItemId };
     }
     return decision;
   }).filter((decision): decision is DecisionDraft => Boolean(decision));
