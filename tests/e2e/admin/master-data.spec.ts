@@ -116,7 +116,7 @@ test.describe("master data administration", () => {
     });
 
     await page.goto(apiUrl("/auth/local?returnTo=%2Fadmin%2Fitems"));
-    await expect(page.getByLabel("物品搜索")).toHaveAttribute("placeholder", "搜索编码、名称或选项标识");
+    await expect(page.getByLabel("物品搜索")).toHaveAttribute("placeholder", "搜索编码、名称、别名或选项标识");
 
     const initialRow = page.locator("tbody tr").first();
     await expect(initialRow.getByText("Tea leaves", { exact: true })).toBeVisible();

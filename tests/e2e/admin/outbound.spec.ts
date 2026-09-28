@@ -90,7 +90,7 @@ test("desktop outbound resolves each immutable intent to a standard item and pos
   await expect(item.locator("option").nth(1)).toHaveText("BJ0002 飞天茅台 / 瓶 / 可用 3");
   await expect(line.getByLabel("实际仓库")).toHaveCount(0);
   await expect(line.getByLabel("采购批次")).toHaveCount(0);
-  await expect(line).toContainText("仓库与批次由系统自动匹配");
+  await expect(line.getByText("仓库与批次由系统自动匹配")).toHaveCount(0);
 
   await item.selectOption("item-maotai");
   const quantity = line.getByLabel("实际数量");
@@ -653,21 +653,40 @@ test("the latest sync-failure refresh wins when an older response finishes last"
   await expect(failures).not.toContainText("older");
 });
 
-test("desktop recommendation stays editable while warehouse and batch controls remain hidden", async ({ page }) => {
+test("desktop fills the first candidate directly and keeps it editable while hidden allocation stays automatic", async ({ page }) => {
   await mockPending(page);
-  await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => route.fulfill({ json: initialOptions }));
+  const lowConfidenceOptions = {
+    ...initialOptions,
+    lines: [{
+      ...initialOptions.lines[0],
+      recommendedItemId: undefined,
+      items: initialOptions.lines[0].items.map((candidate, index) => index === 0
+        ? { ...candidate, recommendationScore: 0, recommendationConfidence: "LOW", recommendationReasons: ["单位一致，需人工确认"] }
+        : candidate),
+    }],
+  };
+  await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => route.fulfill({ json: lowConfidenceOptions }));
   await loginAs(page, "/admin/outbound", "ADMIN");
   await page.getByRole("button", { name: "办理出库" }).click();
   const line = page.getByTestId("outbound-decision-line-line-wine");
   const item = line.getByRole("combobox", { name: "标准物品", exact: true });
+  const quantity = line.getByLabel("实际数量");
   await expect(item).toHaveValue("item-maotai");
-  await expect(line).toContainText("系统推荐");
+  await expect(line.getByText("候选提示")).toHaveCount(0);
+  await expect(line.getByText("仓库与批次由系统自动匹配")).toHaveCount(0);
+  await expect(line.locator(".outbound-selection-row")).toContainText("标准物品");
+  await expect(line.locator(".outbound-selection-row")).toContainText("实际数量");
+  const [itemTop, quantityTop] = await Promise.all([
+    item.evaluate((element) => element.closest("label")?.getBoundingClientRect().top),
+    quantity.evaluate((element) => element.closest("label")?.getBoundingClientRect().top),
+  ]);
+  expect(Math.abs((itemTop ?? 0) - (quantityTop ?? 0))).toBeLessThanOrEqual(2);
   await expect(line.getByLabel("实际仓库")).toHaveCount(0);
   await expect(line.getByLabel("采购批次")).toHaveCount(0);
-  await line.getByLabel("实际数量").fill("1");
+  await quantity.fill("1");
   await item.selectOption("item-wine");
   await expect(item).toHaveValue("item-wine");
-  await expect(line.getByLabel("实际数量")).toHaveValue("1");
+  await expect(quantity).toHaveValue("1");
 });
 
 test("exact legacy approvals show a locked standard item instead of an editable selector", async ({ page }) => {

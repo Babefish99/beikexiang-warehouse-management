@@ -363,14 +363,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .outbound-intent span:last-child { grid-column: 1 / -1; }
 .outbound-locked-item { min-width: 0; display: grid; gap: 6px; }
 .outbound-locked-item span { color: var(--muted); font-size: 13px; font-weight: 650; }
-.outbound-recommendation { grid-column: 1 / -1; padding: 11px 12px; display: grid; gap: 5px; border: 1px solid var(--border); border-radius: 8px; background: #f8fafc; }
-.outbound-recommendation > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.outbound-recommendation p { margin: 0; color: var(--navy); line-height: 1.55; }
-.outbound-recommendation small { color: var(--muted); }
-.outbound-auto-allocation { grid-column: 1 / -1; min-width: 0; padding: 12px; display: grid; grid-template-columns: minmax(180px, .55fr) minmax(0, 1fr); align-items: end; gap: 10px 18px; border-radius: 8px; background: #f8fafc; }
-.outbound-auto-allocation > div { min-height: 40px; display: grid; align-content: center; gap: 3px; }
-.outbound-auto-allocation > div small { color: var(--muted); line-height: 1.45; }
-.outbound-auto-allocation > .field-error { grid-column: 1 / -1; }
+.outbound-selection-row { grid-column: 1 / -1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(180px, .55fr); align-items: end; gap: 10px 12px; }
+.outbound-selection-row > label, .outbound-selection-row > .outbound-locked-item { min-width: 0; }
+.outbound-selection-row > .field-error { grid-column: 1 / -1; }
 .outbound-decision-allocation { grid-column: 1 / -1; min-width: 0; padding: 12px; display: grid; grid-template-columns: 1fr 1.15fr .75fr auto; gap: 10px; align-items: end; border-radius: 8px; background: #f8fafc; }
 .outbound-decision-allocation .field-error { grid-column: 1 / -1; }
 .outbound-add-allocation { justify-self: start; }
@@ -442,7 +437,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .outbound-intent { grid-template-columns: minmax(0, 1fr); }
   .outbound-intent span:last-child { grid-column: auto; }
   .outbound-decision-allocation { grid-template-columns: minmax(0, 1fr); }
-  .outbound-auto-allocation { grid-template-columns: minmax(0, 1fr); }
+  .outbound-selection-row { grid-template-columns: minmax(0, 1fr); }
   .outbound-decision-line__totals { flex-wrap: wrap; gap: 8px 14px; }
   .outbound-sync-failures li { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .outbound-card__actions .button, .outbound-flow__actions .button { flex: 1 1 0; }

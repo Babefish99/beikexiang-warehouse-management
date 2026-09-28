@@ -33,10 +33,6 @@ function itemLabel(item: CandidateItem): string {
   return `${item.code} ${item.name}${item.specification ? ` / ${item.specification}` : ""} / ${item.unit} / 可用 ${item.availableQuantity}`;
 }
 
-function confidenceLabel(confidence: CandidateItem["recommendationConfidence"]): string {
-  return confidence === "HIGH" ? "高置信度" : confidence === "MEDIUM" ? "可参考" : "需人工判断";
-}
-
 export function OutboundDecisionEditor({ approval, options, draft, errors, onChange, disabled = false }: OutboundDecisionEditorProps) {
   const [searches, setSearches] = useState<Record<string, string>>({});
   const updateDecision = (lineId: string, update: (decision: DecisionDraft) => DecisionDraft) => {
@@ -58,7 +54,6 @@ export function OutboundDecisionEditor({ approval, options, draft, errors, onCha
     const lineError = errors[`line:${line.id}`];
     const reasonError = errors[`reason:${line.id}`];
 
-    const recommendedItem = candidateItems.find((candidate) => candidate.id === lineOptions?.recommendedItemId) ?? candidateItems[0];
     const quantityError = errors[`quantity:${line.id}`];
 
     const changeItem = (selectedItemId: string) => updateDecision(line.id, (current) => ({
@@ -81,32 +76,26 @@ export function OutboundDecisionEditor({ approval, options, draft, errors, onCha
         {line.note ? <span>备注：{line.note}</span> : null}
       </div>
       {!decision.zeroIssue ? <>
-        {isLocked ? <div className="outbound-locked-item"><span>标准物品（旧审批锁定）</span><strong>{selectedItem ? `${selectedItem.code} ${selectedItem.name} / ${selectedItem.unit}` : line.itemId}</strong></div> : <>
+        {!isLocked ? <>
           <div className="outbound-item-search">
             <label><span>搜索标准物品</span><input type="search" disabled={disabled} placeholder="输入名称、编码或规格" value={search} onChange={(event) => setSearches((current) => ({ ...current, [line.id]: event.target.value }))} /></label>
             <button type="button" className="button button--secondary button--small" disabled={disabled || !search} onClick={() => setSearches((current) => ({ ...current, [line.id]: "" }))}>清空搜索</button>
           </div>
-          <label>
-          <span>标准物品</span>
-          <select disabled={disabled} aria-invalid={Boolean(lineError)} value={decision.selectedItemId} onChange={(event) => changeItem(event.target.value)}>
-            <option value="">选择标准物品</option>
-            {decision.selectedItemId && !selectedItem ? <option value={decision.selectedItemId}>已失效：{decision.selectedItemId}</option> : null}
-            {selectedItem && !visibleItems.some((item) => item.id === selectedItem.id) ? <option value={selectedItem.id}>{itemLabel(selectedItem)}（已选）</option> : null}
-            {visibleItems.map((item) => <option value={item.id} key={item.id}>{itemLabel(item)}</option>)}
-          </select>
-          </label>
-          {recommendedItem ? <div className="outbound-recommendation" role="status">
-            <div><strong>{lineOptions?.recommendedItemId === recommendedItem.id ? "系统推荐" : "候选提示"}</strong><span className={`status-pill ${recommendedItem.recommendationConfidence === "HIGH" ? "status-pill--active" : ""}`}>{confidenceLabel(recommendedItem.recommendationConfidence)}</span></div>
-            <p>{recommendedItem.code} {recommendedItem.name}：{(recommendedItem.recommendationReasons ?? ["单位一致，需人工确认"]).join("；")}</p>
-            {recommendedItem.recommendationConfidence === "LOW" ? <small>置信度不足，系统未自动选择，请管理员确认。</small> : <small>推荐项可修改；审批原始物品描述保持不变。</small>}
-          </div> : null}
-          {visibleItems.length === 0 ? <small className="outbound-item-search-status" role="status">{search.trim() ? "没有匹配的标准物品，请修改或清空搜索。" : "当前没有同单位且有库存的标准物品。"}</small> : null}
-        </>}
-        <div className="outbound-auto-allocation">
+        </> : null}
+        <div className="outbound-selection-row">
+          {isLocked ? <div className="outbound-locked-item"><span>标准物品（旧审批锁定）</span><strong>{selectedItem ? `${selectedItem.code} ${selectedItem.name} / ${selectedItem.unit}` : line.itemId}</strong></div> : <label>
+            <span>标准物品</span>
+            <select disabled={disabled} aria-invalid={Boolean(lineError)} value={decision.selectedItemId} onChange={(event) => changeItem(event.target.value)}>
+              <option value="">选择标准物品</option>
+              {decision.selectedItemId && !selectedItem ? <option value={decision.selectedItemId}>已失效：{decision.selectedItemId}</option> : null}
+              {selectedItem && !visibleItems.some((item) => item.id === selectedItem.id) ? <option value={selectedItem.id}>{itemLabel(selectedItem)}（已选）</option> : null}
+              {visibleItems.map((item) => <option value={item.id} key={item.id}>{itemLabel(item)}</option>)}
+            </select>
+          </label>}
           <label><span>实际数量</span><input disabled={disabled || !decision.selectedItemId} type="number" inputMode="numeric" min="1" step="1" aria-invalid={Boolean(quantityError)} value={decision.allocations[0]?.quantity ?? ""} onChange={(event) => changeActualQuantity(event.target.value)} /></label>
-          <div><strong>仓库与批次由系统自动匹配</strong><small>确认时按采购日期最早优先分配；库存不足会阻止提交。</small></div>
           {quantityError ? <small className="field-error">{quantityError}</small> : null}
         </div>
+        {!isLocked && visibleItems.length === 0 ? <small className="outbound-item-search-status" role="status">{search.trim() ? "没有匹配的标准物品，请修改或清空搜索。" : "当前没有同单位且有库存的标准物品。"}</small> : null}
       </> : null}
       <div className="outbound-decision-line__totals"><span>审批 {line.requestedQuantity} {line.unit}</span><span>实际 {actual} {line.unit}</span><span>差额 {Number(line.requestedQuantity) - actual} {line.unit}</span></div>
       {isShort || decision.zeroIssue ? <label><span>少出 / 零出原因</span><textarea disabled={disabled} required aria-invalid={Boolean(reasonError)} value={decision.varianceReason} onChange={(event) => updateDecision(line.id, (current) => ({ ...current, varianceReason: event.target.value }))} />{reasonError ? <small className="field-error">{reasonError}</small> : null}</label> : null}

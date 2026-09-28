@@ -231,8 +231,9 @@ export function reconcileOutboundOptions(draft: OutboundDraft, options: Outbound
     const lineOptions = options.lines.find((line) => line.approvalLineId === decision.approvalLineId);
     const candidates = lineOptions?.items ?? [];
     if (decision.selectedItemId && !candidates.some((candidate) => candidate.id === decision.selectedItemId)) staleSelectedItemLineIds.push(decision.approvalLineId);
-    if (!decision.selectedItemId && !decision.recommendationDismissed && lineOptions?.recommendedItemId) {
-      return { ...decision, selectedItemId: lineOptions.recommendedItemId };
+    const suggestedItemId = lineOptions?.recommendedItemId ?? candidates[0]?.id;
+    if (!decision.selectedItemId && !decision.recommendationDismissed && suggestedItemId) {
+      return { ...decision, selectedItemId: suggestedItemId };
     }
     return decision;
   }).filter((decision): decision is DecisionDraft => Boolean(decision));

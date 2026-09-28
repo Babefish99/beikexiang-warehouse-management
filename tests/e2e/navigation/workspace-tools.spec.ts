@@ -27,6 +27,7 @@ async function routeItems(page: Page) {
           categoryId: "CAT-TEA",
           weComOptionKey: "tea",
           minimumStock: "10",
+          stockQuantity: "25",
           isActive: true,
         },
         {
@@ -38,6 +39,7 @@ async function routeItems(page: Page) {
           categoryId: "CAT-COF",
           weComOptionKey: "coffee",
           minimumStock: "5",
+          stockQuantity: "12",
           isActive: true,
         },
       ]),

@@ -130,11 +130,11 @@ describe("outbound decision workflow", () => {
     expect(current.decisions[0]!.varianceReason).toBe("保留原因");
   });
 
-  it("prefills only a high-confidence recommendation that the administrator has not dismissed", () => {
-    const recommendedOptions = { ...options, lines: [{ ...options.lines[0], recommendedItemId: "item-wine" }] };
+  it("prefills the first ranked candidate even without a high-confidence recommendation unless the administrator dismissed it", () => {
+    const recommendedOptions = { ...options, lines: [{ ...options.lines[0], recommendedItemId: undefined }] };
     const blank = draft({ decisions: [{ ...draft().decisions[0]!, selectedItemId: "", allocations: [{ id: "q", warehouseId: "", batchId: "", quantity: "" }] }] });
 
-    expect(reconcileOutboundOptions(blank, recommendedOptions).draft.decisions[0]?.selectedItemId).toBe("item-wine");
+    expect(reconcileOutboundOptions(blank, recommendedOptions).draft.decisions[0]?.selectedItemId).toBe("item-maotai");
     const dismissed = { ...blank, decisions: [{ ...blank.decisions[0]!, recommendationDismissed: true }] };
     expect(reconcileOutboundOptions(dismissed, recommendedOptions).draft.decisions[0]?.selectedItemId).toBe("");
   });
