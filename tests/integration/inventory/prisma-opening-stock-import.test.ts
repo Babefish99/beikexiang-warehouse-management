@@ -49,6 +49,8 @@ describe.skipIf(!databaseUrl)("Prisma opening-stock import transaction", () => {
         "prisma/migrations/20260811171500_stocktake_quantity_snapshots/migration.sql",
         "prisma/migrations/20260814110000_inbound_batch_sequences/migration.sql",
         "prisma/migrations/20260824170000_opening_stock_import/migration.sql",
+        "prisma/migrations/20260904183000_approval_intent_outbound_decisions/migration.sql",
+        "prisma/migrations/20260928111500_item_recommendation/migration.sql",
       ]) {
         await migrationClient.query(readFileSync(resolve(process.cwd(), migration), "utf8"));
       }

@@ -43,9 +43,13 @@ function parseDecision(value: unknown, index: number): OutboundDecisionInput {
   if (value.varianceReason !== undefined && typeof value.varianceReason !== "string") {
     throw new BusinessRuleError(`${path}.varianceReason must be a string`, 400);
   }
+  if (value.actualQuantity !== undefined && (typeof value.actualQuantity !== "string" || !value.actualQuantity.trim())) {
+    throw new BusinessRuleError(`${path}.actualQuantity must be a non-empty string`, 400);
+  }
   return {
     approvalLineId: requiredString(value.approvalLineId, `${path}.approvalLineId`),
     ...(value.selectedItemId === undefined ? {} : { selectedItemId: value.selectedItemId }),
+    ...(value.actualQuantity === undefined ? {} : { actualQuantity: value.actualQuantity }),
     allocations: value.allocations.map((allocation, allocationIndex) => parseAllocation(allocation, `${path}.allocations[${allocationIndex}]`)),
     ...(value.varianceReason === undefined ? {} : { varianceReason: value.varianceReason }),
   };
@@ -76,6 +80,7 @@ function sanitizeConfirmationRequest(value: unknown): { approvalId?: string; dec
           return {
             ...(auditString(decision.approvalLineId) === undefined ? {} : { approvalLineId: auditString(decision.approvalLineId) }),
             ...(auditString(decision.selectedItemId) === undefined ? {} : { selectedItemId: auditString(decision.selectedItemId) }),
+            ...(auditString(decision.actualQuantity) === undefined ? {} : { actualQuantity: auditString(decision.actualQuantity) }),
             allocations: Array.isArray(decision.allocations)
               ? decision.allocations.map((entry) => {
                   if (!entry || typeof entry !== "object") return {};

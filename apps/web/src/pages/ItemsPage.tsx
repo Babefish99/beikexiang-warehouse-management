@@ -7,6 +7,7 @@ type ItemRow = {
   code: string;
   name: string;
   specification?: string;
+  aliases?: string[];
   unit: string;
   categoryId: string;
   weComOptionKey?: string;
@@ -19,6 +20,7 @@ type ItemFormState = {
   categoryPrefix: string;
   name: string;
   specification: string;
+  aliases: string;
   unit: string;
   categoryId: string;
   weComOptionKey: string;
@@ -32,6 +34,7 @@ const emptyForm = (): ItemFormState => ({
   categoryPrefix: "",
   name: "",
   specification: "",
+  aliases: "",
   unit: "",
   categoryId: "",
   weComOptionKey: "",
@@ -55,6 +58,7 @@ function toFormState(item: ItemRow): ItemFormState {
     categoryPrefix: item.code.split("-")[0] ?? "",
     name: item.name,
     specification: item.specification ?? "",
+    aliases: item.aliases?.join("、") ?? "",
     unit: item.unit,
     categoryId: item.categoryId,
     weComOptionKey: item.weComOptionKey ?? "",
@@ -68,6 +72,7 @@ function toPayload(form: ItemFormState) {
     categoryPrefix: form.categoryPrefix,
     name: form.name,
     specification: form.specification || undefined,
+    aliases: form.aliases.split(/[、,，\n]/).map((alias) => alias.trim()).filter(Boolean),
     unit: form.unit,
     categoryId: form.categoryId,
     weComOptionKey: form.weComOptionKey || undefined,
@@ -152,7 +157,7 @@ export function ItemsPage() {
 
   const filteredItems = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    return keyword ? items.filter((item) => [item.code, item.name, item.specification, item.weComOptionKey].some((value) => value?.toLowerCase().includes(keyword))) : items;
+    return keyword ? items.filter((item) => [item.code, item.name, item.specification, item.weComOptionKey, ...(item.aliases ?? [])].some((value) => value?.toLowerCase().includes(keyword))) : items;
   }, [items, search]);
 
   const submitCreate = async (event: FormEvent) => {
@@ -288,6 +293,7 @@ export function ItemsPage() {
               <label><span>分类前缀</span><input value={createForm.categoryPrefix} onChange={(event) => setCreateForm({ ...createForm, categoryPrefix: event.target.value })} /></label>
               <label><span>名称</span><input required value={createForm.name} onChange={(event) => setCreateForm({ ...createForm, name: event.target.value })} /></label>
               <label><span>规格</span><input value={createForm.specification} onChange={(event) => setCreateForm({ ...createForm, specification: event.target.value })} /></label>
+              <label className="form-grid__wide"><span>推荐别名</span><input placeholder="例如：白酒、接待酒（用顿号或逗号分隔）" value={createForm.aliases} onChange={(event) => setCreateForm({ ...createForm, aliases: event.target.value })} /></label>
               <label><span>单位</span><input required value={createForm.unit} onChange={(event) => setCreateForm({ ...createForm, unit: event.target.value })} /></label>
               <label><span>分类</span><input required value={createForm.categoryId} onChange={(event) => setCreateForm({ ...createForm, categoryId: event.target.value })} /></label>
               <label><span>企业微信选项标识</span><input value={createForm.weComOptionKey} onChange={(event) => setCreateForm({ ...createForm, weComOptionKey: event.target.value })} /></label>
@@ -316,6 +322,7 @@ export function ItemsPage() {
               <label><span>编码</span><input required value={editForm.code} onChange={(event) => setEditForm({ ...editForm, code: event.target.value })} /></label>
               <label><span>名称</span><input required value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })} /></label>
               <label><span>规格</span><input value={editForm.specification} onChange={(event) => setEditForm({ ...editForm, specification: event.target.value })} /></label>
+              <label className="form-grid__wide"><span>推荐别名</span><input placeholder="例如：白酒、接待酒（用顿号或逗号分隔）" value={editForm.aliases} onChange={(event) => setEditForm({ ...editForm, aliases: event.target.value })} /></label>
               <label><span>单位</span><input required value={editForm.unit} onChange={(event) => setEditForm({ ...editForm, unit: event.target.value })} /></label>
               <label><span>企业微信选项标识</span><input value={editForm.weComOptionKey} onChange={(event) => setEditForm({ ...editForm, weComOptionKey: event.target.value })} /></label>
               <label><span>最低库存</span><input value={editForm.minimumStock} onChange={(event) => setEditForm({ ...editForm, minimumStock: event.target.value })} /></label>
@@ -337,7 +344,7 @@ export function ItemsPage() {
               aria-label="物品搜索"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="搜索编码、名称或选项标识"
+              placeholder="搜索编码、名称、别名或选项标识"
             />
           </label>
           <span className="toolbar-count">共 {filteredItems.length} 项</span>
@@ -352,6 +359,7 @@ export function ItemsPage() {
                   <th>编码</th>
                   <th>物品名称</th>
                   <th>规格</th>
+                  <th>推荐别名</th>
                   <th>单位</th>
                   <th>状态</th>
                   <th>操作</th>
@@ -363,6 +371,7 @@ export function ItemsPage() {
                     <td>{item.code}</td>
                     <td><strong>{item.name}</strong></td>
                     <td>{item.specification || "—"}</td>
+                    <td>{item.aliases?.join("、") || "—"}</td>
                     <td>{item.unit}</td>
                     <td><span className={`status-pill ${item.isActive ? "status-pill--active" : ""}`}>{item.isActive ? "启用" : "停用"}</span></td>
                     <td>

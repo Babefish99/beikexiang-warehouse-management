@@ -58,10 +58,10 @@ function createStorage(): Storage {
 }
 
 describe("outbound decision workflow", () => {
-  it("rejects non-positive, decimal, or overlong allocation quantities", () => {
+  it("rejects non-positive, decimal, or overlong actual quantities", () => {
     for (const quantity of ["", "0", "-1", "1.5", "123456789012345"]) {
       const candidate = draft({ decisions: [{ ...draft().decisions[0]!, allocations: [{ id: "a1", warehouseId: "wh-1", batchId: "b1", quantity }] }] });
-      expect(validateDecisionStep(approval, candidate.decisions, options)).toMatchObject({ a1: "数量必须为 1 到 14 位正整数" });
+      expect(validateDecisionStep(approval, candidate.decisions, options)).toMatchObject({ "quantity:line-wine": "数量必须为 1 到 14 位正整数" });
     }
   });
 
@@ -97,21 +97,21 @@ describe("outbound decision workflow", () => {
   it("requires zero issue to have no item or allocations and its own reason", () => {
     const zero = draft({ decisions: [{ ...draft().decisions[0]!, selectedItemId: "", zeroIssue: true, allocations: [], varianceReason: "无库存" }] });
     expect(validateDecisionStep(approval, zero.decisions, options)).toEqual({});
-    expect(normalizeDecisions(zero.decisions)).toEqual([{ approvalLineId: "line-wine", allocations: [], varianceReason: "无库存" }]);
+    expect(normalizeDecisions(zero.decisions)).toEqual([{ approvalLineId: "line-wine", actualQuantity: "0", allocations: [], varianceReason: "无库存" }]);
     const malformed = draft({ decisions: [{ ...draft().decisions[0]!, zeroIssue: true, varianceReason: "" }] });
     expect(validateDecisionStep(approval, malformed.decisions, options)).toMatchObject({
-      "line:line-wine": "零出库不能选择标准物品或填写批次分配",
+      "line:line-wine": "零出库不能选择标准物品或填写实际数量",
       "reason:line-wine": "少出或零出必须填写原因",
     });
   });
 
-  it("clears a decision's allocations only when its selected item changes", () => {
+  it("preserves the entered total quantity when its standard item changes", () => {
     const decision = draft().decisions[0]!;
     expect(changeDecisionItem(decision, "item-maotai")).toEqual(decision);
-    expect(changeDecisionItem(decision, "item-wine")).toEqual({ ...decision, selectedItemId: "item-wine", allocations: [] });
+    expect(changeDecisionItem(decision, "item-wine")).toEqual({ ...decision, selectedItemId: "item-wine", recommendationDismissed: false });
   });
 
-  it("preserves text while marking selections and batches that became stale", () => {
+  it("preserves text while marking a selected item that became stale", () => {
     const current = draft({ step: "review", decisions: [{
       ...draft().decisions[0]!, selectedItemId: "item-removed", varianceReason: "保留原因",
       allocations: [{ id: "stale-batch", warehouseId: "wh-1", batchId: "removed", quantity: "1" }],
@@ -119,7 +119,7 @@ describe("outbound decision workflow", () => {
     const reconciled = reconcileOutboundOptions(current, options);
     expect(reconciled.draft).toEqual(current);
     expect(reconciled.staleSelectedItemLineIds).toEqual(["line-wine"]);
-    expect(reconciled.staleAllocationIds).toEqual(["stale-batch"]);
+    expect(reconciled.staleAllocationIds).toEqual([]);
     expect(reconciled.draft.decisions[0]!.varianceReason).toBe("保留原因");
   });
 
@@ -130,13 +130,22 @@ describe("outbound decision workflow", () => {
     expect(current.decisions[0]!.varianceReason).toBe("保留原因");
   });
 
-  it("marks every allocation stale when their combined batch quantity no longer fits", () => {
+  it("prefills only a high-confidence recommendation that the administrator has not dismissed", () => {
+    const recommendedOptions = { ...options, lines: [{ ...options.lines[0], recommendedItemId: "item-wine" }] };
+    const blank = draft({ decisions: [{ ...draft().decisions[0]!, selectedItemId: "", allocations: [{ id: "q", warehouseId: "", batchId: "", quantity: "" }] }] });
+
+    expect(reconcileOutboundOptions(blank, recommendedOptions).draft.decisions[0]?.selectedItemId).toBe("item-wine");
+    const dismissed = { ...blank, decisions: [{ ...blank.decisions[0]!, recommendationDismissed: true }] };
+    expect(reconcileOutboundOptions(dismissed, recommendedOptions).draft.decisions[0]?.selectedItemId).toBe("");
+  });
+
+  it("does not expose or reconcile hidden batch allocations", () => {
     const current = draft({ decisions: [{ ...draft().decisions[0]!, allocations: [
       { id: "first", warehouseId: "wh-1", batchId: "b1", quantity: "3" },
       { id: "second", warehouseId: "wh-1", batchId: "b1", quantity: "2" },
     ] }] });
 
-    expect(reconcileOutboundOptions(current, options).staleAllocationIds).toEqual(["first", "second"]);
+    expect(reconcileOutboundOptions(current, options).staleAllocationIds).toEqual([]);
   });
 
   it("filters the supplied candidates by normalized name, code and specification while preserving their order", () => {
@@ -154,9 +163,9 @@ describe("outbound decision workflow", () => {
     expect(searchCandidateItems(candidates, "   ").map((item) => item.id)).toEqual(["loose", "code", "exact", "other"]);
   });
 
-  it("rounds each allocation amount before summing and retains immutable approval display data", () => {
+  it("estimates FIFO amount and retains immutable approval display data", () => {
     const summary = summarizeOutbound(approval, draft().decisions, options);
-    expect(summary.amount).toBe("110.02");
+    expect(summary.amount).toBe("200.01");
     expect(summary.lines).toEqual([{
       approvalLineId: "line-wine", requestedItemName: "飞天茅台", requestedQuantity: "2", unit: "瓶", note: "宴请",
       selectedItemId: "item-maotai", actualQuantity: "2", difference: "0",
@@ -166,7 +175,7 @@ describe("outbound decision workflow", () => {
   it("normalizes only the confirm API fields and never accepts a v1 draft", () => {
     expect(normalizeDecisions(draft().decisions)).toEqual([{
       approvalLineId: "line-wine", selectedItemId: "item-maotai",
-      allocations: [{ warehouseId: "wh-1", batchId: "b1", quantity: "1" }, { warehouseId: "wh-2", batchId: "b2", quantity: "1" }],
+      actualQuantity: "2", allocations: [],
     }]);
     expect(outboundDraftKey("user/a", "approval b")).toBe("warehouse.outbound.v2.user%2Fa.approval%20b");
     expect(outboundDraftIndexKey("user/a")).toBe("warehouse.outbound.index.v2.user%2Fa");

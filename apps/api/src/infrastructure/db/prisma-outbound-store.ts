@@ -11,6 +11,7 @@ import type {
   OutboundStore,
   PendingApproval,
 } from "../../application/inventory/outbound-service.js";
+import { normalizeRecommendationText } from "../../domain/items/item-recommendation.js";
 import {
   assertPrismaPeriodOpen,
   runInventoryTransaction,
@@ -157,10 +158,16 @@ export class PrismaOutboundStore implements OutboundStore {
     if (itemIds.length === 0) return [];
     const items = await this.prisma.item.findMany({
       where: { id: { in: itemIds }, isActive: true },
-      select: { id: true, code: true, name: true, specification: true, unit: true, isActive: true },
+      select: { id: true, code: true, name: true, specification: true, aliases: true, unit: true, isActive: true },
       orderBy: [{ code: "asc" }, { id: "asc" }],
     });
     return items.map(({ specification, ...item }) => ({ ...item, ...(specification ? { specification } : {}) }));
+  }
+
+  async listRecommendationLearnings() {
+    return this.prisma.itemRecommendationLearning.findMany({
+      select: { normalizedDescription: true, normalizedUnit: true, itemId: true, confirmationCount: true },
+    });
   }
 
   async listBatches(itemIds: string[]) {
@@ -170,7 +177,7 @@ export class PrismaOutboundStore implements OutboundStore {
       where: { itemId: { in: selectedItemIds }, remainingQuantity: { gt: "0" } },
       include: {
         warehouse: { select: { name: true } },
-        batch: { select: { id: true, batchNo: true, itemId: true, unitCost: true } },
+        batch: { select: { id: true, batchNo: true, itemId: true, unitCost: true, purchasedAt: true } },
       },
       orderBy: [{ warehouseId: "asc" }, { batchId: "asc" }],
     });
@@ -179,6 +186,7 @@ export class PrismaOutboundStore implements OutboundStore {
       warehouseId: balance.warehouseId,
       warehouseName: balance.warehouse.name,
       batchNo: balance.batch.batchNo,
+      purchasedAt: balance.batch.purchasedAt.toISOString(),
       itemId: balance.batch.itemId,
       remainingQuantity: balance.remainingQuantity.toString(),
       unitCost: balance.batch.unitCost.toString(),
@@ -371,6 +379,19 @@ export class PrismaOutboundStore implements OutboundStore {
         },
       });
       if (decisionRows.length > 0) await transaction.outboundDecisionLine.createMany({ data: decisionRows });
+      const approvalLinesById = new Map(freshApproval.lines.map((line) => [line.id, line]));
+      for (const decision of freshValidation.decisions) {
+        if (!decision.selectedItemId || new Decimal(decision.actualQuantity).isZero()) continue;
+        const line = approvalLinesById.get(decision.approvalLineId);
+        if (!line) continue;
+        const normalizedDescription = normalizeRecommendationText(line.requestedItemName);
+        const normalizedUnit = normalizeRecommendationText(line.unit);
+        await transaction.itemRecommendationLearning.upsert({
+          where: { normalizedDescription_normalizedUnit_itemId: { normalizedDescription, normalizedUnit, itemId: decision.selectedItemId } },
+          create: { normalizedDescription, normalizedUnit, itemId: decision.selectedItemId, confirmationCount: 1, lastConfirmedAt: occurredAt },
+          update: { confirmationCount: { increment: 1 }, lastConfirmedAt: occurredAt },
+        });
+      }
       if (persistedAllocations.length > 0) {
         await transaction.outboundAllocation.createMany({
           data: persistedAllocations.map((allocation) => ({

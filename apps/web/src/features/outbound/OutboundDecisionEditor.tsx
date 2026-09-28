@@ -1,4 +1,3 @@
-import { Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { searchCandidateItems, type CandidateItem } from "./outbound-workflow";
@@ -34,6 +33,10 @@ function itemLabel(item: CandidateItem): string {
   return `${item.code} ${item.name}${item.specification ? ` / ${item.specification}` : ""} / ${item.unit} / 可用 ${item.availableQuantity}`;
 }
 
+function confidenceLabel(confidence: CandidateItem["recommendationConfidence"]): string {
+  return confidence === "HIGH" ? "高置信度" : confidence === "MEDIUM" ? "可参考" : "需人工判断";
+}
+
 export function OutboundDecisionEditor({ approval, options, draft, errors, onChange, disabled = false }: OutboundDecisionEditorProps) {
   const [searches, setSearches] = useState<Record<string, string>>({});
   const updateDecision = (lineId: string, update: (decision: DecisionDraft) => DecisionDraft) => {
@@ -44,7 +47,8 @@ export function OutboundDecisionEditor({ approval, options, draft, errors, onCha
   return <div className="outbound-decision-editor">{approval.lines.map((line) => {
     const decision = draft.decisions.find((candidate) => candidate.approvalLineId === line.id);
     if (!decision) return null;
-    const candidateItems = options.lines.find((candidate) => candidate.approvalLineId === line.id)?.items ?? [];
+    const lineOptions = options.lines.find((candidate) => candidate.approvalLineId === line.id);
+    const candidateItems = lineOptions?.items ?? [];
     const selectedItem = candidateItems.find((candidate) => candidate.id === decision.selectedItemId);
     const search = searches[line.id] ?? "";
     const visibleItems = searchCandidateItems(candidateItems, search);
@@ -54,17 +58,20 @@ export function OutboundDecisionEditor({ approval, options, draft, errors, onCha
     const lineError = errors[`line:${line.id}`];
     const reasonError = errors[`reason:${line.id}`];
 
-    const changeItem = (selectedItemId: string) => {
-      if (selectedItemId === decision.selectedItemId) return;
-      const hasAllocationInput = decision.allocations.some((allocation) => allocation.warehouseId || allocation.batchId || allocation.quantity);
-      if (hasAllocationInput && !window.confirm("更换标准物品会清空本项已有分配，是否继续？")) return;
-      updateDecision(line.id, (current) => ({
-        ...current,
-        selectedItemId,
-        zeroIssue: false,
-        allocations: hasAllocationInput || current.selectedItemId ? [] : current.allocations,
-      }));
-    };
+    const recommendedItem = candidateItems.find((candidate) => candidate.id === lineOptions?.recommendedItemId) ?? candidateItems[0];
+    const quantityError = errors[`quantity:${line.id}`];
+
+    const changeItem = (selectedItemId: string) => updateDecision(line.id, (current) => ({
+      ...current,
+      selectedItemId,
+      zeroIssue: false,
+      recommendationDismissed: !selectedItemId,
+    }));
+
+    const changeActualQuantity = (quantity: string) => updateDecision(line.id, (current) => ({
+      ...current,
+      allocations: [{ id: current.allocations[0]?.id ?? crypto.randomUUID(), warehouseId: "", batchId: "", quantity }],
+    }));
 
     return <fieldset className="outbound-decision-line" data-testid={`outbound-decision-line-${line.id}`} key={line.id}>
       <legend>审批意向</legend>
@@ -88,26 +95,18 @@ export function OutboundDecisionEditor({ approval, options, draft, errors, onCha
             {visibleItems.map((item) => <option value={item.id} key={item.id}>{itemLabel(item)}</option>)}
           </select>
           </label>
+          {recommendedItem ? <div className="outbound-recommendation" role="status">
+            <div><strong>{lineOptions?.recommendedItemId === recommendedItem.id ? "系统推荐" : "候选提示"}</strong><span className={`status-pill ${recommendedItem.recommendationConfidence === "HIGH" ? "status-pill--active" : ""}`}>{confidenceLabel(recommendedItem.recommendationConfidence)}</span></div>
+            <p>{recommendedItem.code} {recommendedItem.name}：{(recommendedItem.recommendationReasons ?? ["单位一致，需人工确认"]).join("；")}</p>
+            {recommendedItem.recommendationConfidence === "LOW" ? <small>置信度不足，系统未自动选择，请管理员确认。</small> : <small>推荐项可修改；审批原始物品描述保持不变。</small>}
+          </div> : null}
           {visibleItems.length === 0 ? <small className="outbound-item-search-status" role="status">{search.trim() ? "没有匹配的标准物品，请修改或清空搜索。" : "当前没有同单位且有库存的标准物品。"}</small> : null}
         </>}
-        {decision.allocations.map((allocation, index) => {
-          const selectedBatches = options.batches.filter((batch) => batch.itemId === decision.selectedItemId);
-          const warehouses = new Map(selectedBatches.map((batch) => [batch.warehouseId, batch.warehouseName || "仓库名称未提供"]));
-          const batches = selectedBatches.filter((batch) => !allocation.warehouseId || batch.warehouseId === allocation.warehouseId);
-          const allocationError = errors[allocation.id];
-          const updateAllocation = (patch: Partial<AllocationRow>) => updateDecision(line.id, (current) => ({
-            ...current,
-            allocations: current.allocations.map((candidate) => candidate.id === allocation.id ? { ...candidate, ...patch } : candidate),
-          }));
-          return <div className="outbound-decision-allocation" data-testid="outbound-allocation-row" key={allocation.id}>
-            <label><span>实际仓库</span><select disabled={disabled || !decision.selectedItemId} aria-invalid={Boolean(allocationError)} value={allocation.warehouseId} onChange={(event) => updateAllocation({ warehouseId: event.target.value, batchId: "" })}><option value="">选择仓库</option>{allocation.warehouseId && !warehouses.has(allocation.warehouseId) ? <option value={allocation.warehouseId}>已失效：{allocation.warehouseId}</option> : null}{[...warehouses].map(([id, name]) => <option value={id} key={id}>{name}</option>)}</select></label>
-            <label><span>采购批次</span><select disabled={disabled || !decision.selectedItemId || !allocation.warehouseId} aria-invalid={Boolean(allocationError)} value={allocation.batchId} onChange={(event) => updateAllocation({ batchId: event.target.value })}><option value="">选择批次</option>{allocation.batchId && !batches.some((batch) => batch.batchId === allocation.batchId) ? <option value={allocation.batchId}>已失效：{allocation.batchId}</option> : null}{batches.map((batch) => <option value={batch.batchId} key={`${batch.warehouseId}:${batch.batchId}`}>{batch.batchNo || "批次号未提供"} / 可用 {batch.remainingQuantity} / 单价 {batch.unitCost}</option>)}</select></label>
-            <label><span>实际数量</span><input disabled={disabled} type="number" inputMode="numeric" min="1" step="1" aria-invalid={Boolean(allocationError)} value={allocation.quantity} onChange={(event) => updateAllocation({ quantity: event.target.value })} /></label>
-            <button disabled={disabled} className="button button--secondary button--small" type="button" aria-label={`删除第 ${index + 1} 条分配`} onClick={() => updateDecision(line.id, (current) => ({ ...current, allocations: current.allocations.filter((candidate) => candidate.id !== allocation.id) }))}><Trash2 size={15} /></button>
-            {allocationError ? <small className="field-error">{allocationError}</small> : null}
-          </div>;
-        })}
-        <button className="button button--secondary button--small outbound-add-allocation" type="button" disabled={disabled || !decision.selectedItemId} onClick={() => updateDecision(line.id, (current) => ({ ...current, allocations: [...current.allocations, newAllocation()] }))}><Plus size={15} />增加分配</button>
+        <div className="outbound-auto-allocation">
+          <label><span>实际数量</span><input disabled={disabled || !decision.selectedItemId} type="number" inputMode="numeric" min="1" step="1" aria-invalid={Boolean(quantityError)} value={decision.allocations[0]?.quantity ?? ""} onChange={(event) => changeActualQuantity(event.target.value)} /></label>
+          <div><strong>仓库与批次由系统自动匹配</strong><small>确认时按采购日期最早优先分配；库存不足会阻止提交。</small></div>
+          {quantityError ? <small className="field-error">{quantityError}</small> : null}
+        </div>
       </> : null}
       <div className="outbound-decision-line__totals"><span>审批 {line.requestedQuantity} {line.unit}</span><span>实际 {actual} {line.unit}</span><span>差额 {Number(line.requestedQuantity) - actual} {line.unit}</span></div>
       {isShort || decision.zeroIssue ? <label><span>少出 / 零出原因</span><textarea disabled={disabled} required aria-invalid={Boolean(reasonError)} value={decision.varianceReason} onChange={(event) => updateDecision(line.id, (current) => ({ ...current, varianceReason: event.target.value }))} />{reasonError ? <small className="field-error">{reasonError}</small> : null}</label> : null}

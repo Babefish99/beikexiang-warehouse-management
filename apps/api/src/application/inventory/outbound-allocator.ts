@@ -27,6 +27,7 @@ export interface SelectableOutboundItem {
   code: string;
   name: string;
   specification?: string;
+  aliases?: string[];
   unit: string;
   isActive: boolean;
 }
@@ -34,6 +35,7 @@ export interface SelectableOutboundItem {
 export interface OutboundDecisionInput {
   approvalLineId: string;
   selectedItemId?: string;
+  actualQuantity?: string;
   allocations: Array<{ warehouseId: string; batchId: string; quantity: string }>;
   varianceReason?: string;
 }

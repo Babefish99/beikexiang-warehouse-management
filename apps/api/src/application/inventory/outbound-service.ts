@@ -2,6 +2,7 @@ import { Decimal } from "decimal.js";
 
 import { approvalUnitsMatch } from "../../domain/approvals/approval-intent.js";
 import type { InventoryLedgerEntry } from "../../domain/inventory/ledger.js";
+import { normalizeRecommendationText, recommendStandardItems, type ItemRecommendationLearning, type RecommendationConfidence } from "../../domain/items/item-recommendation.js";
 import {
   OutboundAllocator,
   type AllocationBatch,
@@ -10,6 +11,7 @@ import {
   type OutboundDecisionInput,
   type SelectableOutboundItem,
 } from "./outbound-allocator.js";
+import { allocateOutboundBatches } from "./outbound-auto-allocation.js";
 import {
   createInventoryMemoryState,
   inventoryBalanceKey,
@@ -54,15 +56,19 @@ export interface OutboundBatchOption {
 export interface OutboundStockBatch extends AllocationBatch {
   warehouseName?: string;
   batchNo?: string;
+  purchasedAt?: string;
 }
 
 export interface OutboundItemOption extends SelectableOutboundItem {
   availableQuantity: string;
+  recommendationScore: number;
+  recommendationConfidence: RecommendationConfidence;
+  recommendationReasons: string[];
 }
 
 export interface OutboundOptions {
   approvalId: string;
-  lines: Array<{ approvalLineId: string; items: OutboundItemOption[] }>;
+  lines: Array<{ approvalLineId: string; recommendedItemId?: string; items: OutboundItemOption[] }>;
   batches: OutboundBatchOption[];
 }
 
@@ -76,6 +82,7 @@ export interface OutboundStore {
   getApproval(approvalId: string): Promise<PendingApproval | undefined>;
   listPending(): Promise<PendingApproval[]>;
   listCandidateItems(): Promise<SelectableOutboundItem[]>;
+  listRecommendationLearnings(): Promise<ItemRecommendationLearning[]>;
   listBatches(itemIds: string[]): Promise<OutboundStockBatch[]>;
   commitOutbound(approval: PendingApproval, validation: AllocationValidationResult, operatorId: string): Promise<OutboundOrderResult>;
   cancelApproval(approvalId: string, reason: string): Promise<void>;
@@ -87,6 +94,7 @@ export class InMemoryOutboundStore implements OutboundStore {
   private readonly state: InventoryMemoryState;
   private readonly orders: OutboundOrderResult[] = [];
   private readonly seededItems = new Map<string, SelectableOutboundItem>();
+  private readonly recommendationLearnings = new Map<string, ItemRecommendationLearning>();
 
   constructor(
     state: InventoryMemoryState = createInventoryMemoryState(),
@@ -185,6 +193,10 @@ export class InMemoryOutboundStore implements OutboundStore {
     return [...items.values()];
   }
 
+  async listRecommendationLearnings(): Promise<ItemRecommendationLearning[]> {
+    return [...this.recommendationLearnings.values()].map((learning) => structuredClone(learning));
+  }
+
   async listBatches(itemIds: string[]): Promise<OutboundStockBatch[]> {
     const selectedIds = new Set(itemIds);
     const warehouseNames = new Map((await this.warehouseLoader?.() ?? []).map((warehouse) => [warehouse.id, warehouse.name]));
@@ -193,11 +205,13 @@ export class InMemoryOutboundStore implements OutboundStore {
       .map((batch) => {
         const warehouseName = warehouseNames.get(batch.warehouseId);
         const batchNo = this.state.batches.get(batch.batchId)?.batchNo;
+        const purchasedAt = this.state.batches.get(batch.batchId)?.purchasedAt;
         return {
           id: batch.batchId,
           warehouseId: batch.warehouseId,
           ...(warehouseName ? { warehouseName } : {}),
           ...(batchNo ? { batchNo } : {}),
+          ...(purchasedAt ? { purchasedAt } : {}),
           itemId: batch.itemId,
           remainingQuantity: batch.remainingQuantity,
           unitCost: batch.unitCost,
@@ -315,6 +329,22 @@ export class InMemoryOutboundStore implements OutboundStore {
     for (const decision of stagedDecisions) this.state.outboundDecisions.set(decision.id, decision);
     for (const allocation of stagedAllocations) this.state.issuedAllocations.set(allocation.id, allocation);
     this.state.ledger.push(...stagedLedger);
+    const approvalLines = new Map(approval.lines.map((line) => [line.id, line]));
+    for (const decision of stagedDecisions) {
+      if (!decision.selectedItemId || new Decimal(decision.actualQuantity).isZero()) continue;
+      const line = approvalLines.get(decision.approvalLineId);
+      if (!line) continue;
+      const normalizedDescription = normalizeRecommendationText(line.requestedItemName);
+      const normalizedUnit = normalizeRecommendationText(line.unit);
+      const key = `${normalizedDescription}:${normalizedUnit}:${decision.selectedItemId}`;
+      const current = this.recommendationLearnings.get(key);
+      this.recommendationLearnings.set(key, {
+        normalizedDescription,
+        normalizedUnit,
+        itemId: decision.selectedItemId,
+        confirmationCount: (current?.confirmationCount ?? 0) + 1,
+      });
+    }
     return structuredClone(order);
   }
 
@@ -381,7 +411,10 @@ export class OutboundService {
     }
     if (approval.status !== "PENDING_OUTBOUND") throw new Error("approval is already closed");
 
-    const items = await this.store.listCandidateItems();
+    const [items, learnings] = await Promise.all([
+      this.store.listCandidateItems(),
+      this.store.listRecommendationLearnings(),
+    ]);
     const allBatches = await this.store.listBatches(items.map((item) => item.id));
     const positiveBatches = allBatches.filter((batch) => new Decimal(batch.remainingQuantity).gt(0));
     const availableByItem = new Map<string, Decimal>();
@@ -389,20 +422,36 @@ export class OutboundService {
       availableByItem.set(batch.itemId, (availableByItem.get(batch.itemId) ?? new Decimal(0)).plus(batch.remainingQuantity));
     }
     const lines = approval.lines.map((line) => {
-      const candidates = items
+      const eligibleItems = items
         .filter((item) => item.isActive && approvalUnitsMatch(line.unit, item.unit) && availableByItem.has(item.id))
-        .filter((item) => line.legacyResolutionStatus !== "EXACT_LOCKED" || item.id === line.itemId)
-        .sort((left, right) => candidateRank(left, line.requestedItemName) - candidateRank(right, line.requestedItemName) || compareItemCode(left, right))
+        .filter((item) => line.legacyResolutionStatus !== "EXACT_LOCKED" || item.id === line.itemId);
+      const recommendation = recommendStandardItems({
+        requestedDescription: line.requestedItemName,
+        requestedUnit: line.unit,
+        items: eligibleItems.map((item) => ({ ...item, aliases: item.aliases ?? [] })),
+        learnings,
+      });
+      const recommendationByItem = new Map(recommendation.candidates.map((candidate) => [candidate.itemId, candidate]));
+      const candidates = eligibleItems
+        .sort((left, right) => (recommendationByItem.get(right.id)?.score ?? 0) - (recommendationByItem.get(left.id)?.score ?? 0) || compareItemCode(left, right))
         .map((item) => ({
           id: item.id,
           code: item.code,
           name: item.name,
           ...(item.specification ? { specification: item.specification } : {}),
+          ...(item.aliases?.length ? { aliases: item.aliases } : {}),
           unit: item.unit,
           isActive: item.isActive,
           availableQuantity: availableByItem.get(item.id)!.toString(),
+          recommendationScore: recommendationByItem.get(item.id)?.score ?? 0,
+          recommendationConfidence: recommendationByItem.get(item.id)?.confidence ?? "LOW",
+          recommendationReasons: recommendationByItem.get(item.id)?.reasons ?? ["单位一致，需人工确认"],
         }));
-      return { approvalLineId: line.id, items: candidates };
+      return {
+        approvalLineId: line.id,
+        ...(recommendation.recommendedItemId ? { recommendedItemId: recommendation.recommendedItemId } : {}),
+        items: candidates,
+      };
     });
     const candidateIds = new Set(lines.flatMap((line) => line.items.map((item) => item.id)));
     return {
@@ -410,7 +459,7 @@ export class OutboundService {
       lines,
       batches: positiveBatches
         .filter((batch) => candidateIds.has(batch.itemId))
-        .map(({ id: batchId, ...batch }) => ({ batchId, ...batch })),
+        .map(({ id: batchId, purchasedAt: _purchasedAt, ...batch }) => ({ batchId, ...batch })),
     };
   }
 
@@ -423,7 +472,27 @@ export class OutboundService {
       this.store.listCandidateItems(),
       this.store.listBatches(selectedItemIds),
     ]);
-    const validation = this.allocator.validate({ lines: approval.lines, items, batches, decisions: input.decisions });
+    const availableForAutomaticAllocation = batches.map((batch) => ({
+      ...batch,
+      purchasedAt: batch.purchasedAt ?? new Date(0).toISOString(),
+    }));
+    const decisions = input.decisions.map((decision) => {
+      if (decision.actualQuantity === undefined) return decision;
+      if (decision.allocations.length > 0) throw new Error("automatic allocation cannot include client batch allocations");
+      if (decision.actualQuantity.trim() === "0") return { ...decision, allocations: [] };
+      if (!decision.selectedItemId) throw new Error("selected item is required for positive issue");
+      const allocations = allocateOutboundBatches({
+        itemId: decision.selectedItemId,
+        quantity: decision.actualQuantity,
+        batches: availableForAutomaticAllocation,
+      });
+      for (const allocation of allocations) {
+        const batch = availableForAutomaticAllocation.find((candidate) => candidate.id === allocation.batchId && candidate.warehouseId === allocation.warehouseId);
+        if (batch) batch.remainingQuantity = new Decimal(batch.remainingQuantity).minus(allocation.quantity).toString();
+      }
+      return { ...decision, allocations };
+    });
+    const validation = this.allocator.validate({ lines: approval.lines, items, batches, decisions });
     await this.assertPeriodOpen?.();
     return this.store.commitOutbound(approval, validation, input.operatorId);
   }

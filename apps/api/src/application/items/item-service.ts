@@ -1,4 +1,4 @@
-import type { ItemDefinition } from "../../domain/items/item.js";
+import { normalizeItemAliases, type ItemDefinition } from "../../domain/items/item.js";
 import { assertItemCodeChangeAllowed, assertItemDefinitionInput, ensureUniqueItemCode, generateItemCode, normalizeItemCode } from "./item-code-policy.js";
 
 export interface ItemInput {
@@ -6,6 +6,7 @@ export interface ItemInput {
   categoryPrefix?: string;
   name: string;
   specification?: string;
+  aliases?: string[];
   unit: string;
   categoryId: string;
   weComOptionKey?: string;
@@ -70,6 +71,7 @@ export class ItemService {
       code,
       name: input.name.trim(),
       specification: input.specification?.trim() || undefined,
+      aliases: normalizeItemAliases(input.aliases),
       unit: input.unit.trim(),
       categoryId: input.categoryId.trim(),
       weComOptionKey: input.weComOptionKey?.trim() || undefined,
@@ -89,7 +91,7 @@ export class ItemService {
     const existing = await this.repository.list(true);
     ensureUniqueItemCode(nextCode, existing.filter((item) => item.id !== itemId).map((item) => item.code));
     assertItemDefinitionInput({ ...input, code: nextCode });
-    const updated: ItemDefinition = { ...current, ...input, code: nextCode, name: input.name.trim(), unit: input.unit.trim(), categoryId: input.categoryId.trim(), specification: input.specification?.trim() || undefined, weComOptionKey: input.weComOptionKey?.trim() || undefined };
+    const updated: ItemDefinition = { ...current, ...input, code: nextCode, name: input.name.trim(), unit: input.unit.trim(), categoryId: input.categoryId.trim(), specification: input.specification?.trim() || undefined, aliases: normalizeItemAliases(input.aliases), weComOptionKey: input.weComOptionKey?.trim() || undefined };
     await this.repository.save(updated);
     await this.rebuildApprovalReferenceIndex();
     return updated;

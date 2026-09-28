@@ -363,7 +363,7 @@ export function MobileOutboundFlow({ userId, pending, pendingState, onReloadOpti
         : <article className="outbound-card" key={item.id}><strong>{item.weComSpNo}</strong><span>{item.lines.length} 个审批意向 · {inventoryStatusLabel(item.status)}</span><div className="outbound-card__actions"><button className="button button--primary" type="button" disabled={loading} onClick={() => void start(item)}>办理出库</button><button className="button button--danger" type="button" disabled={loading} onClick={() => void cancel(item)}>取消待办</button></div></article>;
     })}</div></> : null}
     {message ? <div className={message === "待办已取消" ? "success-notice" : "form-error"} role={message === "待办已取消" ? "status" : "alert"}>{message}</div> : null}
-    {draft?.step === "allocate" && approval ? <><h2>分配库存</h2>{loading && !options ? <div className="notice">正在读取最新出库选项…</div> : null}{options ? <OutboundDecisionEditor approval={approval} options={options} draft={draft} errors={errors} disabled={loading} onChange={(next) => {
+    {draft?.step === "allocate" && approval ? <><h2>确认出库内容</h2>{loading && !options ? <div className="notice">正在读取最新出库选项…</div> : null}{options ? <OutboundDecisionEditor approval={approval} options={options} draft={draft} errors={errors} disabled={loading} onChange={(next) => {
       if (operationActive.current || submitLock.current) return;
       persistDraft(next, approval);
       if (!Object.keys(errors).length) {
@@ -390,10 +390,7 @@ function MobileReview({ approval, draft, options }: { approval: PendingApproval;
     return <article className="outbound-mobile-review__line" data-testid={`outbound-review-line-${line.approvalLineId}`} key={line.approvalLineId}>
       <strong>申请：{line.requestedItemName} {line.requestedQuantity} {line.unit}</strong>
       <span>标准物品：{decision.zeroIssue ? "本项不出库" : `${item?.code ?? decision.selectedItemId} ${item?.name ?? ""}`}</span>
-      {decision.allocations.map((allocation) => {
-        const batch = options.batches.find((candidate) => candidate.warehouseId === allocation.warehouseId && candidate.batchId === allocation.batchId);
-        return <span key={allocation.id}>分配：{batch?.warehouseName || "仓库名称未提供"} / {batch?.batchNo || "批次号未提供"} / {allocation.quantity} {line.unit}</span>;
-      })}
+      {!decision.zeroIssue ? <span>仓库与批次：提交时由系统按先进先出自动匹配</span> : null}
       <span>实际 {line.actualQuantity} / 审批 {line.requestedQuantity} {line.unit}</span>
       {line.difference !== "0" ? <span>差额 {line.difference}；原因：{decision.varianceReason}</span> : null}
     </article>;

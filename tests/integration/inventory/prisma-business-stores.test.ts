@@ -41,6 +41,7 @@ const historicalMigrationPaths = [
   "prisma/migrations/20260824170000_opening_stock_import/migration.sql",
 ];
 const approvalIntentMigrationPath = "prisma/migrations/20260904183000_approval_intent_outbound_decisions/migration.sql";
+const itemRecommendationMigrationPath = "prisma/migrations/20260928111500_item_recommendation/migration.sql";
 const legacySchemaFixturePath = "tests/integration/inventory/fixtures/prisma-business-stores-legacy.prisma";
 
 async function applyMigrations(client: PoolClient, paths: string[]) {
@@ -799,7 +800,7 @@ describe.skipIf(!databaseUrl)("Prisma outbound decisions after the intent migrat
     const migrationClient = await migrationPool.connect();
     try {
       await migrationClient.query(`SET search_path TO "${outboundSchemaName}"`);
-      await applyMigrations(migrationClient, [...historicalMigrationPaths, approvalIntentMigrationPath]);
+      await applyMigrations(migrationClient, [...historicalMigrationPaths, approvalIntentMigrationPath, itemRecommendationMigrationPath]);
     } finally {
       migrationClient.release();
       await migrationPool.end();
@@ -817,6 +818,7 @@ describe.skipIf(!databaseUrl)("Prisma outbound decisions after the intent migrat
   });
 
   beforeEach(async () => {
+    await prisma.itemRecommendationLearning.deleteMany();
     await prisma.returnLine.deleteMany();
     await prisma.returnOrder.deleteMany();
     await prisma.inventoryLedgerEntry.deleteMany();
@@ -1023,9 +1025,10 @@ describe.skipIf(!databaseUrl)("Prisma outbound decisions after the intent migrat
 
     expect(options.lines).toEqual([{
       approvalLineId: "task6-candidate-line",
+      recommendedItemId: "task6-tea",
       items: [
-        { id: "task6-tea", code: "T6-TEA", name: "Tea supplies", unit: "box", isActive: true, availableQuantity: "5" },
-        { id: "task6-paper", code: "T6-PAPER", name: "Unrelated paper", unit: "box", isActive: true, availableQuantity: "4" },
+        { id: "task6-tea", code: "T6-TEA", name: "Tea supplies", unit: "box", isActive: true, availableQuantity: "5", recommendationScore: 100, recommendationConfidence: "HIGH", recommendationReasons: ["标准名称完全匹配"] },
+        { id: "task6-paper", code: "T6-PAPER", name: "Unrelated paper", unit: "box", isActive: true, availableQuantity: "4", recommendationScore: 0, recommendationConfidence: "LOW", recommendationReasons: ["单位一致，需人工确认"] },
       ],
     }]);
     expect(options.batches).toEqual([
@@ -1034,9 +1037,82 @@ describe.skipIf(!databaseUrl)("Prisma outbound decisions after the intent migrat
       { batchId: "task6-shared-candidate-batch", batchNo: "20260907-001", warehouseId: "warehouse-2", warehouseName: "接收仓库", itemId: "task6-tea", remainingQuantity: "3", unitCost: "12.5" },
     ]);
     await expect(store.listBatches(["task6-tea"])).resolves.toEqual([
-      { id: "task6-shared-candidate-batch", batchNo: "20260907-001", warehouseId: "warehouse-1", warehouseName: "总部仓库", itemId: "task6-tea", remainingQuantity: "2", unitCost: "12.5" },
-      { id: "task6-shared-candidate-batch", batchNo: "20260907-001", warehouseId: "warehouse-2", warehouseName: "接收仓库", itemId: "task6-tea", remainingQuantity: "3", unitCost: "12.5" },
+      { id: "task6-shared-candidate-batch", batchNo: "20260907-001", purchasedAt: "2026-09-04T00:00:00.000Z", warehouseId: "warehouse-1", warehouseName: "总部仓库", itemId: "task6-tea", remainingQuantity: "2", unitCost: "12.5" },
+      { id: "task6-shared-candidate-batch", batchNo: "20260907-001", purchasedAt: "2026-09-04T00:00:00.000Z", warehouseId: "warehouse-2", warehouseName: "接收仓库", itemId: "task6-tea", remainingQuantity: "3", unitCost: "12.5" },
     ]);
+  });
+
+  it("automatically allocates FIFO batches and learns the confirmed item for the next approval", async () => {
+    await createItem({ id: "task6-learned-item", code: "T6-LEARN", name: "Different catalog name" });
+    await createBatch({
+      id: "task6-fifo-early",
+      batchNo: "20260901-001",
+      itemId: "task6-learned-item",
+      quantity: "1",
+      balances: [{ warehouseId: "warehouse-1", quantity: "1" }],
+    });
+    await createBatch({
+      id: "task6-fifo-late",
+      batchNo: "20260902-001",
+      itemId: "task6-learned-item",
+      quantity: "2",
+      balances: [{ warehouseId: "warehouse-1", quantity: "2" }],
+    });
+    await prisma.procurementBatch.update({ where: { id: "task6-fifo-early" }, data: { purchasedAt: new Date("2026-09-01T00:00:00.000Z") } });
+    await prisma.procurementBatch.update({ where: { id: "task6-fifo-late" }, data: { purchasedAt: new Date("2026-09-02T00:00:00.000Z") } });
+    const firstApproval = await createIntentApproval([{
+      id: "task6-learning-line-1",
+      requestedItemName: "Reception bottle",
+      requestedQuantity: "2",
+    }]);
+    const service = new OutboundService(new PrismaOutboundStore(prisma, outboundSchemaName));
+
+    expect((await service.listOptions(firstApproval.id)).lines[0]).not.toHaveProperty("recommendedItemId");
+    const result = await service.confirm({
+      approvalId: firstApproval.id,
+      operatorId: "task6-operator",
+      decisions: [{
+        approvalLineId: "task6-learning-line-1",
+        selectedItemId: "task6-learned-item",
+        actualQuantity: "2",
+        allocations: [],
+      }],
+    });
+
+    await expect(prisma.outboundAllocation.findMany({
+      where: { outboundOrderId: result.id },
+      orderBy: { batchId: "asc" },
+      select: { batchId: true, quantity: true },
+    })).resolves.toEqual([
+      { batchId: "task6-fifo-early", quantity: new Prisma.Decimal("1") },
+      { batchId: "task6-fifo-late", quantity: new Prisma.Decimal("1") },
+    ]);
+    await expect(prisma.stockBalance.findMany({
+      where: { itemId: "task6-learned-item" },
+      orderBy: { batchId: "asc" },
+      select: { batchId: true, remainingQuantity: true },
+    })).resolves.toEqual([
+      { batchId: "task6-fifo-early", remainingQuantity: new Prisma.Decimal("0") },
+      { batchId: "task6-fifo-late", remainingQuantity: new Prisma.Decimal("1") },
+    ]);
+    await expect(prisma.itemRecommendationLearning.findMany({
+      where: { itemId: "task6-learned-item" },
+      select: { normalizedDescription: true, normalizedUnit: true, confirmationCount: true },
+    })).resolves.toEqual([{ normalizedDescription: "receptionbottle", normalizedUnit: "box", confirmationCount: 1 }]);
+
+    const secondApproval = await createIntentApproval([{
+      id: "task6-learning-line-2",
+      requestedItemName: "Reception bottle",
+      requestedQuantity: "1",
+    }]);
+    expect((await service.listOptions(secondApproval.id)).lines[0]).toMatchObject({
+      recommendedItemId: "task6-learned-item",
+      items: [expect.objectContaining({
+        id: "task6-learned-item",
+        recommendationConfidence: "HIGH",
+        recommendationReasons: ["历史确认 1 次"],
+      })],
+    });
   });
 
   it("atomically persists a split positive decision and a zero decision with per-line audit data", async () => {
@@ -1241,7 +1317,7 @@ describe.skipIf(!databaseUrl)("Prisma approval synchronization after the intent 
     const migrationClient = await migrationPool.connect();
     try {
       await migrationClient.query(`SET search_path TO "${syncSchemaName}"`);
-      await applyMigrations(migrationClient, [...historicalMigrationPaths, approvalIntentMigrationPath]);
+      await applyMigrations(migrationClient, [...historicalMigrationPaths, approvalIntentMigrationPath, itemRecommendationMigrationPath]);
     } finally {
       migrationClient.release();
       await migrationPool.end();

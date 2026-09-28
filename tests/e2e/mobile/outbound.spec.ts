@@ -78,15 +78,7 @@ async function mockPending(page: Page, read: () => object[] = () => [pendingAppr
 async function selectTwoBatchAndZeroIssue(page: Page) {
   const wine = page.getByTestId("outbound-decision-line-line-wine");
   await wine.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-maotai");
-  let allocations = wine.getByTestId("outbound-allocation-row");
-  await allocations.nth(0).getByLabel("实际仓库").selectOption("warehouse-1");
-  await allocations.nth(0).getByLabel("采购批次").selectOption("wine-a");
-  await allocations.nth(0).getByLabel("实际数量").fill("1");
-  await wine.getByRole("button", { name: "增加分配" }).click();
-  allocations = wine.getByTestId("outbound-allocation-row");
-  await allocations.nth(1).getByLabel("实际仓库").selectOption("warehouse-2");
-  await allocations.nth(1).getByLabel("采购批次").selectOption("wine-b");
-  await allocations.nth(1).getByLabel("实际数量").fill("1");
+  await wine.getByLabel("实际数量").fill("2");
   await wine.getByLabel("少出 / 零出原因").fill("晚宴人数减少");
 
   const water = page.getByTestId("outbound-decision-line-line-water");
@@ -110,15 +102,14 @@ test("mobile item search stays within one intent and preserves selected stock th
   const item = wine.getByRole("combobox", { name: "标准物品", exact: true });
   const search = wine.getByRole("searchbox", { name: "搜索标准物品" });
   await item.selectOption("item-maotai");
-  await wine.getByLabel("实际仓库").selectOption("warehouse-1");
-  await wine.getByLabel("采购批次").selectOption("wine-a");
   await wine.getByLabel("实际数量").fill("1");
   await search.fill("YL0001");
-  await expect(wine.getByRole("status")).toContainText("没有匹配的标准物品");
+  await expect(wine.getByText("没有匹配的标准物品，请修改或清空搜索。")).toBeVisible();
   await expect(item.locator('option[value="item-water"]')).toHaveCount(0);
   await expect(item).toHaveValue("item-maotai");
   await expect(wine.getByLabel("实际数量")).toHaveValue("1");
-  await expect(wine.getByLabel("采购批次")).toHaveValue("wine-a");
+  await expect(wine.getByLabel("实际仓库")).toHaveCount(0);
+  await expect(wine.getByLabel("采购批次")).toHaveCount(0);
   await expect(water.getByRole("searchbox", { name: "搜索标准物品" })).toHaveValue("");
   await expect(water.getByRole("combobox", { name: "标准物品", exact: true }).locator('option[value="item-water"]')).toHaveCount(1);
   await wine.getByRole("button", { name: "清空搜索" }).click();
@@ -147,13 +138,11 @@ test("completes a two-intent mobile draft after reload and submits exactly once"
         {
           approvalLineId: "line-wine",
           selectedItemId: "item-maotai",
-          allocations: [
-            { warehouseId: "warehouse-1", batchId: "wine-a", quantity: "1" },
-            { warehouseId: "warehouse-2", batchId: "wine-b", quantity: "1" },
-          ],
+          actualQuantity: "2",
+          allocations: [],
           varianceReason: "晚宴人数减少",
         },
-        { approvalLineId: "line-water", allocations: [], varianceReason: "会议取消" },
+        { approvalLineId: "line-water", actualQuantity: "0", allocations: [], varianceReason: "会议取消" },
       ],
     });
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -163,15 +152,15 @@ test("completes a two-intent mobile draft after reload and submits exactly once"
   await loginAs(page, "/admin/outbound", "ADMIN");
   await expect(page.getByText("2 个审批意向 · 待出库", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "办理出库" }).click();
-  await expect(page.getByRole("heading", { name: "分配库存" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "确认出库内容" })).toBeVisible();
   await expect(page.getByTestId(/outbound-decision-line-/)).toHaveCount(2);
   await selectTwoBatchAndZeroIssue(page);
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: "分配库存" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "确认出库内容" })).toBeVisible();
   const restoredWine = page.getByTestId("outbound-decision-line-line-wine");
   await expect(restoredWine.getByRole("combobox", { name: "标准物品", exact: true })).toHaveValue("item-maotai");
-  await expect(restoredWine.getByTestId("outbound-allocation-row").nth(1).getByLabel("实际数量")).toHaveValue("1");
+  await expect(restoredWine.getByLabel("实际数量")).toHaveValue("2");
   await expect(restoredWine.getByLabel("少出 / 零出原因")).toHaveValue("晚宴人数减少");
   await expect(page.getByTestId("outbound-decision-line-line-water").getByLabel("少出 / 零出原因")).toHaveValue("会议取消");
   expect(await page.evaluate(() => Object.keys(sessionStorage).some((key) => key.startsWith("warehouse.outbound.v2.")))).toBe(true);
@@ -180,15 +169,14 @@ test("completes a two-intent mobile draft after reload and submits exactly once"
   const review = page.getByTestId("outbound-mobile-review");
   await expect(review).toContainText("申请：招待用白酒 3 瓶");
   await expect(review).toContainText("标准物品：BJ0002 飞天茅台");
-  await expect(review).toContainText("一号仓 / 20260907-001 / 1 瓶");
-  await expect(review).toContainText("二号仓 / 20260907-002 / 1 瓶");
+  await expect(review).toContainText("仓库与批次：提交时由系统按先进先出自动匹配");
   await expect(review).toContainText("实际 2 / 审批 3");
   await expect(review).toContainText("原因：晚宴人数减少");
   await expect(review).toContainText("申请：会议饮用水 2 箱");
   await expect(review).toContainText("本项不出库");
   await expect(review).toContainText("实际 0 / 审批 2");
   await expect(review).toContainText("原因：会议取消");
-  await expect(review).toContainText("预计总金额 45.00");
+  await expect(review).toContainText("预计总金额 40.00");
 
   await page.getByRole("button", { name: "确认出库" }).click();
   const dialog = page.getByRole("dialog", { name: "确认实际出库" });
@@ -201,15 +189,15 @@ test("completes a two-intent mobile draft after reload and submits exactly once"
   expect(await page.evaluate(() => Object.keys(sessionStorage).filter((key) => key.startsWith("warehouse.outbound.v2.") || key.startsWith("warehouse.outbound.index.v2.")).length)).toBe(0);
 });
 
-test("preserves stale item and batch text, marks controls, and returns to allocation", async ({ page }) => {
+test("preserves actual quantities, marks stale items, and returns to editing", async ({ page }) => {
   let optionReads = 0;
   let confirmPosts = 0;
   await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => {
     optionReads += 1;
     const stale = {
       ...options,
-      lines: options.lines.map((line) => line.approvalLineId === "line-water" ? { ...line, items: [] } : line),
-      batches: options.batches.filter((batch) => batch.batchId !== "wine-a"),
+      lines: options.lines.map((line) => ({ ...line, items: [] })),
+      batches: [],
     };
     return route.fulfill({ json: optionReads === 1 ? options : stale });
   });
@@ -222,21 +210,16 @@ test("preserves stale item and batch text, marks controls, and returns to alloca
   await page.getByRole("button", { name: "办理出库" }).click();
   const wine = page.getByTestId("outbound-decision-line-line-wine");
   await wine.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-maotai");
-  await wine.getByLabel("实际仓库").selectOption("warehouse-1");
-  await wine.getByLabel("采购批次").selectOption("wine-a");
   await wine.getByLabel("实际数量").fill("3");
   const water = page.getByTestId("outbound-decision-line-line-water");
   await water.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-water");
-  await water.getByLabel("实际仓库").selectOption("warehouse-1");
-  await water.getByLabel("采购批次").selectOption("water-a");
   await water.getByLabel("实际数量").fill("2");
 
   await page.getByRole("button", { name: "复核出库" }).click();
-  await expect(page.getByRole("heading", { name: "分配库存" })).toBeVisible();
-  await expect(wine.getByLabel("采购批次")).toHaveValue("wine-a");
+  await expect(page.getByRole("heading", { name: "确认出库内容" })).toBeVisible();
   await expect(wine.getByLabel("实际数量")).toHaveValue("3");
-  await expect(wine.getByLabel("采购批次")).toHaveAttribute("aria-invalid", "true");
-  await expect(wine).toContainText("已失效：wine-a");
+  await expect(wine.getByRole("combobox", { name: "标准物品", exact: true })).toHaveAttribute("aria-invalid", "true");
+  await expect(wine).toContainText("已失效：item-maotai");
   await expect(water.getByRole("combobox", { name: "标准物品", exact: true })).toHaveValue("item-water");
   await expect(water.getByLabel("实际数量")).toHaveValue("2");
   await expect(water.getByRole("combobox", { name: "标准物品", exact: true })).toHaveAttribute("aria-invalid", "true");
@@ -244,12 +227,12 @@ test("preserves stale item and batch text, marks controls, and returns to alloca
   expect(confirmPosts).toBe(0);
 });
 
-test("returns from review to allocation when the final reload invalidates a batch", async ({ page }) => {
+test("returns from review to editing when the final reload invalidates the selected item", async ({ page }) => {
   let optionReads = 0;
   let confirmPosts = 0;
   await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => {
     optionReads += 1;
-    return route.fulfill({ json: optionReads < 3 ? options : { ...options, batches: options.batches.filter((batch) => batch.batchId !== "wine-a") } });
+    return route.fulfill({ json: optionReads < 3 ? options : { ...options, lines: options.lines.map((line) => line.approvalLineId === "line-wine" ? { ...line, items: [] } : line), batches: [] } });
   });
   await page.route(apiUrl("/admin/outbound/confirm"), (route) => {
     confirmPosts += 1;
@@ -260,8 +243,6 @@ test("returns from review to allocation when the final reload invalidates a batc
   await page.getByRole("button", { name: "办理出库" }).click();
   const wine = page.getByTestId("outbound-decision-line-line-wine");
   await wine.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-maotai");
-  await wine.getByLabel("实际仓库").selectOption("warehouse-1");
-  await wine.getByLabel("采购批次").selectOption("wine-a");
   await wine.getByLabel("实际数量").fill("3");
   const water = page.getByTestId("outbound-decision-line-line-water");
   await water.getByRole("button", { name: "本项不出库" }).click();
@@ -270,10 +251,9 @@ test("returns from review to allocation when the final reload invalidates a batc
   await expect(page.getByRole("heading", { name: "复核出库" })).toBeVisible();
 
   await page.getByRole("button", { name: "确认出库" }).click();
-  await expect(page.getByRole("heading", { name: "分配库存" })).toBeVisible();
-  await expect(wine.getByLabel("采购批次")).toHaveValue("wine-a");
+  await expect(page.getByRole("heading", { name: "确认出库内容" })).toBeVisible();
   await expect(wine.getByLabel("实际数量")).toHaveValue("3");
-  await expect(wine.getByLabel("采购批次")).toHaveAttribute("aria-invalid", "true");
+  await expect(wine.getByRole("combobox", { name: "标准物品", exact: true })).toHaveAttribute("aria-invalid", "true");
   await expect(page.getByRole("dialog", { name: "确认实际出库" })).toHaveCount(0);
   expect(confirmPosts).toBe(0);
 });
@@ -303,13 +283,9 @@ test("closes a rejected submission when pending refresh removed the active appro
   await page.getByRole("button", { name: "办理出库" }).click();
   const wine = page.getByTestId("outbound-decision-line-line-wine");
   await wine.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-maotai");
-  await wine.getByLabel("实际仓库").selectOption("warehouse-1");
-  await wine.getByLabel("采购批次").selectOption("wine-a");
   await wine.getByLabel("实际数量").fill("3");
   const water = page.getByTestId("outbound-decision-line-line-water");
   await water.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-water");
-  await water.getByLabel("实际仓库").selectOption("warehouse-1");
-  await water.getByLabel("采购批次").selectOption("water-a");
   await water.getByLabel("实际数量").fill("2");
   await page.getByRole("button", { name: "复核出库" }).click();
   await page.getByRole("button", { name: "确认出库" }).click();
@@ -394,14 +370,14 @@ test("does not auto-switch to another stored draft after leaving or losing the a
   }))).toEqual({ first: true, second: false, index: [{ approvalId: "approval-1", weComSpNo: "202609040001" }] });
 });
 
-test("keeps an unrelated stale control marked while another stale allocation is edited", async ({ page }) => {
+test("keeps an unrelated stale item marked while another line quantity is edited", async ({ page }) => {
   let optionReads = 0;
   await page.route(apiUrl("/admin/outbound/approval-1/options"), (route) => {
     optionReads += 1;
     const stale = {
       ...options,
       lines: options.lines.map((line) => line.approvalLineId === "line-water" ? { ...line, items: [] } : line),
-      batches: options.batches.filter((batch) => batch.batchId !== "wine-a"),
+      batches: options.batches,
     };
     return route.fulfill({ json: optionReads === 1 ? options : stale });
   });
@@ -410,20 +386,14 @@ test("keeps an unrelated stale control marked while another stale allocation is 
   await page.getByRole("button", { name: "办理出库" }).click();
   const wine = page.getByTestId("outbound-decision-line-line-wine");
   await wine.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-maotai");
-  await wine.getByLabel("实际仓库").selectOption("warehouse-1");
-  await wine.getByLabel("采购批次").selectOption("wine-a");
   await wine.getByLabel("实际数量").fill("3");
   const water = page.getByTestId("outbound-decision-line-line-water");
   await water.getByRole("combobox", { name: "标准物品", exact: true }).selectOption("item-water");
-  await water.getByLabel("实际仓库").selectOption("warehouse-1");
-  await water.getByLabel("采购批次").selectOption("water-a");
   await water.getByLabel("实际数量").fill("2");
   await page.getByRole("button", { name: "复核出库" }).click();
-  await expect(wine.getByLabel("采购批次")).toHaveAttribute("aria-invalid", "true");
   await expect(water.getByRole("combobox", { name: "标准物品", exact: true })).toHaveAttribute("aria-invalid", "true");
 
-  await wine.getByLabel("实际仓库").selectOption("warehouse-2");
-  await wine.getByLabel("采购批次").selectOption("wine-b");
+  await wine.getByLabel("实际数量").fill("2");
 
   await expect(water.getByRole("combobox", { name: "标准物品", exact: true })).toHaveAttribute("aria-invalid", "true");
   await expect(water).toContainText("所选标准物品已失效");
@@ -437,7 +407,7 @@ test("closes an active editor when refreshed pending no longer contains its appr
 
   await loginAs(page, "/admin/outbound", "ADMIN");
   await page.getByRole("button", { name: "办理出库" }).first().click();
-  await expect(page.getByRole("heading", { name: "分配库存" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "确认出库内容" })).toBeVisible();
   visibleApprovals = [secondApproval];
   await page.getByRole("button", { name: "刷新" }).click();
 

@@ -11,6 +11,14 @@ describe("item service", () => {
     await expect(service.create(input)).resolves.toMatchObject({ code: "CY-0001", name: "茶叶", isActive: true });
   });
 
+  it("normalizes and deduplicates recommendation aliases", async () => {
+    const service = new ItemService(new InMemoryItemRepository());
+
+    await expect(service.create({ ...input, aliases: [" 白酒 ", "白酒", "接待酒", ""] })).resolves.toMatchObject({
+      aliases: ["白酒", "接待酒"],
+    });
+  });
+
   it("rejects duplicate codes and deactivates instead of deleting", async () => {
     const repository = new InMemoryItemRepository();
     const service = new ItemService(repository);

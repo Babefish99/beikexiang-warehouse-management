@@ -12,7 +12,7 @@ export function registerItemRoutes(app: FastifyInstance, dependencies: { itemSer
   app.get<{ Querystring: ItemQuery }>("/admin/items", async (request) => {
     const items = await dependencies.itemService.list(request.query.includeInactive === "true");
     const search = request.query.search?.trim().toLowerCase();
-    return search ? items.filter((item) => [item.code, item.name, item.specification, item.weComOptionKey].some((value) => value?.toLowerCase().includes(search))) : items;
+    return search ? items.filter((item) => [item.code, item.name, item.specification, item.weComOptionKey, ...(item.aliases ?? [])].some((value) => value?.toLowerCase().includes(search))) : items;
   });
 
   app.post<{ Body: ItemInput }>(

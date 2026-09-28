@@ -239,10 +239,7 @@ function DesktopReview({ approval, draft, options }: { approval: PendingApproval
     return <article data-testid={`outbound-review-line-${line.approvalLineId}`} key={line.approvalLineId}>
       <p>申请：{line.requestedItemName} {line.requestedQuantity} {line.unit}</p>
       <p>实际：{decision.zeroIssue ? `本项不出库 0 ${line.unit}` : `${item?.code ?? decision.selectedItemId} ${item?.name ?? ""} ${line.actualQuantity} ${line.unit}`}</p>
-      {decision.allocations.map((allocation) => {
-        const batch = options.batches.find((candidate) => candidate.warehouseId === allocation.warehouseId && candidate.batchId === allocation.batchId);
-        return <p key={allocation.id}>分配：{batch?.warehouseName || "仓库名称未提供"} / {batch?.batchNo || "批次号未提供"} / {allocation.quantity}</p>;
-      })}
+      {!decision.zeroIssue ? <p>仓库与批次：提交时由系统按先进先出自动匹配</p> : null}
       <p>差额：{line.difference}{line.difference !== "0" ? `；原因：${decision.varianceReason}` : ""}</p>
     </article>;
   })}<p className="outbound-desktop-review__amount">预计金额：{summary.amount}</p></section>;

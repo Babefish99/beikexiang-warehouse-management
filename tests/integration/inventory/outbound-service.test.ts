@@ -128,10 +128,11 @@ describe("outbound service", () => {
       approvalId: "intent-approval",
       lines: [{
         approvalLineId: "intent-line",
+        recommendedItemId: "item-exact",
         items: [
-          { id: "item-exact", code: "ZZ0001", name: "白酒", unit: "瓶", isActive: true, availableQuantity: "1" },
-          { id: "item-substring", code: "YY0001", name: "陈年白酒", unit: "瓶", isActive: true, availableQuantity: "2" },
-          { id: "item-maotai", code: "BJ0002", name: "飞天茅台", unit: "瓶", isActive: true, availableQuantity: "3" },
+          { id: "item-exact", code: "ZZ0001", name: "白酒", unit: "瓶", isActive: true, availableQuantity: "1", recommendationScore: 100, recommendationConfidence: "HIGH", recommendationReasons: ["标准名称完全匹配"] },
+          { id: "item-substring", code: "YY0001", name: "陈年白酒", unit: "瓶", isActive: true, availableQuantity: "2", recommendationScore: 70, recommendationConfidence: "MEDIUM", recommendationReasons: ["标准名称部分匹配"] },
+          { id: "item-maotai", code: "BJ0002", name: "飞天茅台", unit: "瓶", isActive: true, availableQuantity: "3", recommendationScore: 0, recommendationConfidence: "LOW", recommendationReasons: ["单位一致，需人工确认"] },
         ],
       }],
       batches: [
@@ -153,6 +154,25 @@ describe("outbound service", () => {
         legacyResolutionStatus: "NOT_APPLICABLE",
       }],
     }]);
+  });
+
+  it("prefills a unique high-confidence alias recommendation and explains it", async () => {
+    const store = new InMemoryOutboundStore();
+    seedIntentApproval(store);
+    store.seedItem({ id: "item-wine", code: "BJ0008", name: "陈厚酒6年", aliases: ["白酒", "接待酒"], unit: "瓶", isActive: true });
+    store.seedItem({ id: "item-other", code: "BJ0009", name: "赤霞珠干红", unit: "瓶", isActive: true });
+    store.seedBatch({ id: "batch-wine", warehouseId: "wh-1", itemId: "item-wine", remainingQuantity: "3", unitCost: "20" });
+    store.seedBatch({ id: "batch-other", warehouseId: "wh-1", itemId: "item-other", remainingQuantity: "3", unitCost: "30" });
+
+    const options = await new OutboundService(store).listOptions("intent-approval");
+
+    expect(options.lines[0]).toMatchObject({ approvalLineId: "intent-line", recommendedItemId: "item-wine" });
+    expect(options.lines[0]?.items[0]).toMatchObject({
+      id: "item-wine",
+      aliases: ["白酒", "接待酒"],
+      recommendationConfidence: "HIGH",
+      recommendationReasons: ["别名“白酒”完全匹配"],
+    });
   });
 
   it("ranks a code match before otherwise eligible same-unit items without selecting it", async () => {
@@ -191,7 +211,8 @@ describe("outbound service", () => {
       approvalId: "approval-1",
       lines: [{
         approvalLineId: "line-1",
-        items: [{ id: "item-1", code: "TEA-0001", name: "Tea leaves", unit: "box", isActive: true, availableQuantity: "13" }],
+        recommendedItemId: "item-1",
+        items: [{ id: "item-1", code: "TEA-0001", name: "Tea leaves", unit: "box", isActive: true, availableQuantity: "13", recommendationScore: 100, recommendationConfidence: "HIGH", recommendationReasons: ["标准名称完全匹配"] }],
       }],
       batches: [
         { batchId: "batch-1", warehouseId: "wh-1", itemId: "item-1", remainingQuantity: "10", unitCost: "20" },
@@ -259,6 +280,56 @@ describe("outbound service", () => {
       varianceReason: undefined,
       decidedBy: "operator-1",
     }]);
+  });
+
+  it("automatically allocates a submitted total quantity by FIFO without client warehouse or batch input", async () => {
+    const store = new InMemoryOutboundStore();
+    seedIntentApproval(store);
+    store.seedItem({ id: "item-wine", code: "BJ0008", name: "白酒", unit: "瓶", isActive: true });
+    store.seedBatch({ id: "batch-b", batchNo: "B", warehouseId: "wh-1", itemId: "item-wine", remainingQuantity: "2", unitCost: "20" });
+    store.seedBatch({ id: "batch-a", batchNo: "A", warehouseId: "wh-2", itemId: "item-wine", remainingQuantity: "1", unitCost: "18" });
+
+    const result = await new OutboundService(store).confirm({
+      approvalId: "intent-approval",
+      operatorId: "admin-1",
+      decisions: [{ approvalLineId: "intent-line", selectedItemId: "item-wine", actualQuantity: "2", allocations: [] }],
+    });
+
+    expect(result).toMatchObject({ status: "COMPLETED", actualQuantity: "2", amount: "38.00" });
+    expect(store.ledger().map(({ warehouseId, batchId, quantity }) => ({ warehouseId, batchId, quantity }))).toEqual([
+      { warehouseId: "wh-2", batchId: "batch-a", quantity: "-1" },
+      { warehouseId: "wh-1", batchId: "batch-b", quantity: "-1" },
+    ]);
+  });
+
+  it("learns an administrator's confirmed mapping for the next matching description", async () => {
+    const store = new InMemoryOutboundStore();
+    seedIntentApproval(store, { lines: [{ id: "intent-line", requestedItemName: "老板接待用酒", requestedQuantity: "1", unit: "瓶", legacyResolutionStatus: "NOT_APPLICABLE" }] });
+    store.seedItem({ id: "item-a", code: "BJ0001", name: "陈厚酒6年", unit: "瓶", isActive: true });
+    store.seedItem({ id: "item-b", code: "BJ0002", name: "赤霞珠干红", unit: "瓶", isActive: true });
+    store.seedBatch({ id: "batch-a", warehouseId: "wh-1", itemId: "item-a", remainingQuantity: "2", unitCost: "10" });
+    store.seedBatch({ id: "batch-b", warehouseId: "wh-1", itemId: "item-b", remainingQuantity: "2", unitCost: "20" });
+    const service = new OutboundService(store);
+    await service.confirm({
+      approvalId: "intent-approval",
+      operatorId: "admin-1",
+      decisions: [{ approvalLineId: "intent-line", selectedItemId: "item-b", actualQuantity: "1", allocations: [] }],
+    });
+    store.seedApproval({
+      id: "intent-approval-2",
+      weComSpNo: "202609040002",
+      status: "PENDING_OUTBOUND",
+      lines: [{ id: "intent-line-2", requestedItemName: "老板接待用酒", requestedQuantity: "1", unit: "瓶", legacyResolutionStatus: "NOT_APPLICABLE" }],
+    });
+
+    const options = await service.listOptions("intent-approval-2");
+
+    expect(options.lines[0]).toMatchObject({ recommendedItemId: "item-b" });
+    expect(options.lines[0]?.items[0]).toMatchObject({
+      id: "item-b",
+      recommendationConfidence: "HIGH",
+      recommendationReasons: ["历史确认 1 次"],
+    });
   });
 
   it("preserves each allocation's decision when two lines use the same item and batch", async () => {
@@ -427,7 +498,8 @@ describe("outbound options route", () => {
         approvalId: "approval-1",
         lines: [{
           approvalLineId: "line-1",
-          items: [{ id: "item-1", code: "TEA-0001", name: "Tea leaves", unit: "box", isActive: true, availableQuantity: "13" }],
+          recommendedItemId: "item-1",
+          items: [{ id: "item-1", code: "TEA-0001", name: "Tea leaves", unit: "box", isActive: true, availableQuantity: "13", recommendationScore: 100, recommendationConfidence: "HIGH", recommendationReasons: ["标准名称完全匹配"] }],
         }],
         batches: [
           { batchId: "batch-1", warehouseId: "wh-1", itemId: "item-1", remainingQuantity: "10", unitCost: "20" },
@@ -491,6 +563,24 @@ describe("outbound mutation routes", () => {
       expect(response.statusCode).toBe(200);
       expect(confirm).toHaveBeenCalledWith({ approvalId: "approval-1", operatorId: "local-admin", decisions });
       expect(store.decisions()).toMatchObject([{ approvalLineId: "line-1", decidedBy: "local-admin" }]);
+    } finally { await app.close(); }
+  });
+
+  it("accepts an actual total quantity and leaves warehouse and batch generation to the service", async () => {
+    const app = Fastify();
+    addAdminActor(app);
+    const { store, service } = makeService();
+    seedSingleQuantityApproval(store);
+    const confirm = vi.spyOn(service, "confirm");
+    registerOutboundRoutes(app, { outboundService: service });
+    const decisions = [{ approvalLineId: "line-1", selectedItemId: "item-1", actualQuantity: "1", allocations: [] }];
+
+    try {
+      const response = await app.inject({ method: "POST", url: "/admin/outbound/confirm", payload: { approvalId: "approval-1", decisions } });
+
+      expect(response.statusCode).toBe(200);
+      expect(confirm).toHaveBeenCalledWith({ approvalId: "approval-1", operatorId: "local-admin", decisions });
+      expect(store.ledger()).toMatchObject([{ warehouseId: "wh-1", batchId: "batch-1", quantity: "-1" }]);
     } finally { await app.close(); }
   });
 

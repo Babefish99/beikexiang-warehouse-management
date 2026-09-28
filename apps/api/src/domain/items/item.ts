@@ -3,11 +3,29 @@ export interface ItemDefinition {
   code: string;
   name: string;
   specification?: string;
+  aliases?: string[];
   unit: string;
   categoryId: string;
   weComOptionKey?: string;
   minimumStock?: string;
   isActive: boolean;
+}
+
+export function normalizeItemAliases(values: readonly string[] | undefined): string[] {
+  const aliases: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values ?? []) {
+    const alias = value.normalize("NFKC").trim();
+    if (!alias) continue;
+    if (alias.length > 80) throw new Error("item alias must not exceed 80 characters");
+    const key = alias.toLocaleLowerCase();
+    if (!seen.has(key)) {
+      aliases.push(alias);
+      seen.add(key);
+    }
+  }
+  if (aliases.length > 20) throw new Error("item aliases must not exceed 20 entries");
+  return aliases;
 }
 
 export function normalizeItemCode(code: string): string {

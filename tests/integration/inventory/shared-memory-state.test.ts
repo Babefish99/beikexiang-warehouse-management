@@ -241,6 +241,7 @@ describe("shared inventory memory state", () => {
         approvalId,
         lines: [{
           approvalLineId: `${approvalId}-line-1`,
+          recommendedItemId: item.id,
           items: [{
             id: item.id,
             code: "TEA-0001",
@@ -248,6 +249,9 @@ describe("shared inventory memory state", () => {
             unit: "box",
             isActive: true,
             availableQuantity: "8",
+            recommendationScore: 100,
+            recommendationConfidence: "HIGH",
+            recommendationReasons: ["标准名称完全匹配"],
           }],
         }],
         batches: [

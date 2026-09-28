@@ -195,6 +195,7 @@ describe.skipIf(!databaseUrl)("Prisma master-data and identity persistence", () 
 
       const initialMigration = readFileSync(resolve(process.cwd(), "prisma/migrations/00000000000000_init/migration.sql"), "utf8");
       const productionMigration = readFileSync(resolve(process.cwd(), "prisma/migrations/20260811163000_production_persistence/migration.sql"), "utf8");
+      const itemRecommendationMigration = readFileSync(resolve(process.cwd(), "prisma/migrations/20260928111500_item_recommendation/migration.sql"), "utf8");
       await upgradePool.query(initialMigration);
       await upgradePool.query(`
         INSERT INTO "Warehouse" ("id", "code", "name", "isActive", "isPlaceholder") VALUES
@@ -211,6 +212,7 @@ describe.skipIf(!databaseUrl)("Prisma master-data and identity persistence", () 
           VALUES ('legacy-inbound-1', 'legacy-warehouse-1', 'IN-LEGACY-1', 'PURCHASE', CURRENT_TIMESTAMP, 'legacy-user');
       `);
       await upgradePool.query(productionMigration);
+      await upgradePool.query(itemRecommendationMigration);
 
       upgradePrisma = createClient(upgradeUrl);
       await seedStructuralData(upgradePrisma);

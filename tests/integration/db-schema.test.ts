@@ -28,6 +28,13 @@ const openingImportMigrationPath = resolve(
 const openingImportMigration = existsSync(openingImportMigrationPath)
   ? readFileSync(openingImportMigrationPath, "utf8")
   : "";
+const itemRecommendationMigrationPath = resolve(
+  process.cwd(),
+  "prisma/migrations/20260928111500_item_recommendation/migration.sql",
+);
+const itemRecommendationMigration = existsSync(itemRecommendationMigrationPath)
+  ? readFileSync(itemRecommendationMigrationPath, "utf8")
+  : "";
 
 function modelBody(modelName: string): string {
   return schema.match(new RegExp(`model ${modelName} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? "";
@@ -41,6 +48,7 @@ describe("database schema contract", () => {
       "Warehouse",
       "ItemCategory",
       "Item",
+      "ItemRecommendationLearning",
       "ApprovalRequest",
       "ApprovalLine",
       "InboundOrder",
@@ -199,6 +207,16 @@ describe("database schema contract", () => {
     expect(openingImportMigration).toContain('CREATE TABLE "OpeningStockImport"');
     expect(openingImportMigration).toContain('CONSTRAINT "OpeningStockImport_pkey" PRIMARY KEY ("id")');
     expect(openingImportMigration).toContain('ALTER TABLE "InboundLine" ADD COLUMN "remark" TEXT');
+  });
+
+  it("stores item aliases and recommendation learning with non-colliding index names", () => {
+    expect(modelBody("Item")).toMatch(/aliases\s+String\[\]\s+@default\(\[\]\)/);
+    expect(modelBody("ItemRecommendationLearning")).toMatch(/confirmationCount\s+Int\s+@default\(1\)/);
+    expect(existsSync(itemRecommendationMigrationPath)).toBe(true);
+    expect(itemRecommendationMigration).toContain('ADD COLUMN "aliases" TEXT[] NOT NULL');
+    expect(itemRecommendationMigration).toContain('CREATE TABLE "ItemRecommendationLearning"');
+    expect(itemRecommendationMigration).toContain('CREATE UNIQUE INDEX "ItemRecommendationLearning_desc_unit_item_key"');
+    expect(itemRecommendationMigration).toContain('CREATE INDEX "ItemRecommendationLearning_desc_unit_idx"');
   });
 
   it("seeds only structural placeholder data", () => {

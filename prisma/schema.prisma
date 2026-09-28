@@ -54,28 +54,45 @@ model ItemCategory {
 }
 
 model Item {
-  id                    String                 @id @default(cuid())
-  code                  String                 @unique
-  name                  String
-  specification         String?
-  unit                  String
-  categoryId            String
-  weComOptionKey        String?                @unique
-  minimumStock          Decimal?               @db.Decimal(18, 4)
-  isActive              Boolean                @default(true)
-  createdAt             DateTime               @default(now())
-  updatedAt             DateTime               @updatedAt
-  category              ItemCategory           @relation(fields: [categoryId], references: [id])
-  inboundLines          InboundLine[]
-  approvalLines         ApprovalLine[]
-  outboundDecisionLines OutboundDecisionLine[]
-  procurementBatches    ProcurementBatch[]
-  stockBalances         StockBalance[]
-  outboundAllocations   OutboundAllocation[]
-  transferLines         TransferLine[]
-  returnLines           ReturnLine[]
-  stockAdjustments      StockAdjustment[]
-  ledgerEntries         InventoryLedgerEntry[]
+  id                      String                       @id @default(cuid())
+  code                    String                       @unique
+  name                    String
+  specification           String?
+  aliases                 String[]                     @default([])
+  unit                    String
+  categoryId              String
+  weComOptionKey          String?                      @unique
+  minimumStock            Decimal?                     @db.Decimal(18, 4)
+  isActive                Boolean                      @default(true)
+  createdAt               DateTime                     @default(now())
+  updatedAt               DateTime                     @updatedAt
+  category                ItemCategory                 @relation(fields: [categoryId], references: [id])
+  inboundLines            InboundLine[]
+  approvalLines           ApprovalLine[]
+  outboundDecisionLines   OutboundDecisionLine[]
+  procurementBatches      ProcurementBatch[]
+  stockBalances           StockBalance[]
+  outboundAllocations     OutboundAllocation[]
+  transferLines           TransferLine[]
+  returnLines             ReturnLine[]
+  stockAdjustments        StockAdjustment[]
+  ledgerEntries           InventoryLedgerEntry[]
+  recommendationLearnings ItemRecommendationLearning[]
+}
+
+model ItemRecommendationLearning {
+  id                    String   @id @default(cuid())
+  normalizedDescription String
+  normalizedUnit        String
+  itemId                String
+  confirmationCount     Int      @default(1)
+  lastConfirmedAt       DateTime @default(now())
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  item                  Item     @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@unique([normalizedDescription, normalizedUnit, itemId], map: "ItemRecommendationLearning_desc_unit_item_key")
+  @@index([normalizedDescription, normalizedUnit], map: "ItemRecommendationLearning_desc_unit_idx")
 }
 
 model ApprovalRequest {
